@@ -508,6 +508,9 @@ const detailState = {
   requests: { sortKey: "timestamp", sortDir: "desc", page: 1, size: 20, rows: [] },
 };
 
+// kind（API 端点复数）→ HTML id 前缀（单数）：session-*/request-*
+const DETAIL_ID = { sessions: "session", requests: "request" };
+
 async function fetchRows(kind) {
   const data = await api(kind);
   const st = detailState[kind];
@@ -530,8 +533,8 @@ function sortRows(st) {
 }
 function renderDetailTable(kind) {
   const st = detailState[kind];
-  const headEl = $("#" + kind + "-head");
-  const bodyEl = $("#" + kind + "-body");
+  const headEl = $("#" + DETAIL_ID[kind] + "-head");
+  const bodyEl = $("#" + DETAIL_ID[kind] + "-body");
   const sorted = sortRows(st);
   const start = (st.page - 1) * st.size;
   const pageRows = sorted.slice(start, start + st.size);
@@ -545,7 +548,7 @@ function renderDetailTable(kind) {
     const arrow = th.querySelector(".arrow");
     if (arrow) arrow.textContent = th.dataset.key === st.sortKey ? (st.sortDir === "asc" ? "▲" : "▼") : "";
   });
-  const infoEl = $("#" + kind + "-page-info");
+  const infoEl = $("#" + DETAIL_ID[kind] + "-page-info");
   const total = sorted.length;
   const pages = Math.max(1, Math.ceil(total / st.size));
   infoEl.textContent = `${total} 行 · 第 ${st.page}/${pages} 页`;
@@ -566,7 +569,7 @@ async function refreshRequestTable() {
 }
 function bindDetailInteractions() {
   for (const kind of ["sessions", "requests"]) {
-    $("#" + kind + "-head").addEventListener("click", (e) => {
+    $("#" + DETAIL_ID[kind] + "-head").addEventListener("click", (e) => {
       const th = e.target.closest("th");
       if (!th) return;
       const key = th.dataset.key;
@@ -576,7 +579,7 @@ function bindDetailInteractions() {
       st.page = 1;
       renderDetailTable(kind);
     });
-    $("#" + kind + "-page-size").addEventListener("change", (e) => {
+    $("#" + DETAIL_ID[kind] + "-page-size").addEventListener("change", (e) => {
       detailState[kind].size = Number(e.target.value);
       detailState[kind].page = 1;
       renderDetailTable(kind);
