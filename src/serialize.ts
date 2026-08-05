@@ -2,7 +2,7 @@
  * 结构化输出序列化：JSON / CSV。
  * 字段与终端表格列一一对应（驼峰命名）；值为原始数值（cacheRate 为 0-1 小数）。
  */
-import { emptyTotals, type Totals, type SessionRow, type RequestRow, type GroupRow, type GroupBy } from "./aggregate.ts";
+import { emptyTotals, type Totals, type SessionRow, type RequestRow, type GroupRow, type GroupBy, type PeriodRow, type Period } from "./aggregate.ts";
 import type { WindowName } from "./cli.ts";
 
 
@@ -120,4 +120,24 @@ export function serializeGroupCsv(by: GroupBy, rows: GroupRow[]): string {
     ...rows.map((r) => headers.map((h) => csvEscape(String(groupToObject(r)[h]))).join(",")),
   ];
   return lines.join("\n") + "\n";
+}
+
+/** 时间周期汇总 JSON：{ window: "totals", period, rows } */
+export function serializePeriodJson(period: Period, rows: PeriodRow[]): string {
+  return JSON.stringify({ window: "totals", period, rows: rows.map(periodToObject) }, null, 2) + "\n";
+}
+
+/** 时间周期汇总 CSV：表头 = period + 指标列，与 JSON rows 字段一一对应 */
+export function serializePeriodCsv(period: Period, rows: PeriodRow[]): string {
+  const empty: PeriodRow = { period: "", ...emptyTotals() };
+  const headers = Object.keys(periodToObject(empty));
+  const lines = [
+    headers.map(csvEscape).join(","),
+    ...rows.map((r) => headers.map((h) => csvEscape(String(periodToObject(r)[h]))).join(",")),
+  ];
+  return lines.join("\n") + "\n";
+}
+
+export function periodToObject(r: PeriodRow): Record<string, unknown> {
+  return { period: r.period, ...totalsToObject(r) };
 }

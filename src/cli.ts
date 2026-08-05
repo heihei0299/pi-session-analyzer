@@ -13,10 +13,11 @@ import {
   requestRowsFromFiles,
   groupRowsFromFiles,
   filterFiles,
+  periodRowsFromFiles,
 } from "./analyze.ts";
-import type { GroupBy } from "./aggregate.ts";
-import { renderTotalsTable, renderSessionTable, renderRequestTable, renderGroupTable } from "./render.ts";
-import { serializeJson, serializeCsv, serializeGroupJson, serializeGroupCsv } from "./serialize.ts";
+import type { GroupBy, Period } from "./aggregate.ts";
+import { renderTotalsTable, renderSessionTable, renderRequestTable, renderGroupTable, renderPeriodTable } from "./render.ts";
+import { serializeJson, serializeCsv, serializeGroupJson, serializeGroupCsv, serializePeriodJson, serializePeriodCsv } from "./serialize.ts";
 
 const DEFAULT_DIR = join(homedir(), ".pi", "agent", "sessions");
 
@@ -33,6 +34,12 @@ export interface CliArgs {
   cwd?: string;
   /** --by <model|cwd|model,cwd>：totals 窗口按维度分组 */
   by?: GroupBy;
+  /** --since <时间>：只统计会话时间戳 ≥ 该值的会话（含端点） */
+  since?: string;
+  /** --until <时间>：只统计会话时间戳 ≤ 该值的会话（含端点） */
+  until?: string;
+  /** --period <day|week|month>：totals 窗口按周期汇总 */
+  period?: Period;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -42,6 +49,9 @@ export function parseArgs(argv: string[]): CliArgs {
   let model: string | undefined;
   let cwd: string | undefined;
   let by: GroupBy | undefined;
+  let since: string | undefined;
+  let until: string | undefined;
+  let period: Period | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dir" && argv[i + 1]) {
@@ -61,6 +71,20 @@ export function parseArgs(argv: string[]): CliArgs {
     } else if (a === "--cwd" && argv[i + 1]) {
       cwd = argv[i + 1];
       i++;
+    } else if (a === "--since" && argv[i + 1]) {
+      since = argv[i + 1];
+      i++;
+    } else if (a === "--until" && argv[i + 1]) {
+      until = argv[i + 1];
+      i++;
+    } else if (a === "--period" && argv[i + 1]) {
+      const p = argv[i + 1];
+      if (p === "day" || p === "week" || p === "month") {
+        period = p;
+      } else {
+        throw new Error(`未知周期: ${p}（支持 day/week/month）`);
+      }
+      i++;
     } else if (a === "--by" && argv[i + 1]) {
       const b = argv[i + 1];
       if (b === "model" || b === "cwd" || b === "model,cwd") {
@@ -73,16 +97,38 @@ export function parseArgs(argv: string[]): CliArgs {
       window = a;
     }
   }
-  return { window, dir, format, model, cwd, by };
+  return { window, dir, format, model, cwd, by, since, until, period };
 }
 
 /** 运行分析，返回输出文本（供 CLI 打印与测试断言）；目录只扫描一次，派生三窗口 */
 export async function runCli(argv: string[]): Promise<string> {
-  const { window, dir, format, model, cwd, by } = parseArgs(argv);
-  const files = await readSessionFiles(dir);
-  const filtered = filterFiles(files, { model, cwd });
+  const { window, dir, format, model, cwd, by, since, until, period } = parseArgs(argv);
+  // 参数合法性校验先行（IO 之前）
+  if (period !== undefined && window !== "totals") {
+    throw new Error(`--period 汇总仅支持 totals 窗口（当前 ${window}）`);
+  }
   if (by !== undefined && window !== "totals") {
     throw new Error(`--by 分组仅支持 totals 窗口（当前 ${window}）`);
+  }
+  if (period !== undefined && by !== undefined) {
+    throw new Error(`--period 与 --by 不能同时使用（当前 period=${period}, by=${by}）`);
+  }
+  const files = await readSessionFiles(dir);
+  const filtered = filterFiles(files, { model, cwd, since, until });
+  if (period !== undefined && window !== "totals") {
+    throw new Error(`--period 汇总仅支持 totals 窗口（当前 ${window}）`);
+  }
+  if (by !== undefined && window !== "totals") {
+    throw new Error(`--by 分组仅支持 totals 窗口（当前 ${window}）`);
+  }
+  if (period !== undefined && by !== undefined) {
+    throw new Error(`--period 与 --by 不能同时使用（当前 period=${period}, by=${by}）`);
+  }
+  if (period !== undefined) {
+    const rows = periodRowsFromFiles(filtered, period);
+    if (format === "json") return serializePeriodJson(period, rows);
+    if (format === "csv") return serializePeriodCsv(period, rows);
+    return renderPeriodTable(rows, period);
   }
   if (by !== undefined) {
     const rows = groupRowsFromFiles(filtered, by);

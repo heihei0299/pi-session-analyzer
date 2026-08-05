@@ -16,6 +16,8 @@ import {
   type RequestRow,
   type GroupRow,
   type GroupBy,
+  type PeriodRow,
+  type Period,
 } from "./aggregate.ts";
 
 /** 递归收集目录下所有 .jsonl 文件 */
@@ -158,20 +160,104 @@ export function groupRowsFromFiles(files: SessionFileData[], by: GroupBy): Group
 }
 
 /**
- * 按模型/cwd 过滤文件级原始数据。
+ * 按模型/cwd/时间范围过滤文件级原始数据。
  * - model 过滤：仅保留 items 中 model 匹配的消息；完全无匹配消息的会话被隐藏（不输出全 0 行）
  * - cwd 过滤：仅保留 header cwd 规范化后等于过滤值的会话
+ * - since/until 过滤：仅保留会话 header timestamp 落在闭区间 [since, until] 内的会话
  */
 export function filterFiles(
   files: SessionFileData[],
-  filters: { model?: string; cwd?: string },
+  filters: { model?: string; cwd?: string; since?: string; until?: string },
 ): SessionFileData[] {
-  const { model, cwd } = filters;
+  const { model, cwd, since, until } = filters;
   const normCwd = cwd !== undefined ? normalizeCwd(cwd) : undefined;
+  // since 取当天开始（00:00）；until 取当天末尾（23:59:59.999）——日期参数含整天
+  const sinceMs = since !== undefined ? parseTimestamp(since, false) : undefined;
+  const untilMs = until !== undefined ? parseTimestamp(until, true) : undefined;
   return files
     .filter((f) => normCwd === undefined || normalizeCwd(f.cwd) === normCwd)
+    .filter((f) => {
+      if (sinceMs === undefined && untilMs === undefined) return true;
+      const ts = parseUtcTimestamp(f.timestamp);
+      if (Number.isNaN(ts)) return true; // 无有效时间戳的会话不参与时间筛选
+      if (sinceMs !== undefined && ts < sinceMs) return false;
+      if (untilMs !== undefined && ts > untilMs) return false;
+      return true;
+    })
     .map((f) => (model === undefined ? f : { ...f, items: f.items.filter((i) => i.model === model) }))
     .filter((f) => model === undefined || f.items.length > 0);
+}
+
+/**
+ * 统一按 UTC 解析时间戳：无时区标记的字符串（如 "2026-08-01T10:00:00"）
+ * 补 Z 按 UTC 解释，与带 Z 后缀的真实 pi 会话时间戳同一基准。
+ */
+export function parseUtcTimestamp(s: string): number {
+  const hasTz = /(?:Z|[+-]\d{2}:?\d{2})$/.test(s);
+  return Date.parse(hasTz ? s : s + "Z");
+}
+/**
+ * 解析时间参数（--since/--until）：ISO 日期（2026-08-01）或完整时间戳。
+ * 日期参数：since 用 endOfDay=false（当天 00:00 起）；until 用 endOfDay=true（当天 23:59:59.999 止）。
+ * 完整时间戳（含 T 或带时区）原样解析。
+ */
+export function parseTimestamp(s: string, endOfDay: boolean): number {
+  // 纯日期（YYYY-MM-DD）：手动构造，避免 Date.parse 的 UTC 00:00 语义歧义
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (dateOnly) {
+    const [, y, mo, d] = dateOnly;
+    const base = Date.UTC(Number(y), Number(mo) - 1, Number(d));
+    return endOfDay ? base + 86_400_000 - 1 : base;
+  }
+  const ms = Date.parse(s);
+  if (Number.isNaN(ms)) throw new Error(`无效时间: ${s}（支持 ISO 日期或时间戳）`);
+  return ms;
+}
+
+/**
+ * 从文件级原始数据派生时间周期汇总窗口（--period day|week|month）。
+ * 归属基准：会话 header timestamp（spec 决策锚）；周期键 = 周期起始日期。
+ */
+export function periodRowsFromFiles(files: SessionFileData[], period: Period): PeriodRow[] {
+  const map = new Map<string, PeriodRow>();
+  for (const file of files) {
+    const key = periodKey(file.timestamp, period);
+    if (key === null) continue; // 无有效时间戳的会话不归属任何周期
+    let g = map.get(key);
+    if (!g) {
+      g = { period: key, ...emptyTotals() };
+      map.set(key, g);
+    }
+    for (const item of file.items) addUsage(g, item.usage);
+  }
+  for (const g of map.values()) finalizeTotals(g);
+  // 按周期起始日期升序
+  return [...map.values()].sort((a, b) => a.period.localeCompare(b.period));
+}
+
+/** 计算会话时间戳归属的周期键（ISO 日期字符串）；无有效时间戳返回 null */
+export function periodKey(timestamp: string, period: Period): string | null {
+  // 统一 UTC 基准解析（无时区后缀补 Z），与 filterFiles 同一基准
+  const d = new Date(parseUtcTimestamp(timestamp));
+  if (Number.isNaN(d.getTime())) return null;
+  // 用 UTC 字段避免时区偏移（会话时间戳为 UTC ISO 格式）
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const day = d.getUTCDate();
+  if (period === "day") {
+    return `${pad(y, 4)}-${pad(m + 1, 2)}-${pad(day, 2)}`;
+  }
+  if (period === "month") {
+    return `${pad(y, 4)}-${pad(m + 1, 2)}-01`;
+  }
+  // week：ISO 周，周一起始 → 该周周一的日期
+  const dow = (d.getUTCDay() + 6) % 7; // 0=周一 ... 6=周日
+  const monday = new Date(Date.UTC(y, m, day - dow));
+  return `${pad(monday.getUTCFullYear(), 4)}-${pad(monday.getUTCMonth() + 1, 2)}-${pad(monday.getUTCDate(), 2)}`;
+}
+
+function pad(n: number, w: number): string {
+  return String(n).padStart(w, "0");
 }
 
 /** 解析单个 JSONL 文件；残留文件返回 null */

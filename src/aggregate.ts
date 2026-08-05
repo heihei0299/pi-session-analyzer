@@ -34,6 +34,14 @@ export interface Totals {
 /** 维度分组键（--by 参数值） */
 export type GroupBy = "model" | "cwd" | "model,cwd";
 
+/** 时间汇总周期（--period 参数值） */
+export type Period = "day" | "week" | "month";
+
+/** 时间周期汇总窗口一行（--period day|week|month）：周期键 + 指标 */
+export interface PeriodRow extends Totals {
+  /** 周期起始日期（ISO 8601：day=YYYY-MM-DD；week=周一起始日期；month=YYYY-MM-01） */
+  period: string;
+}
 /** 会话级窗口一行：每合法会话一行，指标=会话内 assistant usage 之和 */
 export interface SessionRow extends Totals {
   sessionId: string;

@@ -2,7 +2,7 @@
  * 终端表格渲染。
  * 指标列：请求数 / 输入 / 输出 / 缓存读 / 缓存写 / 推理 / 总 token / 花费 / 缓存率
  */
-import type { Totals, SessionRow, RequestRow, GroupRow, GroupBy } from "./aggregate.ts";
+import type { Totals, SessionRow, RequestRow, GroupRow, GroupBy, Period, PeriodRow } from "./aggregate.ts";
 
 export function renderTotalsTable(totals: Totals): string {
   return renderRows([metricHeaders(), metricValues(totals)], metricWidths());
@@ -52,6 +52,18 @@ export function renderGroupTable(rows: GroupRow[], by: GroupBy): string {
       ]),
     ],
     [...keyWidths, ...metricWidths()],
+  );
+}
+
+/** 时间周期汇总表格（--period day|week|month，作用于 totals 窗口） */
+export function renderPeriodTable(rows: PeriodRow[], period: Period): string {
+  const periodHeader = period === "day" ? "日期" : period === "week" ? "周起始" : "月份";
+  return renderRows(
+    [
+      [periodHeader, ...metricHeaders()],
+      ...rows.map((r) => [r.period, ...metricValues(r)]),
+    ],
+    [12, ...metricWidths()],
   );
 }
 
