@@ -206,6 +206,14 @@ tbody tr:hover { background: var(--bg-hover); }
 .session-row .ts { color: var(--text-dim); font-size: 12px; }
 .session-row .model { color: var(--text-dim); font-size: 12px; }
 .session-row .err { color: var(--danger); font-size: 12px; margin-left: auto; }
+.name-cell {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
 .hidden { display: none !important; }
 </style>
 </head>
@@ -282,6 +290,7 @@ tbody tr:hover { background: var(--bg-hover); }
     <div class="detail-table-wrap">
       <table id="session-table">
         <thead><tr id="session-head">
+          <th class="sortable" data-key="displayName">会话名称 <span class="arrow"></span></th>
           <th class="sortable" data-key="sessionId">会话ID <span class="arrow"></span></th>
           <th class="sortable" data-key="timestamp">时间 <span class="arrow"></span></th>
           <th class="sortable" data-key="cwd">cwd <span class="arrow"></span></th>
@@ -308,6 +317,7 @@ tbody tr:hover { background: var(--bg-hover); }
     <div class="detail-table-wrap">
       <table id="request-table">
         <thead><tr id="request-head" data-sort="timestamp" data-dir="desc">
+          <th class="sortable" data-key="displayName">会话名称 <span class="arrow"></span></th>
           <th class="sortable" data-key="sessionId">会话ID <span class="arrow"></span></th>
           <th class="sortable" data-key="timestamp">时间 <span class="arrow"></span></th>
           <th class="sortable" data-key="model">模型 <span class="arrow"></span></th>
@@ -547,9 +557,10 @@ function toCsv3(totals, sessions, requests) {
 }
 
 // ---------- 明细视图（会话/请求）：列定义 + 排序 + 分页 ----------
-const SESSION_COLS = ["sessionId", "timestamp", "cwd", "model", "requests", "input", "output", "cacheRate", "totalTokens", "cost"];
-const REQUEST_COLS = ["sessionId", "timestamp", "model", "input", "output", "cache", "reasoning", "cacheRate", "totalTokens", "cost"];
+const SESSION_COLS = ["displayName", "sessionId", "timestamp", "cwd", "model", "requests", "input", "output", "cacheRate", "totalTokens", "cost"];
+const REQUEST_COLS = ["displayName", "sessionId", "timestamp", "model", "input", "output", "cache", "reasoning", "cacheRate", "totalTokens", "cost"];
 const METRIC_FMTS = {
+  displayName: (v) => { const s = String(v ?? ""); return `<span class="name-cell" title="${escapeHtml(s)}">${escapeHtml(s)}</span>`; },
   timestamp: fmtTimestamp,
   requests: fmtCompact,
   input: fmtCompact,

@@ -25,6 +25,18 @@ async function fetchSessions(dir: string): Promise<Array<Record<string, unknown>
   }
 }
 
+async function fetchRequests(dir: string): Promise<Array<Record<string, unknown>>> {
+  const server = await startWebServer({ dir, host: "127.0.0.1", port: 0 });
+  try {
+    const res = await fetch(new URL("/api/requests", server.url));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { rows: Array<Record<string, unknown>> };
+    return body.rows;
+  } finally {
+    await server.close();
+  }
+}
+
 const TS_FILE = "2026-08-03T12-54-19-759Z_019fc7b0-7b6f-78d3-bed5-8be6b23edff6.jsonl";
 const RENAMED_FILE = "生成规范化的commit_019faaaa-f24d-7548-b92b-7c3eace406a0.jsonl";
 
@@ -97,6 +109,44 @@ test("重命名过的文件名：displayName 取文件名前缀（首条 user �
   try {
     const rows = await fetchSessions(dir);
     assert.equal(rows[0].displayName, "生成规范化的commit");
+  } finally {
+    removeFixture(dir);
+  }
+});
+
+// ---------- /api/requests 行含 displayName（会话名称列数据源） ----------
+
+test("请求明细行含 displayName：默认时间戳文件名取首条 user 消息", async () => {
+  const dir = makeFixture({
+    [TS_FILE]: [
+      sessionHeader(),
+      userMsg("生成规范化的commit"),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage() }),
+    ],
+  });
+  try {
+    const rows = await fetchRequests(dir);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].displayName, "生成规范化的commit", "请求行应带会话名称");
+  } finally {
+    removeFixture(dir);
+  }
+});
+
+test("请求明细行含 displayName：重命名过的取文件名前缀，多请求行同会话名", async () => {
+  const dir = makeFixture({
+    [RENAMED_FILE]: [
+      sessionHeader(),
+      userMsg("别的消息内容"),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 1 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 2 }) }),
+    ],
+  });
+  try {
+    const rows = await fetchRequests(dir);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].displayName, "生成规范化的commit");
+    assert.equal(rows[1].displayName, "生成规范化的commit", "同一会话的所有请求行同名称");
   } finally {
     removeFixture(dir);
   }

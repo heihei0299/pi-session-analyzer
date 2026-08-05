@@ -85,7 +85,16 @@ export async function handleApi(
     }
     if (method === "GET" && pathname === "/api/requests") {
       const filtered = await loadFiltered(dir, params);
-      return { status: 200, body: { window: "requests", rows: requestRowsFromFiles(filtered).map(requestToObject) } };
+      // 会话名称映射：sessionId → displayName（会话名称列数据源，与会话管理同规则）
+      const nameBySession = new Map<string, string>();
+      for (const f of filtered) nameBySession.set(f.sessionId, displayNameOf(f.fileName ?? "", f.firstUserText));
+      return {
+        status: 200,
+        body: {
+          window: "requests",
+          rows: requestRowsFromFiles(filtered).map((r) => ({ ...requestToObject(r), displayName: nameBySession.get(r.sessionId) ?? "" })),
+        },
+      };
     }
     if (method === "GET" && pathname === "/api/groups") {
       const by = parseGroupBy(params);

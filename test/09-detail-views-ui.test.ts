@@ -26,16 +26,16 @@ test("S15 明细 tab 骨架标记：表头列数 / 排序标记 / 默认倒序 /
   try {
     const body = await fetchHtml(dir);
 
-    // 会话明细表头 10 列：会话ID/时间/cwd/模型/请求数/输入/输出/缓存率/总token/花费
+    // 会话明细表头 11 列：会话名称/会话ID/时间/cwd/模型/请求数/输入/输出/缓存率/总token/花费
     const sessHead = body.match(/<tr id="session-head"[^>]*>([\s\S]*?)<\/tr>/)?.[1] ?? "";
-    assert.equal((sessHead.match(/<th/g) ?? []).length, 10, "会话明细表头应为 10 列");
-    for (const label of ["会话ID", "时间", "cwd", "模型", "请求数", "输入", "输出", "缓存率", "总token", "花费"]) {
+    assert.equal((sessHead.match(/<th/g) ?? []).length, 11, "会话明细表头应为 11 列");
+    for (const label of ["会话名称", "会话ID", "时间", "cwd", "模型", "请求数", "输入", "输出", "缓存率", "总token", "花费"]) {
       assert.match(sessHead, new RegExp(`>${label} <span`), `会话明细表头应含列 ${label}`);
     }
-    // 请求明细表头 10 列：会话ID/时间/模型/输入/输出/缓存/推理/缓存率/总token/花费
+    // 请求明细表头 11 列：会话名称/会话ID/时间/模型/输入/输出/缓存/推理/缓存率/总token/花费
     const reqHead = body.match(/<tr id="request-head"[^>]*>([\s\S]*?)<\/tr>/)?.[1] ?? "";
-    assert.equal((reqHead.match(/<th/g) ?? []).length, 10, "请求明细表头应为 10 列（spec 列清单）");
-    for (const label of ["会话ID", "时间", "模型", "输入", "输出", "缓存", "推理", "缓存率", "总token", "花费"]) {
+    assert.equal((reqHead.match(/<th/g) ?? []).length, 11, "请求明细表头应为 11 列（spec 列清单 + 会话名称）");
+    for (const label of ["会话名称", "会话ID", "时间", "模型", "输入", "输出", "缓存", "推理", "缓存率", "总token", "花费"]) {
       assert.match(reqHead, new RegExp(`>${label} <span`), `请求明细表头应含列 ${label}`);
     }
 

@@ -76,9 +76,15 @@ test("S7 /api/sessions 与 /api/requests 行结构与 CLI json 对应 rows 一�
     assert.equal(resR.status, 200);
     const apiR = (await resR.json()) as { window: string; rows: Record<string, unknown>[] };
     assert.equal(apiR.window, "requests");
-    assert.deepEqual(apiR.rows, cliRequests.rows);
+    // API 行 = CLI 全部字段 + displayName 扩展（会话名称列数据源，见会话名称需求）
+    assert.equal(apiR.rows.length, cliRequests.rows.length);
+    for (let i = 0; i < apiR.rows.length; i++) {
+      for (const k of Object.keys(cliRequests.rows[i])) {
+        assert.deepEqual(apiR.rows[i][k], cliRequests.rows[i][k], `requests row[${i}] 字段 ${k} 应与 CLI 一致`);
+      }
+    }
     for (const row of apiR.rows) {
-      for (const key of ["sessionId", "timestamp", "model", "requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"]) {
+      for (const key of ["sessionId", "timestamp", "model", "displayName", "requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"]) {
         assert.ok(key in row, `requests 行应含字段 ${key}`);
       }
     }
