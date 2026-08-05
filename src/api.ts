@@ -5,7 +5,7 @@
  * 错误：统一 JSON 错误体 { error, detail } + 400/404/409/500。
  */
 import {
-  readSessionFiles,
+  readSessionFilesCached,
   filterFiles,
   totalsFromFiles,
   sessionRowsFromFiles,
@@ -74,7 +74,7 @@ export async function handleApi(
         return {
           ...sessionToObject(r),
           fileName,
-          displayName: displayNameOf(fileName),
+          displayName: displayNameOf(fileName, f.firstUserText),
           cwdNorm: normalizeCwd(f.cwd),
         };
       });
@@ -114,7 +114,7 @@ export async function handleApi(
 async function loadFiles(dir: string): Promise<SessionFileData[]> {
   let files: SessionFileData[];
   try {
-    files = await readSessionFiles(dir);
+    files = await readSessionFilesCached(dir);
   } catch (e) {
     throw new ApiError(500, "Internal Server Error", `数据目录不可读: ${dir}（${e instanceof Error ? e.message : String(e)}）`);
   }
@@ -186,12 +186,16 @@ function buildMeta(dir: string, files: SessionFileData[]): Record<string, unknow
 
 // ---------- 会话管理：显示名派生 + 重命名 ----------
 
-/** 显示名派生：去尾 `_<UUID>.jsonl` 的前缀；无 `_` 尾缀 → 原始文件名 */
-function displayNameOf(fileName: string): string {
+/** 显示名派生：重命名过的（文件名前缀非 pi 时间戳格式）用前缀；否则用首条 user 消息文本 */
+function displayNameOf(fileName: string, firstUserText?: string): string {
   const base = fileName.endsWith(".jsonl") ? fileName.slice(0, -6) : fileName;
   const idx = base.lastIndexOf("_");
-  if (idx > 0 && idx < base.length - 1) return base.slice(0, idx);
-  return fileName;
+  const prefix = idx > 0 && idx < base.length - 1 ? base.slice(0, idx) : fileName;
+  // pi 默认文件名 `<时间戳>_<UUID>.jsonl`（前缀 ISO 时间戳）→ 未重命名 → 用首条 user 消息
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}/.test(prefix)) {
+    return firstUserText && firstUserText.length > 0 ? firstUserText : prefix;
+  }
+  return prefix;
 }
 
 /** 显示名规范化：去除非法文件名字符（/ \ : * ? " < > |）与首尾空白；去除后为空 → 非法 */

@@ -3,7 +3,7 @@
  * 逐行解析并仅提取 type=message && role=assistant 且携带 usage 的消息（口径 A）。
  * 三个窗口（总 / 会话级 / 单请求级）共用同一份文件级原始数据。
  */
-import { readdirSync, createReadStream, realpathSync } from "node:fs";
+import { readdirSync, createReadStream, realpathSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { createInterface } from "node:readline";
 import {
@@ -34,13 +34,15 @@ export function collectJsonlFiles(dir: string): string[] {
   return out.sort();
 }
 
-/** 单个会话文件解析出的原始数据（仅计入口径的消息） */
+/** 单个会话文件解析出的原始数据（计入口径的消息 + 会话元数据） */
 export interface SessionFileData {
   sessionId: string;
   timestamp: string;
   cwd: string;
   /** 来源文件名（webui /api/sessions 扩展字段 fileName 用） */
   fileName?: string;
+  /** 首条 user 消息的文本内容（webui 会话管理显示名用；无 user 消息时为 undefined） */
+  firstUserText?: string;
   items: { timestamp: string; model: string; usage: Usage }[];
 }
 
@@ -56,6 +58,29 @@ export async function readSessionFiles(dir: string): Promise<SessionFileData[]> 
   }
   return out;
 }
+
+/**
+ * readSessionFiles 结果缓存（webui serve 专用）：目录文件 (path, mtimeMs, size) 快照失效，
+ * 数据不变时直接返回缓存，避免每次请求全量重读重解析（222 会话 ≈ 0.5s 单核 CPU）。
+ * CLI/watch 仍走无缓存 readSessionFiles，保证实时语义。
+ */
+const sessionFileCache = new Map<string, { sig: string; data: SessionFileData[] }>();
+
+export async function readSessionFilesCached(dir: string): Promise<SessionFileData[]> {
+  const files = collectJsonlFiles(dir);
+  const sig = files
+    .map((f) => {
+      const st = statSync(f);
+      return `${f}:${st.mtimeMs}:${st.size}`;
+    })
+    .join("|");
+  const hit = sessionFileCache.get(dir);
+  if (hit !== undefined && hit.sig === sig) return hit.data;
+  const data = await readSessionFiles(dir);
+  sessionFileCache.set(dir, { sig, data });
+  return data;
+}
+
 
 /** 从文件级原始数据派生总窗口（不重扫目录） */
 export function totalsFromFiles(files: SessionFileData[]): Totals {
@@ -267,6 +292,7 @@ async function analyzeFile(file: string): Promise<SessionFileData | null> {
   const rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
   let header: { id?: unknown; timestamp?: unknown; cwd?: unknown } | null = null;
   const items: SessionFileData["items"] = [];
+  let firstUserText: string | undefined;
   try {
     let firstLine = true;
     for await (const line of rl) {
@@ -286,6 +312,24 @@ async function analyzeFile(file: string): Promise<SessionFileData | null> {
       if (entry === null) continue; // 坏行跳过（不中断整个文件）
       if (entry.type === "message") {
         const msg = entry.message;
+        // 首条 user 消息的文本内容（会话管理显示名用；取 content 第一个 text）
+        if (
+          firstUserText === undefined &&
+          msg !== null &&
+          typeof msg === "object" &&
+          !Array.isArray(msg) &&
+          (msg as Record<string, unknown>).role === "user"
+        ) {
+          const content = (msg as Record<string, unknown>).content;
+          if (Array.isArray(content)) {
+            for (const part of content) {
+              if (part !== null && typeof part === "object" && !Array.isArray(part) && (part as Record<string, unknown>).type === "text") {
+                const text = String((part as Record<string, unknown>).text ?? "");
+                if (text.trim()) { firstUserText = text.trim(); break; }
+              }
+            }
+          }
+        }
         if (
           msg !== null &&
           typeof msg === "object" &&
@@ -311,6 +355,7 @@ async function analyzeFile(file: string): Promise<SessionFileData | null> {
     timestamp: typeof header.timestamp === "string" ? header.timestamp : "",
     cwd: typeof header.cwd === "string" ? header.cwd : "",
     fileName: basename(file),
+    firstUserText,
     items,
   };
 }

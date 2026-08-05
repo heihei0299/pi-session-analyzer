@@ -43,7 +43,7 @@ test("明细视图动态 id 引用全部命中 HTML 静态 id（单复数不匹�
     // 动态拼接后缀：$("#" + DETAIL_ID[kind] + "-<suffix>")
     const suffixes = [...body.matchAll(/\$\("#" \+ DETAIL_ID\[kind\] \+ "-([a-z-]+)"\)/g)].map((m) => m[1]);
     assert.ok(suffixes.length > 0, "JS 应通过 DETAIL_ID[kind] 动态拼接明细 id");
-    assert.deepEqual([...new Set(suffixes)].sort(), ["body", "head", "page-info", "page-size"]);
+    assert.deepEqual([...new Set(suffixes)].sort(), ["body", "head", "next", "page-info", "page-size", "prev"]);
 
     // 每个 kind 的前缀 + 后缀组合必须命中静态 id
     for (const kind of Object.keys(prefixById)) {
