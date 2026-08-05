@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * CLI 入口：token-analyzer [totals|sessions|requests] --dir <path> [--format <table|json|csv>]
  * 默认窗口 totals（issue 01 行为），默认格式 table，默认数据目录 ~/.pi/agent/sessions/。
