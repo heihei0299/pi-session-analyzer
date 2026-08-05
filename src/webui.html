@@ -362,6 +362,14 @@ const UNPRICED = "费率未配置（免费/未定价）";
 function fmtCost(n) { return n === 0 ? UNPRICED : n.toLocaleString("en-US", { maximumFractionDigits: 6 }); }
 function fmtRate(r) { return (r * 100).toFixed(2) + "%"; }
 function dateStr(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+// UTC ISO 时间戳 → 本地显示（YYYY-MM-DD HH:MM:SS）；pi 会话时间戳为 UTC，筛选按本地，显示统一本地基准
+function fmtTimestamp(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
 // 预设按钮日期参数：全部时间筛选按本地时间适配（后端 parseTimestamp 按本地解释日期）
 function dateStamp() { const d = new Date(); return dateStr(d) + "-" + String(d.getHours()).padStart(2, "0") + String(d.getMinutes()).padStart(2, "0") + String(d.getSeconds()).padStart(2, "0"); }
 
@@ -387,7 +395,7 @@ function clearError() { $("#error-banner").classList.remove("show"); }
 
 // ---------- 状态行 ----------
 function renderStatus(meta) {
-  $("#status-line").innerHTML = `数据目录: <code>${escapeHtml(meta.dir)}</code> · 会话数: ${meta.sessionCount} · 范围: ${meta.dataRange.since ?? "-"} ~ ${meta.dataRange.until ?? "-"}`;
+  $("#status-line").innerHTML = `数据目录: <code>${escapeHtml(meta.dir)}</code> · 会话数: ${meta.sessionCount} · 范围: ${fmtTimestamp(meta.dataRange.since) || "-"} ~ ${fmtTimestamp(meta.dataRange.until) || "-"}`;
 }
 
 // ---------- 总览卡片 ----------
@@ -542,6 +550,7 @@ function toCsv3(totals, sessions, requests) {
 const SESSION_COLS = ["sessionId", "timestamp", "cwd", "model", "requests", "input", "output", "cacheRate", "totalTokens", "cost"];
 const REQUEST_COLS = ["sessionId", "timestamp", "model", "input", "output", "cache", "reasoning", "cacheRate", "totalTokens", "cost"];
 const METRIC_FMTS = {
+  timestamp: fmtTimestamp,
   requests: fmtCompact,
   input: fmtCompact,
   output: fmtCompact,
@@ -697,7 +706,7 @@ function sessionRowHtml(r) {
   const errId = "err-" + r.sessionId;
   return `<div class="session-row" data-sid="${escapeHtml(r.sessionId)}">
     <span class="name" title="点击重命名：${escapeHtml(r.displayName)}">${escapeHtml(r.displayName)}</span>
-    <span class="ts">${escapeHtml(r.timestamp)}</span>
+    <span class="ts">${escapeHtml(fmtTimestamp(r.timestamp))}</span>
     <span class="model">${escapeHtml(r.model)}</span>
     <span class="req">${r.requests}</span>
     <span class="tok">${fmtCompact(r.totalTokens)}</span>
