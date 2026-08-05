@@ -262,7 +262,18 @@ tbody tr:hover { background: var(--bg-hover); }
   <section id="tab-sessions" class="tab-panel">
     <div class="detail-table-wrap">
       <table id="session-table">
-        <thead><tr id="session-head"></tr></thead>
+        <thead><tr id="session-head">
+          <th class="sortable" data-key="sessionId">会话ID <span class="arrow"></span></th>
+          <th class="sortable" data-key="timestamp">时间 <span class="arrow"></span></th>
+          <th class="sortable" data-key="cwd">cwd <span class="arrow"></span></th>
+          <th class="sortable" data-key="model">模型 <span class="arrow"></span></th>
+          <th class="sortable" data-key="requests">请求数 <span class="arrow"></span></th>
+          <th class="sortable" data-key="input">输入 <span class="arrow"></span></th>
+          <th class="sortable" data-key="output">输出 <span class="arrow"></span></th>
+          <th class="sortable" data-key="cacheRate">缓存率 <span class="arrow"></span></th>
+          <th class="sortable" data-key="totalTokens">总token <span class="arrow"></span></th>
+          <th class="sortable" data-key="cost">花费 <span class="arrow"></span></th>
+        </tr></thead>
         <tbody id="session-body"></tbody>
       </table>
     </div>
@@ -275,7 +286,18 @@ tbody tr:hover { background: var(--bg-hover); }
   <section id="tab-requests" class="tab-panel">
     <div class="detail-table-wrap">
       <table id="request-table">
-        <thead><tr id="request-head"></tr></thead>
+        <thead><tr id="request-head" data-sort="timestamp" data-dir="desc">
+          <th class="sortable" data-key="sessionId">会话ID <span class="arrow"></span></th>
+          <th class="sortable" data-key="timestamp">时间 <span class="arrow"></span></th>
+          <th class="sortable" data-key="model">模型 <span class="arrow"></span></th>
+          <th class="sortable" data-key="input">输入 <span class="arrow"></span></th>
+          <th class="sortable" data-key="output">输出 <span class="arrow"></span></th>
+          <th class="sortable" data-key="cache">缓存 <span class="arrow"></span></th>
+          <th class="sortable" data-key="reasoning">推理 <span class="arrow"></span></th>
+          <th class="sortable" data-key="cacheRate">缓存率 <span class="arrow"></span></th>
+          <th class="sortable" data-key="totalTokens">总token <span class="arrow"></span></th>
+          <th class="sortable" data-key="cost">花费 <span class="arrow"></span></th>
+        </tr></thead>
         <tbody id="request-body"></tbody>
       </table>
     </div>
@@ -468,18 +490,105 @@ function toCsv3(totals, sessions, requests) {
   return parts.join("\n");
 }
 
-// ---------- tab 切换（明细 tab 拉取在 ticket 04 接入） ----------
+// ---------- 明细视图（会话/请求）：列定义 + 排序 + 分页 ----------
+const SESSION_COLS = ["sessionId", "timestamp", "cwd", "model", "requests", "input", "output", "cacheRate", "totalTokens", "cost"];
+const REQUEST_COLS = ["sessionId", "timestamp", "model", "input", "output", "cache", "reasoning", "cacheRate", "totalTokens", "cost"];
+const METRIC_FMTS = {
+  requests: fmtCompact,
+  input: fmtCompact,
+  output: fmtCompact,
+  cache: fmtCompact,
+  reasoning: fmtCompact,
+  totalTokens: fmtCompact,
+  cacheRate: fmtRate,
+  cost: (v) => (v === 0 ? UNPRICED : fmtCost(v)),
+};
+const detailState = {
+  sessions: { sortKey: null, sortDir: "asc", page: 1, size: 20, rows: [] },
+  requests: { sortKey: "timestamp", sortDir: "desc", page: 1, size: 20, rows: [] },
+};
+
+async function fetchRows(kind) {
+  const data = await api(kind);
+  const st = detailState[kind];
+  st.rows = data.rows;
+  st.page = 1;
+  return st;
+}
+function sortRows(st) {
+  if (!st.sortKey) return st.rows;
+  const k = st.sortKey;
+  const dir = st.sortDir === "asc" ? 1 : -1;
+  return [...st.rows].sort((a, b) => {
+    const va = a[k];
+    const vb = b[k];
+    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+    return String(va).localeCompare(String(vb)) * dir;
+  });
+}
+function renderDetailTable(kind) {
+  const st = detailState[kind];
+  const headEl = $("#" + kind + "-head");
+  const bodyEl = $("#" + kind + "-body");
+  const sorted = sortRows(st);
+  const start = (st.page - 1) * st.size;
+  const pageRows = sorted.slice(start, start + st.size);
+  const cols = kind === "sessions" ? SESSION_COLS : REQUEST_COLS;
+  bodyEl.innerHTML = pageRows
+    .map((r) => "<tr>" + cols.map((c) => `<td>${(METRIC_FMTS[c] ? METRIC_FMTS[c](r[c]) : r[c]) ?? ""}</td>`).join("") + "</tr>")
+    .join("");
+  headEl.querySelectorAll("th").forEach((th) => {
+    const arrow = th.querySelector(".arrow");
+    if (arrow) arrow.textContent = th.dataset.key === st.sortKey ? (st.sortDir === "asc" ? "▲" : "▼") : "";
+  });
+  const infoEl = $("#" + kind + "-page-info");
+  const total = sorted.length;
+  const pages = Math.max(1, Math.ceil(total / st.size));
+  infoEl.textContent = `${total} 行 · 第 ${st.page}/${pages} 页`;
+}
+async function refreshSessionTable() {
+  try {
+    clearError();
+    await fetchRows("sessions");
+    renderDetailTable("sessions");
+  } catch (e) { showError("会话明细加载失败: " + e.message); }
+}
+async function refreshRequestTable() {
+  try {
+    clearError();
+    await fetchRows("requests");
+    renderDetailTable("requests");
+  } catch (e) { showError("请求明细加载失败: " + e.message); }
+}
+function bindDetailInteractions() {
+  for (const kind of ["sessions", "requests"]) {
+    $("#" + kind + "-head").addEventListener("click", (e) => {
+      const th = e.target.closest("th");
+      if (!th) return;
+      const key = th.dataset.key;
+      const st = detailState[kind];
+      if (st.sortKey === key) st.sortDir = st.sortDir === "asc" ? "desc" : "asc";
+      else { st.sortKey = key; st.sortDir = "asc"; }
+      st.page = 1;
+      renderDetailTable(kind);
+    });
+    $("#" + kind + "-page-size").addEventListener("change", (e) => {
+      detailState[kind].size = Number(e.target.value);
+      detailState[kind].page = 1;
+      renderDetailTable(kind);
+    });
+  }
+}
+
+// ---------- tab 切换：切换即拉取对应端点（无整页刷新） ----------
 function switchTab(tab) {
   state.tab = tab;
   document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + tab));
-  if (tab === "overview") refreshOverview();
-  if (tab === "manage") refreshSessionGroups();
+  refreshAll();
 }
 
-// ---------- 统一刷新入口（明细/会话管理函数由 ticket 04/06 实现） ----------
-function refreshSessionTable() { /* ticket 04 */ }
-function refreshRequestTable() { /* ticket 04 */ }
+// ---------- 统一刷新入口（会话管理函数由 ticket 06 实现） ----------
 function refreshSessionGroups() { /* ticket 06 */ }
 function refreshAll() {
   if (state.tab === "overview") refreshOverview();
@@ -502,6 +611,7 @@ function init() {
   $("#export-json").addEventListener("click", () => exportData("json"));
   $("#export-csv").addEventListener("click", () => exportData("csv"));
   $("#refresh-btn").addEventListener("click", () => refreshAll());
+  bindDetailInteractions();
   refreshAll();
 }
 init();
