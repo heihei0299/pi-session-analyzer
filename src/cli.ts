@@ -15,7 +15,8 @@ import {
   filterFiles,
   periodRowsFromFiles,
 } from "./analyze.ts";
-import type { GroupBy, Period } from "./aggregate.ts";
+import { IncrementalReader, applyIncrements } from "./watch.ts";
+import { emptyTotals, type GroupBy, type Period, type Totals } from "./aggregate.ts";
 import { renderTotalsTable, renderSessionTable, renderRequestTable, renderGroupTable, renderPeriodTable } from "./render.ts";
 import { serializeJson, serializeCsv, serializeGroupJson, serializeGroupCsv, serializePeriodJson, serializePeriodCsv } from "./serialize.ts";
 
@@ -40,6 +41,10 @@ export interface CliArgs {
   until?: string;
   /** --period <day|week|month>：totals 窗口按周期汇总 */
   period?: Period;
+  /** --watch：实时监控模式（长驻，跟随追加） */
+  watch: boolean;
+  /** --interval <ms>：watch 轮询间隔（默认 1000） */
+  interval: number;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -52,6 +57,8 @@ export function parseArgs(argv: string[]): CliArgs {
   let since: string | undefined;
   let until: string | undefined;
   let period: Period | undefined;
+  let watch = false;
+  let interval = 1000;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dir" && argv[i + 1]) {
@@ -85,6 +92,15 @@ export function parseArgs(argv: string[]): CliArgs {
         throw new Error(`未知周期: ${p}（支持 day/week/month）`);
       }
       i++;
+    } else if (a === "--watch") {
+      watch = true;
+    } else if (a === "--interval" && argv[i + 1]) {
+      const ms = Number(argv[i + 1]);
+      if (!Number.isFinite(ms) || ms <= 0) {
+        throw new Error(`无效间隔: ${argv[i + 1]}（需为正数毫秒）`);
+      }
+      interval = ms;
+      i++;
     } else if (a === "--by" && argv[i + 1]) {
       const b = argv[i + 1];
       if (b === "model" || b === "cwd" || b === "model,cwd") {
@@ -97,33 +113,19 @@ export function parseArgs(argv: string[]): CliArgs {
       window = a;
     }
   }
-  return { window, dir, format, model, cwd, by, since, until, period };
+  return { window, dir, format, model, cwd, by, since, until, period, watch, interval };
 }
 
 /** 运行分析，返回输出文本（供 CLI 打印与测试断言）；目录只扫描一次，派生三窗口 */
 export async function runCli(argv: string[]): Promise<string> {
-  const { window, dir, format, model, cwd, by, since, until, period } = parseArgs(argv);
-  // 参数合法性校验先行（IO 之前）
-  if (period !== undefined && window !== "totals") {
-    throw new Error(`--period 汇总仅支持 totals 窗口（当前 ${window}）`);
-  }
-  if (by !== undefined && window !== "totals") {
-    throw new Error(`--by 分组仅支持 totals 窗口（当前 ${window}）`);
-  }
-  if (period !== undefined && by !== undefined) {
-    throw new Error(`--period 与 --by 不能同时使用（当前 period=${period}, by=${by}）`);
+  const { window, dir, format, model, cwd, by, since, until, period, watch, interval } = parseArgs(argv);
+  validateArgs({ window, by, period });
+  if (watch) {
+    // 实时监控模式：长驻循环（测试通过 runWatch 单步驱动，此处仅打印初始状态并进入循环）
+    return runWatchCli({ dir, format, model, cwd, since, until, window, interval });
   }
   const files = await readSessionFiles(dir);
   const filtered = filterFiles(files, { model, cwd, since, until });
-  if (period !== undefined && window !== "totals") {
-    throw new Error(`--period 汇总仅支持 totals 窗口（当前 ${window}）`);
-  }
-  if (by !== undefined && window !== "totals") {
-    throw new Error(`--by 分组仅支持 totals 窗口（当前 ${window}）`);
-  }
-  if (period !== undefined && by !== undefined) {
-    throw new Error(`--period 与 --by 不能同时使用（当前 period=${period}, by=${by}）`);
-  }
   if (period !== undefined) {
     const rows = periodRowsFromFiles(filtered, period);
     if (format === "json") return serializePeriodJson(period, rows);
@@ -151,6 +153,79 @@ export async function runCli(argv: string[]): Promise<string> {
     case "requests":
       return renderRequestTable(requestRowsFromFiles(filtered));
   }
+}
+
+/** 参数合法性校验（IO 之前） */
+function validateArgs(args: { window: WindowName; by?: GroupBy; period?: Period }): void {
+  if (args.period !== undefined && args.window !== "totals") {
+    throw new Error(`--period 汇总仅支持 totals 窗口（当前 ${args.window}）`);
+  }
+  if (args.by !== undefined && args.window !== "totals") {
+    throw new Error(`--by 分组仅支持 totals 窗口（当前 ${args.window}）`);
+  }
+  if (args.period !== undefined && args.by !== undefined) {
+    throw new Error(`--period 与 --by 不能同时使用（当前 period=${args.period}, by=${args.by}）`);
+  }
+}
+
+/**
+ * --watch 实时监控：增量读取器单步 + 刷新回调。
+ * 测试直接驱动（传入自建 reader 与回调）；CLI 用 runWatchCli 提供长驻循环。
+ * 返回刷新次数（供测试断言）。
+ */
+export async function runWatch(
+  reader: IncrementalReader,
+  totals: Totals,
+  onRefresh: (totals: Totals, changed: boolean) => void,
+  intervalMs: number,
+  iterations = Infinity,
+): Promise<number> {
+  let refreshes = 0;
+  for (let i = 0; i < iterations; i++) {
+    const changed = await applyIncrements(reader, totals);
+    if (changed || i === 0) {
+      onRefresh(totals, changed);
+      refreshes++;
+    }
+    if (i < iterations - 1) await sleep(intervalMs);
+  }
+  return refreshes;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** CLI --watch 长驻模式：初始输出当前 totals，之后每间隔刷新 */
+async function runWatchCli(args: {
+  dir: string;
+  format: FormatName;
+  model?: string;
+  cwd?: string;
+  since?: string;
+  until?: string;
+  window: WindowName;
+  interval: number;
+}): Promise<string> {
+  // 实时模式仅支持 totals 表格（长驻刷新语义；结构化输出无意义）
+  if (args.format !== "table" || args.window !== "totals") {
+    throw new Error(`--watch 仅支持 totals 窗口 + table 格式（当前 window=${args.window}, format=${args.format}）`);
+  }
+  // --watch 不支持筛选组合（实时增量边界是全量新行，筛选语义不清）
+  if (args.model !== undefined || args.cwd !== undefined || args.since !== undefined || args.until !== undefined) {
+    throw new Error("--watch 不支持 --model/--cwd/--since/--until 组合（实时模式统计全部会话增量）");
+  }
+  const reader = new IncrementalReader(args.dir);
+  const totals: Totals = emptyTotals();
+  let last = "";
+  await runWatch(reader, totals, (t) => {
+    const out = renderTotalsTable(t);
+    if (out !== last) {
+      process.stdout.write("\u001b[2J\u001b[H" + out); // 清屏刷新
+      last = out;
+    }
+  }, args.interval);
+  return last; // 循环仅在迭代耗尽时返回（CLI 直接运行时为长驻）
 }
 
 // 直接执行时打印（兼容 npm bin symlink：解析 realpath 后比较）
