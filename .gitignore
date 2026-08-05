@@ -1,3 +1,6 @@
 node_modules/
 *.log
 dist/
+.codegraph/
+问题汇总.md
+推送失败.md
