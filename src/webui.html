@@ -69,9 +69,7 @@ nav.tabs button.tab.active {
 }
 .toolbar button:hover { color: var(--text); }
 .toolbar button.active { color: var(--text); border-color: var(--accent); }
-.toolbar input[type="datetime-local"],
-.toolbar input[type="date"],
-.toolbar input[type="time"] {
+.toolbar input[type="date"] {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   color: var(--text);
@@ -231,11 +229,13 @@ tbody tr:hover { background: var(--bg-hover); }
     <button data-preset="custom">自定义</button>
   </div>
   <div id="custom-range" class="hidden">
-    <input type="date" id="since-date" title="起始日期（按 UTC 解释）">
-    <input type="time" id="since-time" step="60" title="起始时间（按 UTC 解释）">
+    <input type="date" id="since-date" title="起始日期（本地时间）">
+    <select id="since-hour" title="起始小时（本地时间）"><option value="">时</option><option value="00">00</option><option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option></select>
+    <select id="since-minute" title="起始分钟（本地时间）"><option value="">分</option><option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option></select>
     <span>—</span>
-    <input type="date" id="until-date" title="结束日期（按 UTC 解释）">
-    <input type="time" id="until-time" step="60" title="结束时间（按 UTC 解释）">
+    <input type="date" id="until-date" title="结束日期（本地时间）">
+    <select id="until-hour" title="结束小时（本地时间）"><option value="">时</option><option value="00">00</option><option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option></select>
+    <select id="until-minute" title="结束分钟（本地时间）"><option value="">分</option><option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option></select>
   </div>
   <span style="flex:1"></span>
   <select id="auto-refresh" title="自动刷新">
@@ -362,8 +362,7 @@ const UNPRICED = "费率未配置（免费/未定价）";
 function fmtCost(n) { return n === 0 ? UNPRICED : n.toLocaleString("en-US", { maximumFractionDigits: 6 }); }
 function fmtRate(r) { return (r * 100).toFixed(2) + "%"; }
 function dateStr(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
-// 预设按钮日期参数：后端按 UTC 解释日期（与 CLI 同语义），用 UTC 字段生成，避免本地/UTC 日界错位
-function utcDateStr(d) { return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0"); }
+// 预设按钮日期参数：全部时间筛选按本地时间适配（后端 parseTimestamp 按本地解释日期）
 function dateStamp() { const d = new Date(); return dateStr(d) + "-" + String(d.getHours()).padStart(2, "0") + String(d.getMinutes()).padStart(2, "0") + String(d.getSeconds()).padStart(2, "0"); }
 
 function filterParams() {
@@ -469,22 +468,24 @@ function applyPreset(preset) {
   } else {
     $("#custom-range").classList.add("hidden");
     const days = preset === "today" ? 0 : preset === "7d" ? 6 : 29;
-    // 后端按 UTC 解释 since/until：整体用 UTC 日期字段推算（Date.UTC 自动处理跨月/跨年进位）
-    const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - days));
-    state.since = utcDateStr(since);
-    state.until = utcDateStr(now);
+    // 本地自然日：本地日期字段推算（setDate 自动处理跨月/跨年）；后端 parseTimestamp 按本地解释
+    const since = new Date(now);
+    since.setDate(now.getDate() - days);
+    state.since = dateStr(since);
+    state.until = dateStr(now);
   }
   refreshAll();
 }
 
-// ---------- 自定义时间范围（date + time 组合，输入即生效） ----------
-/** 由 4 个输入框拼接 since/until：只有日期 → 纯日期（后端按 UTC 全天）；日期+时间 → YYYY-MM-DDTHH:MM（后端补 Z 按 UTC） */
+// ---------- 自定义时间范围（date + 时分下拉，输入即生效，本地时间语义） ----------
+/** 由 6 个输入控件拼接 since/until：只有日期 → 纯日期（本地全天）；日期+时分 → YYYY-MM-DDTHH:MM（本地时间，后端按本地解释） */
 function customRangeValue() {
-  const sd = $("#since-date").value, st = $("#since-time").value;
-  const ud = $("#until-date").value, ut = $("#until-time").value;
+  const sd = $("#since-date").value, sh = $("#since-hour").value, sm = $("#since-minute").value;
+  const ud = $("#until-date").value, uh = $("#until-hour").value, um = $("#until-minute").value;
+  const timeOf = (h, m) => (h !== "" && m !== "" ? `${h}:${m}` : "");
   return {
-    since: sd ? (st ? `${sd}T${st}` : sd) : null,
-    until: ud ? (ut ? `${ud}T${ut}` : ud) : null,
+    since: sd ? (timeOf(sh, sm) ? `${sd}T${timeOf(sh, sm)}` : sd) : null,
+    until: ud ? (timeOf(uh, um) ? `${ud}T${timeOf(uh, um)}` : ud) : null,
   };
 }
 function applyCustomRange() {
@@ -494,8 +495,9 @@ function applyCustomRange() {
   refreshAll();
 }
 function bindCustomRange() {
-  for (const id of ["since-date", "since-time", "until-date", "until-time"]) {
-    $("#" + id).addEventListener("input", applyCustomRange);
+  for (const id of ["since-date", "since-hour", "since-minute", "until-date", "until-hour", "until-minute"]) {
+    // date 用 input（实时），select 用 change（select 无 input 事件语义）
+    $("#" + id).addEventListener(id.endsWith("-date") ? "input" : "change", applyCustomRange);
   }
 }
 

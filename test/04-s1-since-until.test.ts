@@ -1,3 +1,6 @@
+// 筛选参数（--since/--until）按本地自然日语义；固定东八区使断言与实现一致
+process.env.TZ = "Asia/Shanghai";
+
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runCli } from "../src/cli.ts";
@@ -43,12 +46,13 @@ test("S1a --since 闭区间含端点：--since 2026-08-10 含 8/10 当天", asyn
   }
 });
 
-test("S1b --until 闭区间含端点：--until 2026-08-15 含 8/15 全天（23:59:59）", async () => {
+test("S1b --until 闭区间含端点：--until 2026-08-15 含本地 8/15 全天（本地 23:59:59.999 止）", async () => {
   const dir = buildDir();
   try {
     const until = parseTable(await runCli(["totals", "--dir", dir, "--until", "2026-08-15"]));
-    assert.equal(until["请求数"], "3", "含 8/15 23:59:59：a、b、c 三个会话");
-    assert.equal(until["输入"], "600", "100+200+300");
+    // 本地 8/15 23:59:59.999 = UTC 8/15 15:59:59.999；c 在 UTC 8/15 23:59:59（本地 8/16 07:59）不含
+    assert.equal(until["请求数"], "2", "本地 8/15 全天：a、b 两个会话（c 属本地 8/16）");
+    assert.equal(until["输入"], "300", "100+200");
   } finally {
     removeFixture(dir);
   }
@@ -58,8 +62,8 @@ test("S1c 闭区间组合：--since 2026-08-10 --until 2026-08-15", async () => 
   const dir = buildDir();
   try {
     const both = parseTable(await runCli(["totals", "--dir", dir, "--since", "2026-08-10", "--until", "2026-08-15"]));
-    assert.equal(both["请求数"], "2", "b、c 两个会话");
-    assert.equal(both["输入"], "500", "200+300");
+    assert.equal(both["请求数"], "1", "本地 8/10 ~ 8/15：b 一个会话（c 属本地 8/16）");
+    assert.equal(both["输入"], "200");
   } finally {
     removeFixture(dir);
   }
@@ -70,7 +74,7 @@ test("S1d 时间筛选对 sessions 窗口生效", async () => {
   try {
     const out = await runCli(["sessions", "--dir", dir, "--since", "2026-08-01", "--until", "2026-08-15"]);
     const rows = out.trim().split("\n").length - 1;
-    assert.equal(rows, 3, "a/b/c 三个会话行");
+    assert.equal(rows, 2, "a/b 两个会话行（c 属本地 8/16）");
   } finally {
     removeFixture(dir);
   }
@@ -81,7 +85,7 @@ test("S1e 时间筛选对 requests 窗口生效", async () => {
   try {
     const out = await runCli(["requests", "--dir", dir, "--since", "2026-08-01", "--until", "2026-08-15"]);
     const rows = out.trim().split("\n").length - 1;
-    assert.equal(rows, 3, "a/b/c 三条请求");
+    assert.equal(rows, 2, "a/b 两条请求（c 属本地 8/16）");
   } finally {
     removeFixture(dir);
   }

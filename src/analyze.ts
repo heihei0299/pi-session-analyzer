@@ -236,17 +236,20 @@ export function parseUtcTimestamp(s: string): number {
 /**
  * 解析时间参数（--since/--until）：ISO 日期（2026-08-01）或完整时间戳。
  * 日期参数：since 用 endOfDay=false（当天 00:00 起）；until 用 endOfDay=true（当天 23:59:59.999 止）。
- * 完整时间戳统一按 UTC 解释（无时区后缀补 Z），与 parseUtcTimestamp/README「按 UTC 解释」一致。
+ * 完整时间戳按本地时区解释（无时区后缀）；带时区后缀（Z/±HH:MM）原样解析。
+ * 注：会话时间戳（parseUtcTimestamp）仍按 UTC 解释（数据是 UTC ISO）；筛选参数按本地
+ * 时区——「今天/7天/30天/自定义」均以本地自然日为语义。
  */
 export function parseTimestamp(s: string, endOfDay: boolean): number {
-  // 纯日期（YYYY-MM-DD）：手动构造，避免 Date.parse 的 UTC 00:00 语义歧义
+  // 纯日期（YYYY-MM-DD）：本地自然日（本地 00:00 起 / endOfDay 本地 23:59:59.999 止）
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (dateOnly) {
     const [, y, mo, d] = dateOnly;
-    const base = Date.UTC(Number(y), Number(mo) - 1, Number(d));
+    const base = new Date(Number(y), Number(mo) - 1, Number(d)).getTime();
     return endOfDay ? base + 86_400_000 - 1 : base;
   }
-  const ms = Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/.test(s) ? s : s + "Z");
+  // 完整时间戳：无时区后缀按本地时区解释（Date.parse 本地语义），带时区后缀原样
+  const ms = Date.parse(s);
   if (Number.isNaN(ms)) throw new Error(`无效时间: ${s}（支持 ISO 日期或时间戳）`);
   return ms;
 }

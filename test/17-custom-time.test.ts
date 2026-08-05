@@ -1,10 +1,9 @@
 /**
- * Bugfix — 自定义时间范围（问题汇总追加）：
- * 1. parseTimestamp 完整时间戳统一按 UTC 解释（无时区补 Z）——修复 Date.parse 按本地时区
- *    解释导致的「自定义筛选与预设/CLI 语义不一致」（预设按 UTC、自定义按本地，差 8 小时）。
- * 2. 自定义输入 UI 从 datetime-local 改为 date + time 组合（Firefox 的 datetime-local 无法
- *    弹出时分选择器，date 可弹日历、time 有 spinner）；绑定 input 事件输入即生效（原 change
- *    需失焦才触发，用户输入后不点别处会感觉「筛选不生效」）。
+ * Bugfix — 自定义时间范围：本地时间语义 + 时分下拉选择。
+ * 1. parseTimestamp 完整时间戳与纯日期均按本地时区解释（东八区：本地 14:00 = UTC 06:00，
+ *    本地 8/5 全天 = UTC 8/4 16:00 ~ 8/5 15:59:59.999）——与预设按钮（本地自然日）一致。
+ * 2. 自定义输入 UI 为 date + 时分下拉（时 00-23 / 分 00/15/30/45）：Firefox 原生 time
+ *    输入框点击时分字段无反应（平台限制），下拉选择稳定可点。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,17 +11,23 @@ import { parseTimestamp } from "../src/analyze.ts";
 import { startWebServer } from "../src/server.ts";
 import { makeFixture, removeFixture, sessionHeader, messageEntry, assistantUsage } from "./helpers.ts";
 
-// ---------- parseTimestamp UTC 语义 ----------
+// 固定东八区（node --test 每文件独立进程，TZ 不影响其他文件）
+process.env.TZ = "Asia/Shanghai";
 
-test("parseTimestamp 完整时间戳按 UTC 解释（无时区补 Z，不再按本地时区）", () => {
+// ---------- parseTimestamp 本地时间语义 ----------
+
+test("parseTimestamp 完整时间戳按本地时区解释（东八区：本地 14:00 = UTC 06:00）", () => {
   const ms = parseTimestamp("2026-08-05T14:00", false);
-  assert.equal(new Date(ms).toISOString(), "2026-08-05T14:00:00.000Z", "无时区完整时间戳应补 Z 按 UTC（东八区下 Date.parse 原按本地=UTC 06:00）");
+  assert.equal(new Date(ms).toISOString(), "2026-08-05T06:00:00.000Z", "无时区完整时间戳按本地解释（不再是 UTC 补 Z）");
 });
 
-test("parseTimestamp 带时区后缀原样解析 + 纯日期不受影响", () => {
+test("parseTimestamp 纯日期按本地自然日（东八区：8/5 = UTC 8/4 16:00 起）", () => {
+  assert.equal(new Date(parseTimestamp("2026-08-05", false)).toISOString(), "2026-08-04T16:00:00.000Z");
+  assert.equal(new Date(parseTimestamp("2026-08-05", true)).toISOString(), "2026-08-05T15:59:59.999Z");
+});
+
+test("parseTimestamp 带时区后缀原样解析", () => {
   assert.equal(new Date(parseTimestamp("2026-08-05T14:00Z", false)).toISOString(), "2026-08-05T14:00:00.000Z");
-  assert.equal(new Date(parseTimestamp("2026-08-05", false)).toISOString(), "2026-08-05T00:00:00.000Z");
-  assert.equal(new Date(parseTimestamp("2026-08-05", true)).toISOString(), "2026-08-05T23:59:59.999Z");
 });
 
 // ---------- 前端 date + time 组合静态断言 ----------
@@ -38,27 +43,35 @@ async function fetchHtml(dir: string): Promise<string> {
   }
 }
 
-test("自定义时间输入为 date+time 组合，input 事件输入即生效", async () => {
+test("自定义时间输入为 date + 时分下拉，input 事件输入即生效", async () => {
   const dir = makeFixture({
     "s.jsonl": [sessionHeader(), messageEntry({ role: "assistant", model: "m1", usage: assistantUsage() })],
   });
   try {
     const body = await fetchHtml(dir);
 
-    // 4 个输入框：since/until × date/time
-    for (const id of ["since-date", "since-time", "until-date", "until-time"]) {
+    // 6 个输入控件：since/until × (date + hour + minute)
+    for (const id of ["since-date", "since-hour", "since-minute", "until-date", "until-hour", "until-minute"]) {
       assert.match(body, new RegExp(`id="${id}"`), `HTML 应含 ${id}`);
     }
     assert.match(body, /<input type="date" id="since-date"/, "since 应为 date 输入框");
-    assert.match(body, /<input type="time" id="since-time"/, "since 应为 time 输入框");
+    assert.match(body, /<select id="since-hour"/, "since 应为小时下拉");
+    assert.match(body, /<select id="since-minute"/, "since 应为分钟下拉");
+    assert.doesNotMatch(body, /type="time"/, "不应再使用原生 time 输入框（Firefox 点击时分字段无反应）");
 
-    // 拼接逻辑：只有日期 → 纯日期；日期+时间 → YYYY-MM-DDTHH:MM（后端补 Z 按 UTC）
-    assert.match(body, /since: sd \? \(st \? `\$\{sd\}T\$\{st\}` : sd\) : null/, "since 拼接：有日期必传，有时分拼 T");
-    assert.match(body, /until: ud \? \(ut \? `\$\{ud\}T\$\{ut\}` : ud\) : null/, "until 拼接同上");
+    // 时 00-23、分 00/15/30/45 选项
+    const hourSel = body.match(/<select id="since-hour"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
+    assert.ok(hourSel.includes("00") && hourSel.includes("23"), "小时下拉应含 00-23");
+    const minSel = body.match(/<select id="since-minute"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
+    assert.match(minSel, /value="(00|15|30|45)"/, "分钟下拉应为 00/15/30/45 档位");
 
-    // input 事件绑定（输入即生效，无需失焦）
-    assert.match(body, /for \(const id of \["since-date", "since-time", "until-date", "until-time"\]\)/, "应遍历 4 个输入框绑定");
-    assert.match(body, /addEventListener\("input", applyCustomRange\)/, "应绑定 input 事件");
+    // 拼接逻辑：只有日期 → 纯日期；日期+时分 → YYYY-MM-DDTHH:MM（本地时间，后端按本地解释）
+    assert.match(body, /timeOf\(sh, sm\)/, "应有时分拼接辅助");
+    assert.match(body, /since: sd \? \(timeOf\(sh, sm\) \? `\$\{sd\}T\$\{timeOf\(sh, sm\)\}` : sd\) : null/, "since 拼接：有日期必传，有时分拼 T");
+
+    // input/change 事件绑定（输入即生效，无需失焦）
+    assert.match(body, /\["since-date", "since-hour", "since-minute", "until-date", "until-hour", "until-minute"\]/, "应遍历 6 个输入控件绑定");
+    assert.match(body, /addEventListener\(id\.endsWith\("-date"\) \? "input" : "change", applyCustomRange\)/, "date 绑 input、select 绑 change，均触发 applyCustomRange");
 
     // 不应残留旧 datetime-local 引用
     assert.doesNotMatch(body, /id="since-input"/, "不应残留旧 since-input");
