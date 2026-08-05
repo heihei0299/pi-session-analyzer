@@ -339,6 +339,8 @@ const UNPRICED = "费率未配置（免费/未定价）";
 function fmtCost(n) { return n === 0 ? UNPRICED : n.toLocaleString("en-US", { maximumFractionDigits: 6 }); }
 function fmtRate(r) { return (r * 100).toFixed(2) + "%"; }
 function dateStr(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+// 预设按钮日期参数：后端按 UTC 解释日期（与 CLI 同语义），用 UTC 字段生成，避免本地/UTC 日界错位
+function utcDateStr(d) { return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0"); }
 function dateStamp() { const d = new Date(); return dateStr(d) + "-" + String(d.getHours()).padStart(2, "0") + String(d.getMinutes()).padStart(2, "0") + String(d.getSeconds()).padStart(2, "0"); }
 
 function filterParams() {
@@ -445,10 +447,10 @@ function applyPreset(preset) {
   } else {
     $("#custom-range").classList.add("hidden");
     const days = preset === "today" ? 0 : preset === "7d" ? 6 : 29;
-    const since = new Date(now);
-    since.setDate(now.getDate() - days);
-    state.since = dateStr(since);
-    state.until = dateStr(now);
+    // 后端按 UTC 解释 since/until：整体用 UTC 日期字段推算（Date.UTC 自动处理跨月/跨年进位）
+    const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - days));
+    state.since = utcDateStr(since);
+    state.until = utcDateStr(now);
   }
   refreshAll();
 }
