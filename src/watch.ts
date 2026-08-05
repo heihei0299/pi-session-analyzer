@@ -34,9 +34,12 @@ export class IncrementalReader {
   /** 每个文件的累计贡献（用于替换/截断重读时扣减，避免重复计数） */
   private contrib = new Map<string, Totals>();
   private dir: string;
+  /** 会话文件合法性判定（测试注入点：H1 回归测试统计首行重验次数）；默认 isSessionFile */
+  private isSession: (file: string) => Promise<boolean>;
 
-  constructor(dir: string) {
+  constructor(dir: string, isSession: (file: string) => Promise<boolean> = isSessionFile) {
     this.dir = dir;
+    this.isSession = isSession;
   }
 
   /**
@@ -49,10 +52,22 @@ export class IncrementalReader {
    */
   async readIncrements(): Promise<Increment[]> {
     const increments: Increment[] = [];
-    // 异步过滤：仅保留合法会话文件（首行 type==session）
+    // 合法会话文件收集：已跟踪文件跳过首行重验（仅 stat 判 inode 是否被替换），
+    // 仅对新增文件与 inode 变化（整体替换）的文件执行 isSession 判定——
+    // 每轮成本从「全量重读首行」降为「全量 stat」（189ms/轮 → ~2ms/轮，异常占用修复）。
     const files: string[] = [];
     for (const f of collectJsonlFiles(this.dir)) {
-      if (await isSessionFile(f)) files.push(f);
+      const known = this.states.get(f);
+      if (known === undefined) {
+        if (await this.isSession(f)) files.push(f); // 新增文件：验证首行
+      } else {
+        const st = statSync(f);
+        if (st.ino === known.inode) {
+          files.push(f); // 未替换：首行类型不变，跳过重读
+        } else if (await this.isSession(f)) {
+          files.push(f); // 被替换（新 inode）：重验首行（替换成残留则被排除）
+        }
+      }
     }
     const seen = new Set(files);
 

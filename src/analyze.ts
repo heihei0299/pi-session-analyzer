@@ -60,36 +60,89 @@ export async function readSessionFiles(dir: string): Promise<SessionFileData[]> 
 }
 
 /**
- * readSessionFiles 结果缓存（webui serve 专用）：目录文件 (path, mtimeMs, size) 快照失效，
- * 数据不变时直接返回缓存，避免每次请求全量重读重解析（222 会话 ≈ 0.5s 单核 CPU）。
+ * readSessionFiles 结果缓存（webui serve 专用）：文件级 (path, mtimeMs, size) 快照增量失效。
+ * 数据不变时直接返回缓存（同一数组引用）；任一文件新增/变化时仅重读该文件并合并，
+ * 删除的文件从结果剔除（不重读）——避免全量重解析尖峰（486ms → 仅变化文件，异常占用修复）。
  * CLI/watch 仍走无缓存 readSessionFiles，保证实时语义。
  */
-const sessionFileCache = new Map<string, { sig: string; data: SessionFileData[] }>();
+/** 单文件加载器（测试注入点：H2 回归测试统计重读次数）；默认 analyzeFile */
+let fileLoader: (file: string) => Promise<SessionFileData | null> = analyzeFile;
+/** 替换单文件加载器（仅测试用；用毕须还原为 analyzeFile） */
+export function __setFileLoaderForTest(fn: (file: string) => Promise<SessionFileData | null>): void {
+  fileLoader = fn;
+}
+
+/** 单文件缓存条目：文件级快照 + 解析结果（null = 残留文件，缓存「非会话」结论避免重读首行） */
+interface FileCacheEntry {
+  mtimeMs: number;
+  size: number;
+  data: SessionFileData | null;
+}
+
+/** 目录缓存：byFile 为文件级快照（增量失效判定用）；data 为有序结果（无变化时同引用返回） */
+interface DirCache {
+  byFile: Map<string, FileCacheEntry>;
+  data: SessionFileData[];
+}
+
+const sessionFileCache = new Map<string, DirCache>();
 const sessionFileInflight = new Map<string, Promise<SessionFileData[]>>();
 
 export async function readSessionFilesCached(dir: string): Promise<SessionFileData[]> {
   const files = collectJsonlFiles(dir);
-  const sig = files
-    .map((f) => {
+  const prev = sessionFileCache.get(dir);
+  const byFile = new Map<string, FileCacheEntry>();
+  const changed: string[] = []; // 需要重读的文件（新增或 mtime/size 变化）
+  if (prev !== undefined) {
+    for (const f of files) {
       const st = statSync(f);
-      return `${f}:${st.mtimeMs}:${st.size}`;
-    })
-    .join("|");
-  const hit = sessionFileCache.get(dir);
-  if (hit !== undefined && hit.sig === sig) return hit.data;
-  // 并发去重：同一快照的读取共享一个 Promise（打开页面 3 并发请求只重读一次，避免峰值放大）
-  const key = dir + "|" + sig;
+      const old = prev.byFile.get(f);
+      if (old !== undefined && old.mtimeMs === st.mtimeMs && old.size === st.size) {
+        byFile.set(f, old); // 未变：复用解析结果
+      } else {
+        changed.push(f);
+      }
+    }
+    // 目录中已删除的文件不在 byFile（不重读、不进结果）
+  } else {
+    changed.push(...files); // 首次：全量
+  }
+
+  // 删除检测：prev 缓存中有而目录中已消失的文件 → 需重建结果（剔除）
+  const fileSet = new Set(files);
+  const deleted = prev !== undefined ? [...prev.byFile.keys()].filter((f) => !fileSet.has(f)) : [];
+
+  if (changed.length === 0 && deleted.length === 0) {
+    // 数据完全不变：同引用返回（缓存契约：15-server-cache 断言同一数组引用）
+    sessionFileCache.set(dir, { byFile, data: prev!.data });
+    return prev!.data;
+  }
+
+  // 并发去重：变化文件集合签名作为 key（同快照并发只重读一次，避免峰值放大）
+  const key = dir + "|" + changed.map((f) => `${f}:${statSync(f).mtimeMs}:${statSync(f).size}`).join(",");
   const pending = sessionFileInflight.get(key);
   if (pending !== undefined) return pending;
-  const p = readSessionFiles(dir)
-    .then((data) => {
-      sessionFileCache.set(dir, { sig, data });
-      return data;
-    })
-    .finally(() => sessionFileInflight.delete(key));
+  const p = (async () => {
+    // 按 files（collectJsonlFiles 排序）顺序重建：未变文件复用缓存，变化文件重读——
+    // 保证结果顺序稳定（否则变化文件被 set 追加到末尾，顺序漂移）
+    const next = new Map<string, FileCacheEntry>();
+    const changedSet = new Set(changed);
+    for (const f of files) {
+      if (changedSet.has(f)) {
+        const st = statSync(f);
+        next.set(f, { mtimeMs: st.mtimeMs, size: st.size, data: await fileLoader(f) });
+      } else {
+        next.set(f, byFile.get(f)!); // 未变：复用解析结果
+      }
+    }
+    const data = [...next.values()].filter((e) => e.data !== null).map((e) => e.data!);
+    sessionFileCache.set(dir, { byFile: next, data });
+    return data;
+  })().finally(() => sessionFileInflight.delete(key));
   sessionFileInflight.set(key, p);
   return p;
 }
+
 
 
 /** 从文件级原始数据派生总窗口（不重扫目录） */
@@ -208,11 +261,21 @@ export function filterFiles(
 ): SessionFileData[] {
   const { model, cwd, since, until } = filters;
   const normCwd = cwd !== undefined ? normalizeCwd(cwd) : undefined;
+  // 文件级 cwd 规范化缓存（避免逐文件 realpathSync；与 groupRowsFromFiles 的 normCwdCache 对齐）
+  const normCwdCache = new Map<string, string>();
+  const normOf = (f: SessionFileData): string => {
+    let n = normCwdCache.get(f.cwd);
+    if (n === undefined) {
+      n = normalizeCwd(f.cwd);
+      normCwdCache.set(f.cwd, n);
+    }
+    return n;
+  };
   // since 取当天开始（00:00）；until 取当天末尾（23:59:59.999）——日期参数含整天
   const sinceMs = since !== undefined ? parseTimestamp(since, false) : undefined;
   const untilMs = until !== undefined ? parseTimestamp(until, true) : undefined;
   return files
-    .filter((f) => normCwd === undefined || normalizeCwd(f.cwd) === normCwd)
+    .filter((f) => normCwd === undefined || normOf(f) === normCwd)
     .filter((f) => {
       if (sinceMs === undefined && untilMs === undefined) return true;
       const ts = parseUtcTimestamp(f.timestamp);
@@ -301,7 +364,7 @@ function pad(n: number, w: number): string {
 }
 
 /** 解析单个 JSONL 文件；残留文件返回 null */
-async function analyzeFile(file: string): Promise<SessionFileData | null> {
+export async function analyzeFile(file: string): Promise<SessionFileData | null> {
   const rl = createInterface({ input: createReadStream(file, "utf8"), crlfDelay: Infinity });
   let header: { id?: unknown; timestamp?: unknown; cwd?: unknown } | null = null;
   const items: SessionFileData["items"] = [];
