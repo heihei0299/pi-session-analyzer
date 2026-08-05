@@ -69,7 +69,9 @@ nav.tabs button.tab.active {
 }
 .toolbar button:hover { color: var(--text); }
 .toolbar button.active { color: var(--text); border-color: var(--accent); }
-.toolbar input[type="datetime-local"] {
+.toolbar input[type="datetime-local"],
+.toolbar input[type="date"],
+.toolbar input[type="time"] {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   color: var(--text);
@@ -234,9 +236,11 @@ tbody tr:hover { background: var(--bg-hover); }
     <button data-preset="custom">自定义</button>
   </div>
   <div id="custom-range" class="hidden">
-    <input type="datetime-local" id="since-input" title="起始时间（无时区，按 UTC 解释）">
+    <input type="date" id="since-date" title="起始日期（按 UTC 解释）">
+    <input type="time" id="since-time" step="60" title="起始时间（按 UTC 解释）">
     <span>—</span>
-    <input type="datetime-local" id="until-input" title="结束时间（无时区，按 UTC 解释）">
+    <input type="date" id="until-date" title="结束日期（按 UTC 解释）">
+    <input type="time" id="until-time" step="60" title="结束时间（按 UTC 解释）">
   </div>
   <span style="flex:1"></span>
   <select id="auto-refresh" title="自动刷新">
@@ -466,8 +470,7 @@ function applyPreset(preset) {
     $("#custom-range").classList.add("hidden");
   } else if (preset === "custom") {
     $("#custom-range").classList.remove("hidden");
-    state.since = $("#since-input").value || null;
-    state.until = $("#until-input").value || null;
+    applyCustomRange();
   } else {
     $("#custom-range").classList.add("hidden");
     const days = preset === "today" ? 0 : preset === "7d" ? 6 : 29;
@@ -477,6 +480,28 @@ function applyPreset(preset) {
     state.until = utcDateStr(now);
   }
   refreshAll();
+}
+
+// ---------- 自定义时间范围（date + time 组合，输入即生效） ----------
+/** 由 4 个输入框拼接 since/until：只有日期 → 纯日期（后端按 UTC 全天）；日期+时间 → YYYY-MM-DDTHH:MM（后端补 Z 按 UTC） */
+function customRangeValue() {
+  const sd = $("#since-date").value, st = $("#since-time").value;
+  const ud = $("#until-date").value, ut = $("#until-time").value;
+  return {
+    since: sd ? (st ? `${sd}T${st}` : sd) : null,
+    until: ud ? (ut ? `${ud}T${ut}` : ud) : null,
+  };
+}
+function applyCustomRange() {
+  const v = customRangeValue();
+  state.since = v.since;
+  state.until = v.until;
+  refreshAll();
+}
+function bindCustomRange() {
+  for (const id of ["since-date", "since-time", "until-date", "until-time"]) {
+    $("#" + id).addEventListener("input", applyCustomRange);
+  }
 }
 
 // ---------- 导出 ----------
@@ -758,8 +783,7 @@ function init() {
     refreshOverview();
   }));
   document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => applyPreset(b.dataset.preset)));
-  $("#since-input").addEventListener("change", () => { if (!$("#custom-range").classList.contains("hidden")) { state.since = $("#since-input").value || null; refreshAll(); } });
-  $("#until-input").addEventListener("change", () => { if (!$("#custom-range").classList.contains("hidden")) { state.until = $("#until-input").value || null; refreshAll(); } });
+  bindCustomRange();
   $("#export-json").addEventListener("click", () => exportData("json"));
   $("#export-csv").addEventListener("click", () => exportData("csv"));
   $("#refresh-btn").addEventListener("click", () => refreshAll());

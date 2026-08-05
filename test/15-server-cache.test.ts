@@ -73,3 +73,20 @@ test("缓存失效：修改文件内容后返回新数据", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("并发去重：同一快照的并发调用共享一次重读（打开页面 3 请求场景）", async () => {
+  const dir = makeDir();
+  writeSession(dir, "a.jsonl", 100);
+  try {
+    // 首次并发 3 个调用：应共享同一 in-flight Promise（只重读一次）
+    const [r1, r2, r3] = await Promise.all([readSessionFilesCached(dir), readSessionFilesCached(dir), readSessionFilesCached(dir)]);
+    assert.equal(r1, r2, "并发调用应共享同一读取结果（同一引用）");
+    assert.equal(r2, r3, "并发调用应共享同一读取结果（同一引用）");
+    assert.equal(r1.length, 1);
+    // 完成后缓存生效：后续调用命中缓存
+    const after = await readSessionFilesCached(dir);
+    assert.equal(after, r1, "完成后应命中缓存");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
