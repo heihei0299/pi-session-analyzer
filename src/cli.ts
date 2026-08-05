@@ -1,31 +1,74 @@
 /**
- * CLI 入口：token-analyzer --dir <path>
- * 默认数据目录 ~/.pi/agent/sessions/；--dir 可注入 fixture 目录（测试 seam）。
+ * CLI 入口：token-analyzer [totals|sessions|requests] --dir <path> [--format <table|json|csv>]
+ * 默认窗口 totals（issue 01 行为），默认格式 table，默认数据目录 ~/.pi/agent/sessions/。
  */
 import { homedir } from "node:os";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { analyzeSessionDir } from "./analyze.ts";
-import { renderTotalsTable } from "./render.ts";
+import {
+  readSessionFiles,
+  totalsFromFiles,
+  sessionRowsFromFiles,
+  requestRowsFromFiles,
+} from "./analyze.ts";
+import { renderTotalsTable, renderSessionTable, renderRequestTable } from "./render.ts";
+import { serializeJson, serializeCsv } from "./serialize.ts";
 
 const DEFAULT_DIR = join(homedir(), ".pi", "agent", "sessions");
-export function parseArgs(argv: string[]): { dir: string } {
-  let dir = DEFAULT_DIR;
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--dir" && argv[i + 1]) {
-      dir = argv[i + 1];
-      i++;
-    }
-  }
-  return { dir };
+
+export type WindowName = "totals" | "sessions" | "requests";
+export type FormatName = "table" | "json" | "csv";
+
+export interface CliArgs {
+  window: WindowName;
+  dir: string;
+  format: FormatName;
 }
 
-/** 运行分析，返回表格文本（供 CLI 打印与测试断言） */
+export function parseArgs(argv: string[]): CliArgs {
+  let window: WindowName = "totals";
+  let dir = DEFAULT_DIR;
+  let format: FormatName = "table";
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--dir" && argv[i + 1]) {
+      dir = argv[i + 1];
+      i++;
+    } else if (a === "--format" && argv[i + 1]) {
+      const f = argv[i + 1];
+      if (f === "json" || f === "csv" || f === "table") {
+        format = f;
+      } else {
+        throw new Error(`未知格式: ${f}（支持 table/json/csv）`);
+      }
+      i++;
+    } else if (a === "totals" || a === "sessions" || a === "requests") {
+      window = a;
+    }
+  }
+  return { window, dir, format };
+}
+
+/** 运行分析，返回输出文本（供 CLI 打印与测试断言）；目录只扫描一次，派生三窗口 */
 export async function runCli(argv: string[]): Promise<string> {
-  const { dir } = parseArgs(argv);
-  const totals = await analyzeSessionDir(dir);
-  return renderTotalsTable(totals);
+  const { window, dir, format } = parseArgs(argv);
+  const files = await readSessionFiles(dir);
+  const totals = totalsFromFiles(files);
+  if (format === "json") {
+    return serializeJson(window, totals, sessionRowsFromFiles(files), requestRowsFromFiles(files));
+  }
+  if (format === "csv") {
+    return serializeCsv(window, totals, sessionRowsFromFiles(files), requestRowsFromFiles(files));
+  }
+  switch (window) {
+    case "totals":
+      return renderTotalsTable(totals);
+    case "sessions":
+      return renderSessionTable(sessionRowsFromFiles(files));
+    case "requests":
+      return renderRequestTable(requestRowsFromFiles(files));
+  }
 }
 
 // 直接执行时打印（兼容 npm bin symlink：解析 realpath 后比较）

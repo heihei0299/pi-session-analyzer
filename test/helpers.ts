@@ -74,12 +74,20 @@ export function zeroUsage(): Record<string, unknown> {
 
 /** 解析 CLI 表格输出，返回 { 表头: 值 } 映射（按双空格列分隔） */
 export function parseTable(out: string): Record<string, string> {
+  const rows = parseTableRows(out);
+  return rows[0];
+}
+
+/** 解析 CLI 表格输出，返回每数据行一个 { 表头: 值 } 映射 */
+export function parseTableRows(out: string): Record<string, string>[] {
   const lines = out.trim().split("\n");
   const headers = lines[0].trim().split(/\s{2,}/);
-  const values = lines[1].trim().split(/\s{2,}/);
-  const row: Record<string, string> = {};
-  headers.forEach((h, i) => {
-    row[h] = values[i];
+  return lines.slice(1).map((line) => {
+    const values = line.trim().split(/\s{2,}/);
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => {
+      row[h] = values[i];
+    });
+    return row;
   });
-  return row;
 }

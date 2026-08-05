@@ -31,6 +31,25 @@ export interface Totals {
   cacheRate: number;
 }
 
+/** 会话级窗口一行：每合法会话一行，指标=会话内 assistant usage 之和 */
+export interface SessionRow extends Totals {
+  sessionId: string;
+  /** 会话 header timestamp */
+  timestamp: string;
+  /** 会话 header cwd（权威归属键） */
+  cwd: string;
+  /** 会话内唯一模型名；混合模型会话为 "mixed" */
+  model: string;
+}
+
+/** 单请求级窗口一行：逐计入口径的 assistant 消息 */
+export interface RequestRow extends Totals {
+  sessionId: string;
+  /** 消息 entry timestamp */
+  timestamp: string;
+  /** 该消息的 model（请求级权威归属） */
+  model: string;
+}
 export function emptyTotals(): Totals {
   return {
     requests: 0,
