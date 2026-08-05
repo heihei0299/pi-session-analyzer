@@ -228,7 +228,7 @@ tbody tr:hover { background: var(--bg-hover); }
   <button id="refresh-btn">刷新</button>
 </div>
 
-<div id="status-line">加载中…</div>
+<div id="status-line">加载中… <span id="updated-at" class="updated hidden"></span></div>
 <div id="error-banner"></div>
 
 <main>
@@ -580,9 +580,46 @@ function bindDetailInteractions() {
   }
 }
 
+// ---------- 自动刷新（全量重算轮询；静默替换；变化时状态行显示「已更新 HH:MM:SS」） ----------
+function pad2(n) { return String(n).padStart(2, "0"); }
+let lastSnapshot = "";
+function setAutoRefresh(ms) {
+  if (state.refreshTimer) { clearInterval(state.refreshTimer); state.refreshTimer = null; }
+  if (ms > 0) state.refreshTimer = setInterval(poll, ms);
+}
+async function snapshot() {
+  const params = filterParams();
+  if (state.tab === "overview") {
+    const t = await api("totals", params);
+    const gp = filterParams();
+    gp.set("by", state.groupBy);
+    const g = await api("groups", gp);
+    return JSON.stringify([t, g]);
+  }
+  if (state.tab === "sessions") return JSON.stringify((await api("sessions", params)).rows);
+  if (state.tab === "requests") return JSON.stringify((await api("requests", params)).rows);
+  // 会话管理 tab：忽略筛选，展示全部会话
+  return JSON.stringify((await api("sessions", new URLSearchParams())).rows);
+}
+async function poll() {
+  try {
+    const snap = await snapshot();
+    if (snap !== lastSnapshot) {
+      lastSnapshot = snap;
+      await refreshAll();
+      const now = new Date();
+      $("#updated-at").textContent = "已更新 " + pad2(now.getHours()) + ":" + pad2(now.getMinutes()) + ":" + pad2(now.getSeconds());
+      $("#updated-at").classList.remove("hidden");
+    }
+  } catch {
+    // 轮询失败静默（错误横幅由 refreshAll 内部处理）
+  }
+}
+
 // ---------- tab 切换：切换即拉取对应端点（无整页刷新） ----------
 function switchTab(tab) {
   state.tab = tab;
+  lastSnapshot = ""; // 切换后下一次轮询重新对比
   document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + tab));
   refreshAll();
@@ -611,6 +648,10 @@ function init() {
   $("#export-json").addEventListener("click", () => exportData("json"));
   $("#export-csv").addEventListener("click", () => exportData("csv"));
   $("#refresh-btn").addEventListener("click", () => refreshAll());
+  $("#auto-refresh").addEventListener("change", (e) => {
+    const v = e.target.value;
+    setAutoRefresh(v === "off" ? 0 : Number(v));
+  });
   bindDetailInteractions();
   refreshAll();
 }
