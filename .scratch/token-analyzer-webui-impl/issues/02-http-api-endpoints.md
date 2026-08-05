@@ -15,7 +15,7 @@
 - [x] 数据目录无合法会话 → 500（detail 附原因）；未知 API 路径 → 404 统一错误体
 
 ## 实施总结
-- 提交：`<hash>` — feat: HTTP API 端点集（totals/sessions/requests/groups/period/meta + 筛选与统一错误体）
+- 提交：`365c4b0` — feat: HTTP API 端点集（totals/sessions/requests/groups/period/meta + 筛选与统一错误体）
 - 实现的 seams：S6 /api/totals 与 CLI json 一致 / S7 sessions+requests 行结构一致 / S8 groups?by=model|cwd|model,cwd 一致 / S9 period?period=day|week|month 一致 / S10 meta（dir/sessionCount/dataRange min/max）/ S11 model/cwd/since/until 筛选一致 + 非法 since/until、未知 by/period → 400 / S12 空目录 500+detail、未知 API 404、非 GET 方法 404
 - 验收标准：7 条全部 `- [x]`（见上）
 - 测试结果：7/7 全绿（test/07-api.test.ts）；完整套件 61/61
