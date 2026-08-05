@@ -167,12 +167,14 @@ function validateServeMode(argv: string[]): void {
 /** serve 子命令：启动 Web 服务器、打印访问 URL、Ctrl+C 优雅退出（长驻） */
 async function runServeCli(args: { dir: string; host: string; port: number }): Promise<string> {
   const server = await startWebServer({ dir: args.dir, host: args.host, port: args.port });
-  process.stdout.write(`Token Analyzer WebUI: ${server.url}\n`);
-  await new Promise<void>((resolve) => {
+  // SIGINT handler 先于 URL 打印注册：URL 打印即代表优雅退出已就绪（消除 kill 竞态）
+  const exited = new Promise<void>((resolve) => {
     process.once("SIGINT", () => {
       server.close().then(resolve);
     });
   });
+  process.stdout.write(`Token Analyzer WebUI: ${server.url}\n`);
+  await exited;
   return "";
 }
 /** 运行分析，返回输出文本（供 CLI 打印与测试断言）；目录只扫描一次，派生三窗口 */

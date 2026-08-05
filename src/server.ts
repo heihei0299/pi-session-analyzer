@@ -52,6 +52,7 @@ export function startWebServer(options: WebServerOptions): Promise<WebServer> {
         port: actualPort,
         close: () =>
           new Promise<void>((done, fail) => {
+            server.closeIdleConnections?.();
             server.close((err) => (err ? fail(err) : done()));
           }),
       });
