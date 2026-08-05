@@ -32,7 +32,11 @@ export function startWebServer(options: WebServerOptions): Promise<WebServer> {
   const port = options.port ?? 50080;
   return new Promise((resolve, reject) => {
     const server: Server = createServer((req, res) => {
-      void handleRequest(req.method ?? "GET", req.url ?? "/", dir, res);
+      // 兜底：请求处理器意外 rejection 只记录，不使进程崩溃
+      handleRequest(req.method ?? "GET", req.url ?? "/", dir, req, res).catch((err) => {
+        console.error("request handler error:", err);
+        if (!res.headersSent) send(res, 500, "application/json; charset=utf-8", JSON.stringify({ error: "Internal Server Error", detail: "服务器内部错误" }));
+      });
     });
     server.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EADDRINUSE") {
@@ -55,7 +59,7 @@ export function startWebServer(options: WebServerOptions): Promise<WebServer> {
   });
 }
 
-async function handleRequest(method: string, pathname: string, dir: string, res: ServerResponse): Promise<void> {
+async function handleRequest(method: string, pathname: string, dir: string, req: import("node:http").IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(pathname, "http://localhost");
   const p = url.pathname;
 
@@ -64,11 +68,24 @@ async function handleRequest(method: string, pathname: string, dir: string, res:
     return;
   }
   if (p.startsWith("/api/")) {
-    const { status, body } = await handleApi(method, p, url.searchParams, dir);
+    const rawBody = await readBody(req);
+    const { status, body } = await handleApi(method, p, url.searchParams, dir, rawBody);
     send(res, status, "application/json; charset=utf-8", JSON.stringify(body));
     return;
   }
   send(res, 404, "application/json; charset=utf-8", JSON.stringify({ error: "Not Found", detail: `路径不存在: ${p}` }));
+}
+
+/** 读取请求体（UTF-8 文本；读取失败按空串处理） */
+function readBody(req: import("node:http").IncomingMessage): Promise<string> {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (chunk: Buffer) => {
+      data += chunk.toString("utf8");
+    });
+    req.on("end", () => resolve(data));
+    req.on("error", () => resolve(""));
+  });
 }
 
 function send(

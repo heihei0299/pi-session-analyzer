@@ -4,7 +4,7 @@
  * 三个窗口（总 / 会话级 / 单请求级）共用同一份文件级原始数据。
  */
 import { readdirSync, createReadStream, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import { createInterface } from "node:readline";
 import {
   addUsage,
@@ -39,6 +39,8 @@ export interface SessionFileData {
   sessionId: string;
   timestamp: string;
   cwd: string;
+  /** 来源文件名（webui /api/sessions 扩展字段 fileName 用） */
+  fileName?: string;
   items: { timestamp: string; model: string; usage: Usage }[];
 }
 
@@ -308,6 +310,7 @@ async function analyzeFile(file: string): Promise<SessionFileData | null> {
     sessionId: typeof header.id === "string" ? header.id : "",
     timestamp: typeof header.timestamp === "string" ? header.timestamp : "",
     cwd: typeof header.cwd === "string" ? header.cwd : "",
+    fileName: basename(file),
     items,
   };
 }

@@ -519,9 +519,11 @@ function sortRows(st) {
   if (!st.sortKey) return st.rows;
   const k = st.sortKey;
   const dir = st.sortDir === "asc" ? 1 : -1;
+  // 请求明细「缓存」列 = cacheRead + cacheWrite（API 行无 cache 字段）
+  const valueOf = (r) => (k === "cache" ? (r.cacheRead ?? 0) + (r.cacheWrite ?? 0) : r[k]);
   return [...st.rows].sort((a, b) => {
-    const va = a[k];
-    const vb = b[k];
+    const va = valueOf(a);
+    const vb = valueOf(b);
     if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
     return String(va).localeCompare(String(vb)) * dir;
   });
@@ -534,8 +536,10 @@ function renderDetailTable(kind) {
   const start = (st.page - 1) * st.size;
   const pageRows = sorted.slice(start, start + st.size);
   const cols = kind === "sessions" ? SESSION_COLS : REQUEST_COLS;
+  // 请求明细「缓存」列 = cacheRead + cacheWrite（API 行字段为拆分的 cacheRead/cacheWrite）
+  const valueOf = (r, c) => (c === "cache" ? (r.cacheRead ?? 0) + (r.cacheWrite ?? 0) : r[c]);
   bodyEl.innerHTML = pageRows
-    .map((r) => "<tr>" + cols.map((c) => `<td>${(METRIC_FMTS[c] ? METRIC_FMTS[c](r[c]) : r[c]) ?? ""}</td>`).join("") + "</tr>")
+    .map((r) => "<tr>" + cols.map((c) => `<td>${(METRIC_FMTS[c] ? METRIC_FMTS[c](valueOf(r, c)) : valueOf(r, c)) ?? ""}</td>`).join("") + "</tr>")
     .join("");
   headEl.querySelectorAll("th").forEach((th) => {
     const arrow = th.querySelector(".arrow");
@@ -625,8 +629,78 @@ function switchTab(tab) {
   refreshAll();
 }
 
-// ---------- 统一刷新入口（会话管理函数由 ticket 06 实现） ----------
-function refreshSessionGroups() { /* ticket 06 */ }
+// ---------- 会话管理：按 cwd 分组展示全部会话（忽略筛选）+ 行内重命名 ----------
+function sessionRowHtml(r) {
+  const errId = "err-" + r.sessionId;
+  return `<div class="session-row" data-sid="${escapeHtml(r.sessionId)}">
+    <span class="name">${escapeHtml(r.displayName)}</span>
+    <span class="ts">${escapeHtml(r.timestamp)}</span>
+    <span class="model">${escapeHtml(r.model)}</span>
+    <span class="req">${r.requests}</span>
+    <span class="tok">${fmtCompact(r.totalTokens)}</span>
+    <span class="session-row-actions">
+      <input data-rename-input placeholder="新显示名" aria-label="新显示名">
+      <button data-rename-btn>重命名</button>
+      <span class="err" id="${errId}"></span>
+    </span>
+  </div>`;
+}
+async function refreshSessionGroups() {
+  try {
+    clearError();
+    const data = await api("sessions", new URLSearchParams()); // 展示全部会话
+    const groups = new Map();
+    for (const r of data.rows) {
+      const key = r.cwdNorm || r.cwd || "(未知)";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    }
+    const wrap = $("#session-groups");
+    wrap.innerHTML = "";
+    for (const [cwd, rows] of groups) {
+      const g = document.createElement("div");
+      g.className = "session-group";
+      const h3 = document.createElement("h3");
+      h3.innerHTML = `项目 ${escapeHtml(cwd)} <span class="count">(${rows.length})</span>`;
+      const body = document.createElement("div");
+      body.className = "group-body";
+      body.innerHTML = rows.map(sessionRowHtml).join("");
+      h3.addEventListener("click", () => g.classList.toggle("collapsed"));
+      g.appendChild(h3);
+      g.appendChild(body);
+      wrap.appendChild(g);
+    }
+  } catch (e) {
+    showError("会话管理加载失败: " + e.message);
+  }
+}
+function bindSessionManage() {
+  $("#session-groups").addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-rename-btn]");
+    if (!btn) return;
+    const row = btn.closest(".session-row");
+    const sid = row.dataset.sid;
+    const input = row.querySelector("[data-rename-input]");
+    const errEl = row.querySelector(".err");
+    const name = input.value.trim();
+    if (!name) { errEl.textContent = "显示名不能为空"; return; }
+    try {
+      const res = await fetch("/api/sessions/rename", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: sid, name }),
+      });
+      const body = await res.json();
+      if (!res.ok) { errEl.textContent = body.detail || ("HTTP " + res.status); return; }
+      errEl.textContent = "";
+      await refreshSessionGroups();
+    } catch {
+      errEl.textContent = "重命名失败";
+    }
+  });
+}
+
+// ---------- 统一刷新入口 ----------
 function refreshAll() {
   if (state.tab === "overview") refreshOverview();
   if (state.tab === "sessions") refreshSessionTable();
@@ -653,6 +727,7 @@ function init() {
     setAutoRefresh(v === "off" ? 0 : Number(v));
   });
   bindDetailInteractions();
+  bindSessionManage();
   refreshAll();
 }
 init();

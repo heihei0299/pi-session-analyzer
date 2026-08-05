@@ -58,7 +58,13 @@ test("S7 /api/sessions 与 /api/requests 行结构与 CLI json 对应 rows 一�
     assert.equal(resS.status, 200);
     const apiS = (await resS.json()) as { window: string; rows: Record<string, unknown>[] };
     assert.equal(apiS.window, "sessions");
-    assert.deepEqual(apiS.rows, cliSessions.rows);
+    // 与 CLI rows 逐字段一致（API 行可含 fileName/displayName/cwdNorm 扩展字段，见 ticket 06）
+    assert.equal(apiS.rows.length, cliSessions.rows.length);
+    for (let i = 0; i < apiS.rows.length; i++) {
+      for (const k of Object.keys(cliSessions.rows[i])) {
+        assert.deepEqual(apiS.rows[i][k], cliSessions.rows[i][k], `sessions row[${i}] 字段 ${k} 应与 CLI 一致`);
+      }
+    }
     // 每行字段：sessionId/timestamp/cwd/model + 9 指标
     for (const row of apiS.rows) {
       for (const key of ["sessionId", "timestamp", "cwd", "model", "requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"]) {
@@ -224,11 +230,11 @@ test("S12 空目录 500 + detail；未知 API 路径 404；非 GET 方法 404", 
     const body404 = (await res404.json()) as { error: string; detail: string };
     assert.ok(body404.error.length > 0 && body404.detail.length > 0);
 
-    // 非 GET 方法 → 404（POST /api/totals、POST /api/sessions/rename）
+    // 非 GET 方法 → 404（GET 端点方法不匹配；rename 为合法 POST 端点，ticket 06 起不再 404）
     const resPost = await fetch(new URL("/api/totals", server.url), { method: "POST" });
     assert.equal(resPost.status, 404);
-    const resPost2 = await fetch(new URL("/api/sessions/rename", server.url), { method: "POST" });
-    assert.equal(resPost2.status, 404);
+    const resPut = await fetch(new URL("/api/sessions", server.url), { method: "PUT" });
+    assert.equal(resPut.status, 404);
   } finally {
     await server.close();
     removeFixture(dir);
