@@ -19,6 +19,7 @@ import { IncrementalReader, applyIncrements } from "./watch.ts";
 import { emptyTotals, type GroupBy, type Period, type Totals } from "./aggregate.ts";
 import { renderTotalsTable, renderSessionTable, renderRequestTable, renderGroupTable, renderPeriodTable } from "./render.ts";
 import { serializeJson, serializeCsv, serializeGroupJson, serializeGroupCsv, serializePeriodJson, serializePeriodCsv } from "./serialize.ts";
+import { startWebServer } from "./server.ts";
 
 const DEFAULT_DIR = join(homedir(), ".pi", "agent", "sessions");
 
@@ -45,6 +46,12 @@ export interface CliArgs {
   watch: boolean;
   /** --interval <ms>：watch 轮询间隔（默认 1000） */
   interval: number;
+  /** serve：Web 服务器模式（serve 子命令） */
+  serve: boolean;
+  /** --port <n>：serve 监听端口（默认 50080） */
+  port: number;
+  /** --host <h>：serve 监听地址（默认 127.0.0.1） */
+  host: string;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -59,10 +66,23 @@ export function parseArgs(argv: string[]): CliArgs {
   let period: Period | undefined;
   let watch = false;
   let interval = 1000;
+  let serve = false;
+  let port = 50080;
+  let host = "127.0.0.1";
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dir" && argv[i + 1]) {
       dir = argv[i + 1];
+      i++;
+    } else if (a === "--port" && argv[i + 1]) {
+      const n = Number(argv[i + 1]);
+      if (!Number.isInteger(n) || n < 0 || n > 65535) {
+        throw new Error(`无效端口: ${argv[i + 1]}（需为 0-65535 的整数）`);
+      }
+      port = n;
+      i++;
+    } else if (a === "--host" && argv[i + 1]) {
+      host = argv[i + 1];
       i++;
     } else if (a === "--format" && argv[i + 1]) {
       const f = argv[i + 1];
@@ -111,14 +131,56 @@ export function parseArgs(argv: string[]): CliArgs {
       i++;
     } else if (a === "totals" || a === "sessions" || a === "requests") {
       window = a;
+    } else if (a === "serve") {
+      serve = true;
     }
   }
-  return { window, dir, format, model, cwd, by, since, until, period, watch, interval };
+  if (serve) {
+    validateServeMode(argv);
+  }
+  return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host };
 }
 
+/** serve 模式参数校验：仅允许 --port/--host/--dir，其余一律拒绝（避免静默忽略） */
+function validateServeMode(argv: string[]): void {
+  const FORBIDDEN = [
+    "totals",
+    "sessions",
+    "requests",
+    "--format",
+    "--by",
+    "--period",
+    "--watch",
+    "--interval",
+    "--model",
+    "--cwd",
+    "--since",
+    "--until",
+  ];
+  const hit = argv.find((a) => FORBIDDEN.includes(a));
+  if (hit !== undefined) {
+    throw new Error(`serve 模式仅支持 --port/--host/--dir 参数（收到 ${hit}）`);
+  }
+}
+
+/** serve 子命令：启动 Web 服务器、打印访问 URL、Ctrl+C 优雅退出（长驻） */
+async function runServeCli(args: { dir: string; host: string; port: number }): Promise<string> {
+  const server = await startWebServer({ dir: args.dir, host: args.host, port: args.port });
+  process.stdout.write(`Token Analyzer WebUI: ${server.url}\n`);
+  await new Promise<void>((resolve) => {
+    process.once("SIGINT", () => {
+      server.close().then(resolve);
+    });
+  });
+  return "";
+}
 /** 运行分析，返回输出文本（供 CLI 打印与测试断言）；目录只扫描一次，派生三窗口 */
 export async function runCli(argv: string[]): Promise<string> {
-  const { window, dir, format, model, cwd, by, since, until, period, watch, interval } = parseArgs(argv);
+  const { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host } = parseArgs(argv);
+  if (serve) {
+    // Web 服务器模式：启动、打印访问 URL、Ctrl+C 优雅退出（长驻，正常退出时返回空串）
+    return runServeCli({ dir, host, port });
+  }
   validateArgs({ window, by, period });
   if (watch) {
     // 实时监控模式：长驻循环（测试通过 runWatch 单步驱动，此处仅打印初始状态并进入循环）
