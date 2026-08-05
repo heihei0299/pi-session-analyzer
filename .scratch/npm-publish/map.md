@@ -26,10 +26,11 @@ token-analyzer 成为**可发布的 npm CLI 包**：`tsc` 编译 dist 产物（J
 - [配置 GitHub Actions 发布凭据](issues/04-npm-token-provisioning.md) — 用户已配 `NPM_TOKEN`（npmjs Automation token → GitHub Actions secret）；凭据仅存于 repo secret，07 发布时实体验证
 - [构建与打包配置落地](issues/06-build-and-pack.md) — 可发布包已落地：cli.ts shebang + tsconfig.build（dist+d.ts）+ package.json（name/bin/files/engines>=18/MIT）+ LICENSE + webui.html 随包 + .gitignore dist/；验收全绿（91 测试、pack 20 文件 34.6kB、`i -g` 与 serve 冒烟通过）
 - [发布 workflow 规格](issues/05-publish-workflow-spec.md) — 已落地 `.github/workflows/publish.yml`：仅 tags v* 触发、Node 24、tag↔version 不一致 fail、NPM_TOKEN 认证（无 provenance——OIDC 需包已存在）、失败不重试、发布前 pack --dry-run
+- [首次真实发布验证](issues/07-release-verification.md) — **destination 达成（2026-08-06）**：`token-analyzer@2026.8.6` 已发布（run 4 成功，https://github.com/heihei0299/pi-session-analyzer/actions/runs/31050914740）；npmjs latest=2026.8.6，`i -g` 安装 + totals/serve 冒烟通过
 
 ## Not yet specified
 
-<!-- 尚未 sharp 到可 ticket 化的 fog；frontier 推进后逐步毕业 -->
+<!-- effort 已达成终点（2026-08-06 首发 2026.8.6 发布成功）；以下 fog 供后续版本迭代参考 -->
 
 - 版本迭代节奏（首发后的后续版本沿用同一 tag 机制；本 effort 只覆盖首发闭环）
 
