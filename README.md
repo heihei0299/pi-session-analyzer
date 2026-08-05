@@ -2,18 +2,23 @@
 
 分析 pi 会话数据（`~/.pi/agent/sessions/` 下的 JSONL 文件）token 消耗的 CLI 工具。读取全部合法会话，按统计口径 A 提取消耗数据，输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、自动刷新、导出 JSON/CSV 与会话重命名。
 
+已发布为 npm 包 **`token-analyzer`**（npmjs.org，日期式版本如 `2026.8.6`）。
+
 功能规格见 [`.scratch/token-analyzer/spec.md`](.scratch/token-analyzer/spec.md)（含实施状态）；实现拆分为 5 个 issue（[`.scratch/token-analyzer-impl/issues/`](.scratch/token-analyzer-impl/issues/)）。WebUI 功能规格见 [`.scratch/token-analyzer-webui/spec.md`](.scratch/token-analyzer-webui/spec.md)，实现拆分为 6 个 issue（[`.scratch/token-analyzer-webui-impl/issues/`](.scratch/token-analyzer-webui-impl/issues/)）。
 
-## 技术栈与运行
+## 安装
 
-- TypeScript + Node 24（原生 type-stripping 直接运行 `.ts`，零运行时依赖）
-- 测试：Node 内置 `node:test`（71 用例）
-- 无构建步骤：`node src/cli.ts` 直接运行
+```bash
+npm i -g token-analyzer    # 从 npm 安装（Node ≥ 18）
+```
+
+开发环境（本仓库）：TypeScript + Node 24，零运行时依赖。
 
 ```bash
 npm install      # 安装 typescript + @types/node（devDependencies）
-npm test         # 运行全部测试（71 用例）
+npm test         # 运行全部测试（95 用例；固定 TZ=Asia/Shanghai 保证时区确定性）
 npm run typecheck  # tsc --noEmit
+npm run build    # tsc 编译到 dist/ + 复制 webui.html（发布产物）
 ```
 
 ## 用法
@@ -21,6 +26,8 @@ npm run typecheck  # tsc --noEmit
 ```
 token-analyzer [totals|sessions|requests] --dir <path> [选项]
 ```
+
+开发时可用 `node src/cli.ts` 替代 `token-analyzer`（Node 24 type-stripping 直接运行）。
 
 - **窗口**（位置参数，默认 `totals`）：`totals` 总消耗量 / `sessions` 会话级（每会话一行）/ `requests` 单请求级（逐 assistant 消息）
 - **数据目录**：`--dir <path>`（默认 `~/.pi/agent/sessions/`）
@@ -30,37 +37,50 @@ token-analyzer [totals|sessions|requests] --dir <path> [选项]
 - **时间汇总**（仅 totals 窗口）：`--period day|week|month` 按周期汇总
 - **实时监控**：`--watch [--interval <ms>]` 长驻跟随（默认 1s 轮询）
 - **Web 面板**：`serve [--port <n>] [--host <h>] [--dir <path>]` 启动零依赖 HTTP 服务（默认 `127.0.0.1:50080`，仅本机；serve 模式仅支持这三个参数）
+
 ### 示例
 
 ```bash
 # 总消耗量（终端表格）
-node src/cli.ts
+token-analyzer
 
 # 按模型分组
-node src/cli.ts totals --by model
+token-analyzer totals --by model
 
 # 按 cwd 分组（交叉）
-node src/cli.ts totals --by model,cwd --cwd /home/shial/Project/pi-session-anylize
+token-analyzer totals --by model,cwd --cwd /home/shial/Project/pi-session-anylize
 
 # 会话级窗口 + 模型过滤
-node src/cli.ts sessions --model deepseek-v4-flash
+token-analyzer sessions --model deepseek-v4-flash
 
 # 按月汇总 + 时间范围
-node src/cli.ts totals --period month --since 2026-07-01 --until 2026-08-31
+token-analyzer totals --period month --since 2026-07-01 --until 2026-08-31
 
 # JSON 输出（供脚本消费）
-node src/cli.ts totals --by model --format json
+token-analyzer totals --by model --format json
 
 # 实时监控
-node src/cli.ts totals --watch --interval 1000
+token-analyzer totals --watch --interval 1000
 
 # 启动 Web 面板（浏览器访问 http://127.0.0.1:50080/）
-node src/cli.ts serve
+token-analyzer serve
 ```
+
+## 发布
+
+push `v<版本>` tag 由 GitHub Actions（[`.github/workflows/publish.yml`](.github/workflows/publish.yml)）自动完成 typecheck + test + build + `npm publish`：
+
+```bash
+npm version 2026.8.7 && git push && git push --tags
+```
+
+- **版本**：日期式 semver（`YYYY.M.D`）；同日再次发布用 prerelease 后缀（`2026.8.6-1`）
+- **校验**：tag 与 `package.json.version` 不一致时 workflow 失败（防手滑）
+- **凭据**：`NPM_TOKEN`（npmjs Automation token）存于 GitHub Actions secret
 
 ## Web 面板（serve）
 
-`node src/cli.ts serve` 启动本地 Web 服务（零依赖，Node 原生 `http` + 单 HTML 内联前端），浏览器访问 `http://127.0.0.1:50080/`：
+`token-analyzer serve` 启动本地 Web 服务（零依赖，Node 原生 `http` + 单 HTML 内联前端），浏览器访问 `http://127.0.0.1:50080/`：
 
 - **四个 tab**：总览（8 张汇总卡片 + 按模型/cwd 分组表）/ 会话明细 / 请求明细 / 会话管理（按项目 cwd 分组 + 重命名会话）
 - **时间范围**：今天 / 7天 / 30天 / 全部 / 自定义（date 日期 + 时分下拉，按本地时间解释），作用于总览与明细与导出
@@ -95,4 +115,6 @@ src/
   api.ts        HTTP API 层（端点处理、筛选、统一错误体、会话重命名）
   webui.html    单 HTML 内联前端（深色主题、4 tab、fetch API、自动刷新、导出）
 test/           node:test 测试（fixture JSONL → CLI 输出断言；serve → HTTP 端点断言）
+dist/           构建产物（npm 发布内容；不入库）
+.github/workflows/publish.yml  tag 触发自动发布
 ```
