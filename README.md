@@ -66,7 +66,7 @@ node src/cli.ts serve
 - **时间范围**：今天 / 7天 / 30天 / 全部 / 自定义（datetime-local，按 UTC 解释），作用于总览与明细与导出
 - **自动刷新**：Off / 5s / 30s / 5min（后端每请求全量重算），数据变化时状态行显示「已更新 HH:MM:SS」
 - **导出**：JSON（`{ totals, sessions, requests }`）与 CSV（`# totals` / `# sessions` / `# requests` 三段式）下载当前筛选范围
-- **会话管理**：按规范化 cwd 分组展示全部会话（组可折叠），行内重命名——改文件名前缀保留尾 UUID（`<显示名>_<UUID>.jsonl`），仅非活跃会话（mtime > 5min）可改，非法名 400 / 不存在 404 / 活跃与重名 409
+- **会话管理**：按规范化 cwd 分组展示全部会话（组可折叠），点击名称行内编辑重命名——改文件名前缀保留尾 UUID（`<显示名>_<UUID>.jsonl`），仅非活跃会话（mtime > 5min）可改，非法名 400 / 不存在 404 / 活跃与重名 409
 
 HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` / `sessions` / `requests` / `groups?by=` / `period?period=` / `meta`（筛选参数 `model`/`cwd`/`since`/`until` 映射 CLI 语义）+ `POST /api/sessions/rename`；错误统一 `{ error, detail }`（400/404/409/500）。
 

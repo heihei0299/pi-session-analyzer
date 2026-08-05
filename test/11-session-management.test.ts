@@ -177,7 +177,7 @@ test("S21 活跃会话 409 + 目标重名 409", async () => {
   }
 });
 
-test("S22 会话管理 UI 骨架：按 cwd 分组容器 / 折叠控件 / 行内重命名按钮", async () => {
+test("S22 会话管理 UI 骨架：按 cwd 分组容器 / 折叠控件 / 点击名称行内编辑", async () => {
   const dir = makeInactiveSessionDir();
   const server = await startWebServer({ dir, host: "127.0.0.1", port: 0 });
   try {
@@ -187,8 +187,12 @@ test("S22 会话管理 UI 骨架：按 cwd 分组容器 / 折叠控件 / 行内�
     assert.match(body, /id="session-groups"/);
     assert.match(body, /session-group/);
     assert.match(body, /collapsed/);
-    assert.match(body, /data-rename-btn/);
-    assert.match(body, /重命名/);
+    // 点击名称进入行内编辑（无独立重命名按钮/输入框）
+    assert.match(body, /session-row \.name/);
+    assert.match(body, /startSessionRename\(nameEl\)/);
+    assert.match(body, /rename-input/);
+    assert.doesNotMatch(body, /data-rename-btn/, "不应有独立重命名按钮");
+    assert.doesNotMatch(body, /data-rename-input/, "不应有独立新显示名输入框");
     assert.match(body, /fetch\("\/api\/sessions\/rename"/);
   } finally {
     await server.close();

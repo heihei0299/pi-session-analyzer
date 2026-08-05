@@ -190,29 +190,24 @@ tbody tr:hover { background: var(--bg-hover); }
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 4px;
 }
-.session-row .ts { color: var(--text-dim); font-size: 12px; }
-.session-row .model { color: var(--text-dim); font-size: 12px; }
-.session-row-actions { display: flex; gap: 6px; align-items: center; }
-.session-row-actions input {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+.session-row .name:hover { background: var(--bg-hover); color: var(--accent); }
+.session-row .rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--accent);
   color: var(--text);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 2px 6px;
   font-size: 13px;
 }
-.session-row-actions button {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  border-radius: 6px;
-  padding: 2px 8px;
-  cursor: pointer;
-  font-size: 12px;
-}
-.session-row-actions button:hover { color: var(--text); }
-.session-row-actions .err { color: var(--danger); font-size: 12px; }
+.session-row .ts { color: var(--text-dim); font-size: 12px; }
+.session-row .model { color: var(--text-dim); font-size: 12px; }
+.session-row .err { color: var(--danger); font-size: 12px; margin-left: auto; }
 .hidden { display: none !important; }
 </style>
 </head>
@@ -699,16 +694,12 @@ function switchTab(tab) {
 function sessionRowHtml(r) {
   const errId = "err-" + r.sessionId;
   return `<div class="session-row" data-sid="${escapeHtml(r.sessionId)}">
-    <span class="name" title="${escapeHtml(r.displayName)}">${escapeHtml(r.displayName)}</span>
+    <span class="name" title="点击重命名：${escapeHtml(r.displayName)}">${escapeHtml(r.displayName)}</span>
     <span class="ts">${escapeHtml(r.timestamp)}</span>
     <span class="model">${escapeHtml(r.model)}</span>
     <span class="req">${r.requests}</span>
     <span class="tok">${fmtCompact(r.totalTokens)}</span>
-    <span class="session-row-actions">
-      <input data-rename-input placeholder="新显示名" aria-label="新显示名">
-      <button data-rename-btn>重命名</button>
-      <span class="err" id="${errId}"></span>
-    </span>
+    <span class="err" id="${errId}"></span>
   </div>`;
 }
 async function refreshSessionGroups() {
@@ -741,29 +732,79 @@ async function refreshSessionGroups() {
   }
 }
 function bindSessionManage() {
-  $("#session-groups").addEventListener("click", async (e) => {
-    const btn = e.target.closest("[data-rename-btn]");
-    if (!btn) return;
-    const row = btn.closest(".session-row");
-    const sid = row.dataset.sid;
-    const input = row.querySelector("[data-rename-input]");
-    const errEl = row.querySelector(".err");
-    const name = input.value.trim();
-    if (!name) { errEl.textContent = "显示名不能为空"; return; }
-    try {
-      const res = await fetch("/api/sessions/rename", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: sid, name }),
-      });
-      const body = await res.json();
-      if (!res.ok) { errEl.textContent = body.detail || ("HTTP " + res.status); return; }
-      errEl.textContent = "";
-      await refreshSessionGroups();
-    } catch {
-      errEl.textContent = "重命名失败";
-    }
+  // 点击会话名称 → 行内编辑（同一时间只编辑一行）
+  $("#session-groups").addEventListener("click", (e) => {
+    const nameEl = e.target.closest(".session-row .name");
+    if (!nameEl || document.querySelector(".session-row.editing")) return;
+    startSessionRename(nameEl);
   });
+}
+
+/** 行内编辑：名称替换为输入框；Enter/失焦保存，Esc 取消 */
+function startSessionRename(nameEl) {
+  const row = nameEl.closest(".session-row");
+  const errEl = row.querySelector(".err");
+  errEl.textContent = "";
+  row.classList.add("editing");
+  const prevText = nameEl.textContent;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "rename-input";
+  input.value = prevText;
+  input.maxLength = 100;
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let saveOnBlur = false;
+  let done = false;
+  const exitEdit = (save) => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    if (!save || !name) {
+      if (name === "") errEl.textContent = "显示名不能为空";
+      restoreSessionName(input, row, prevText);
+      return;
+    }
+    saveSessionRename(row, input, errEl, name);
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); saveOnBlur = true; input.blur(); }
+    else if (e.key === "Escape") { e.preventDefault(); saveOnBlur = false; input.blur(); }
+  });
+  input.addEventListener("blur", () => exitEdit(saveOnBlur));
+}
+
+/** 恢复名称 span（取消编辑或保存失败后） */
+function restoreSessionName(input, row, text) {
+  const span = document.createElement("span");
+  span.className = "name";
+  span.title = "点击重命名：" + text;
+  span.textContent = text;
+  input.replaceWith(span);
+  row.classList.remove("editing");
+}
+
+/** 保存重命名：POST /api/sessions/rename，成功刷新分组 */
+async function saveSessionRename(row, input, errEl, name) {
+  const sid = row.dataset.sid;
+  try {
+    const res = await fetch("/api/sessions/rename", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: sid, name }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      errEl.textContent = body.detail || ("HTTP " + res.status);
+      restoreSessionName(input, row, name);
+      return;
+    }
+    await refreshSessionGroups();
+  } catch {
+    errEl.textContent = "重命名失败";
+    restoreSessionName(input, row, name);
+  }
 }
 
 // ---------- 统一刷新入口 ----------
