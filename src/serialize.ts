@@ -2,8 +2,9 @@
  * 结构化输出序列化：JSON / CSV。
  * 字段与终端表格列一一对应（驼峰命名）；值为原始数值（cacheRate 为 0-1 小数）。
  */
-import { emptyTotals, type Totals, type SessionRow, type RequestRow } from "./aggregate.ts";
+import { emptyTotals, type Totals, type SessionRow, type RequestRow, type GroupRow, type GroupBy } from "./aggregate.ts";
 import type { WindowName } from "./cli.ts";
+
 
 /** 序列化为 JSON 文本（totals 为单对象；sessions/requests 为 { window, rows }） */
 export function serializeJson(
@@ -92,4 +93,31 @@ export function requestToObject(r: RequestRow): Record<string, unknown> {
     model: r.model,
     ...totalsToObject(r),
   };
+}
+
+export function groupToObject(r: GroupRow): Record<string, unknown> {
+  const obj: Record<string, unknown> = {};
+  if (r.model !== undefined) obj.model = r.model;
+  if (r.cwd !== undefined) obj.cwd = r.cwd;
+  return { ...obj, ...totalsToObject(r) };
+}
+
+/** 维度分组 JSON：{ window: "totals", by, rows } */
+export function serializeGroupJson(by: GroupBy, rows: GroupRow[]): string {
+  return JSON.stringify({ window: "totals", by, rows: rows.map(groupToObject) }, null, 2) + "\n";
+}
+
+/** 维度分组 CSV：表头 = 分组键列 + 指标列，与 JSON rows 字段一一对应 */
+export function serializeGroupCsv(by: GroupBy, rows: GroupRow[]): string {
+  const byModel = by === "model" || by === "model,cwd";
+  const byCwd = by === "cwd" || by === "model,cwd";
+  const empty: GroupRow = { ...emptyTotals() };
+  if (byModel) empty.model = "";
+  if (byCwd) empty.cwd = "";
+  const headers = Object.keys(groupToObject(empty));
+  const lines = [
+    headers.map(csvEscape).join(","),
+    ...rows.map((r) => headers.map((h) => csvEscape(String(groupToObject(r)[h]))).join(",")),
+  ];
+  return lines.join("\n") + "\n";
 }

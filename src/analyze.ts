@@ -3,8 +3,8 @@
  * 逐行解析并仅提取 type=message && role=assistant 且携带 usage 的消息（口径 A）。
  * 三个窗口（总 / 会话级 / 单请求级）共用同一份文件级原始数据。
  */
-import { readdirSync, createReadStream } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, createReadStream, realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
   addUsage,
@@ -14,6 +14,8 @@ import {
   type Usage,
   type SessionRow,
   type RequestRow,
+  type GroupRow,
+  type GroupBy,
 } from "./aggregate.ts";
 
 /** 递归收集目录下所有 .jsonl 文件 */
@@ -98,6 +100,78 @@ export function requestRowsFromFiles(files: SessionFileData[]): RequestRow[] {
     }
   }
   return rows;
+}
+
+
+/** 规范化 cwd：绝对路径、去尾斜杠、解析符号链接（不存在时回退 resolve） */
+export function normalizeCwd(cwd: string): string {
+  // 相对路径也 resolve 为绝对路径（相对当前工作目录），再规范化
+  const abs = resolve(cwd).replace(/\/+$/, "") || "/";
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * 从文件级原始数据派生维度分组窗口（--by model|cwd|model,cwd）。
+ * 模型键取每条消息的 model（请求级权威归属）；cwd 键取规范化后的 header cwd。
+ */
+export function groupRowsFromFiles(files: SessionFileData[], by: GroupBy): GroupRow[] {
+  const byModel = by === "model" || by === "model,cwd";
+  const byCwd = by === "cwd" || by === "model,cwd";
+  // 文件级 cwd 规范化缓存（避免逐消息 realpath）
+  const normCwdCache = new Map<string, string>();
+  const normOf = (f: SessionFileData): string => {
+    let n = normCwdCache.get(f.cwd);
+    if (n === undefined) {
+      n = normalizeCwd(f.cwd);
+      normCwdCache.set(f.cwd, n);
+    }
+    return n;
+  };
+  const map = new Map<string, GroupRow>();
+  for (const file of files) {
+    for (const item of file.items) {
+      const keyParts: string[] = [];
+      const row: GroupRow = { ...emptyTotals() };
+      if (byModel) {
+        row.model = item.model;
+        keyParts.push(`m:${item.model}`);
+      }
+      if (byCwd) {
+        row.cwd = normOf(file);
+        keyParts.push(`c:${row.cwd}`);
+      }
+      const key = keyParts.join("|");
+      let g = map.get(key);
+      if (!g) {
+        g = row;
+        map.set(key, g);
+      }
+      addUsage(g, item.usage);
+    }
+  }
+  for (const g of map.values()) finalizeTotals(g);
+  return [...map.values()];
+}
+
+/**
+ * 按模型/cwd 过滤文件级原始数据。
+ * - model 过滤：仅保留 items 中 model 匹配的消息；完全无匹配消息的会话被隐藏（不输出全 0 行）
+ * - cwd 过滤：仅保留 header cwd 规范化后等于过滤值的会话
+ */
+export function filterFiles(
+  files: SessionFileData[],
+  filters: { model?: string; cwd?: string },
+): SessionFileData[] {
+  const { model, cwd } = filters;
+  const normCwd = cwd !== undefined ? normalizeCwd(cwd) : undefined;
+  return files
+    .filter((f) => normCwd === undefined || normalizeCwd(f.cwd) === normCwd)
+    .map((f) => (model === undefined ? f : { ...f, items: f.items.filter((i) => i.model === model) }))
+    .filter((f) => model === undefined || f.items.length > 0);
 }
 
 /** 解析单个 JSONL 文件；残留文件返回 null */

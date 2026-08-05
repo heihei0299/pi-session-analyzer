@@ -31,6 +31,9 @@ export interface Totals {
   cacheRate: number;
 }
 
+/** 维度分组键（--by 参数值） */
+export type GroupBy = "model" | "cwd" | "model,cwd";
+
 /** 会话级窗口一行：每合法会话一行，指标=会话内 assistant usage 之和 */
 export interface SessionRow extends Totals {
   sessionId: string;
@@ -49,6 +52,14 @@ export interface RequestRow extends Totals {
   timestamp: string;
   /** 该消息的 model（请求级权威归属） */
   model: string;
+}
+
+/** 维度分组窗口一行（--by model/cwd/model,cwd）：分组键 + 指标 */
+export interface GroupRow extends Totals {
+  /** by=model 或 model,cwd 时有值 */
+  model?: string;
+  /** by=cwd 或 model,cwd 时有值（规范化后的 cwd） */
+  cwd?: string;
 }
 export function emptyTotals(): Totals {
   return {

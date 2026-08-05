@@ -11,9 +11,12 @@ import {
   totalsFromFiles,
   sessionRowsFromFiles,
   requestRowsFromFiles,
+  groupRowsFromFiles,
+  filterFiles,
 } from "./analyze.ts";
-import { renderTotalsTable, renderSessionTable, renderRequestTable } from "./render.ts";
-import { serializeJson, serializeCsv } from "./serialize.ts";
+import type { GroupBy } from "./aggregate.ts";
+import { renderTotalsTable, renderSessionTable, renderRequestTable, renderGroupTable } from "./render.ts";
+import { serializeJson, serializeCsv, serializeGroupJson, serializeGroupCsv } from "./serialize.ts";
 
 const DEFAULT_DIR = join(homedir(), ".pi", "agent", "sessions");
 
@@ -24,12 +27,21 @@ export interface CliArgs {
   window: WindowName;
   dir: string;
   format: FormatName;
+  /** --model <id>：只统计指定模型（对所有窗口生效） */
+  model?: string;
+  /** --cwd <path>：只统计指定项目（对所有窗口生效，规范化比较） */
+  cwd?: string;
+  /** --by <model|cwd|model,cwd>：totals 窗口按维度分组 */
+  by?: GroupBy;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
   let window: WindowName = "totals";
   let dir = DEFAULT_DIR;
   let format: FormatName = "table";
+  let model: string | undefined;
+  let cwd: string | undefined;
+  let by: GroupBy | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--dir" && argv[i + 1]) {
@@ -43,31 +55,55 @@ export function parseArgs(argv: string[]): CliArgs {
         throw new Error(`未知格式: ${f}（支持 table/json/csv）`);
       }
       i++;
+    } else if (a === "--model" && argv[i + 1]) {
+      model = argv[i + 1];
+      i++;
+    } else if (a === "--cwd" && argv[i + 1]) {
+      cwd = argv[i + 1];
+      i++;
+    } else if (a === "--by" && argv[i + 1]) {
+      const b = argv[i + 1];
+      if (b === "model" || b === "cwd" || b === "model,cwd") {
+        by = b;
+      } else {
+        throw new Error(`未知分组: ${b}（支持 model/cwd/model,cwd）`);
+      }
+      i++;
     } else if (a === "totals" || a === "sessions" || a === "requests") {
       window = a;
     }
   }
-  return { window, dir, format };
+  return { window, dir, format, model, cwd, by };
 }
 
 /** 运行分析，返回输出文本（供 CLI 打印与测试断言）；目录只扫描一次，派生三窗口 */
 export async function runCli(argv: string[]): Promise<string> {
-  const { window, dir, format } = parseArgs(argv);
+  const { window, dir, format, model, cwd, by } = parseArgs(argv);
   const files = await readSessionFiles(dir);
-  const totals = totalsFromFiles(files);
+  const filtered = filterFiles(files, { model, cwd });
+  if (by !== undefined && window !== "totals") {
+    throw new Error(`--by 分组仅支持 totals 窗口（当前 ${window}）`);
+  }
+  if (by !== undefined) {
+    const rows = groupRowsFromFiles(filtered, by);
+    if (format === "json") return serializeGroupJson(by, rows);
+    if (format === "csv") return serializeGroupCsv(by, rows);
+    return renderGroupTable(rows, by);
+  }
+  const totals = totalsFromFiles(filtered);
   if (format === "json") {
-    return serializeJson(window, totals, sessionRowsFromFiles(files), requestRowsFromFiles(files));
+    return serializeJson(window, totals, sessionRowsFromFiles(filtered), requestRowsFromFiles(filtered));
   }
   if (format === "csv") {
-    return serializeCsv(window, totals, sessionRowsFromFiles(files), requestRowsFromFiles(files));
+    return serializeCsv(window, totals, sessionRowsFromFiles(filtered), requestRowsFromFiles(filtered));
   }
   switch (window) {
     case "totals":
       return renderTotalsTable(totals);
     case "sessions":
-      return renderSessionTable(sessionRowsFromFiles(files));
+      return renderSessionTable(sessionRowsFromFiles(filtered));
     case "requests":
-      return renderRequestTable(requestRowsFromFiles(files));
+      return renderRequestTable(requestRowsFromFiles(filtered));
   }
 }
 
