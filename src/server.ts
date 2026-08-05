@@ -6,6 +6,7 @@
  */
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
+import { handleApi } from "./api.ts";
 
 const HTML = readFileSync(new URL("./webui.html", import.meta.url), "utf8");
 
@@ -26,12 +27,12 @@ export interface WebServer {
 
 /** 启动 Web 服务器；端口被占用时 reject 友好消息（「端口 X 已被占用，可用 --port 更换」） */
 export function startWebServer(options: WebServerOptions): Promise<WebServer> {
+  const dir = options.dir;
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 50080;
-
   return new Promise((resolve, reject) => {
     const server: Server = createServer((req, res) => {
-      handleRequest(req.url ?? "/", res);
+      void handleRequest(req.method ?? "GET", req.url ?? "/", dir, res);
     });
     server.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EADDRINUSE") {
@@ -54,8 +55,7 @@ export function startWebServer(options: WebServerOptions): Promise<WebServer> {
   });
 }
 
-function handleRequest(pathname: string, res: ServerResponse): void {
-  // 仅处理 GET；其余方法 404 统一错误体（spec：错误码集合为 400/404/409/500）
+async function handleRequest(method: string, pathname: string, dir: string, res: ServerResponse): Promise<void> {
   const url = new URL(pathname, "http://localhost");
   const p = url.pathname;
 
@@ -64,8 +64,8 @@ function handleRequest(pathname: string, res: ServerResponse): void {
     return;
   }
   if (p.startsWith("/api/")) {
-    // Ticket 02 接入 API 层；当前返回 404
-    send(res, 404, "application/json; charset=utf-8", JSON.stringify({ error: "Not Found", detail: `未知 API 路径: ${p}` }));
+    const { status, body } = await handleApi(method, p, url.searchParams, dir);
+    send(res, status, "application/json; charset=utf-8", JSON.stringify(body));
     return;
   }
   send(res, 404, "application/json; charset=utf-8", JSON.stringify({ error: "Not Found", detail: `路径不存在: ${p}` }));
