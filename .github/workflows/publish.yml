@@ -50,4 +50,11 @@ jobs:
         run: npm pack --dry-run
 
       - name: Publish
-        run: npm publish
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$PKG_VERSION" == *-* ]]; then
+            # prerelease（如 2026.8.6-1）：npm 强制显式 --tag；发到 next 而非 latest
+            npm publish --tag next
+          else
+            npm publish
+          fi
