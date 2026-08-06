@@ -10,8 +10,7 @@
 import { openSync, readSync, statSync, closeSync, createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { emptyTotals, finalizeTotals, addUsage, type Totals, type Usage } from "./aggregate.ts";
-import { collectJsonlFiles } from "./analyze.ts";
-
+import { collectJsonlFiles, parseUtcTimestamp } from "./analyze.ts";
 /** 单个文件的增量读取状态 */
 interface FileState {
   /** 已读取到的字节 offset（完整行边界，下次从此续读） */
@@ -20,6 +19,8 @@ interface FileState {
   inode: number;
   /** mtime ms（用于截断重写到同尺寸检测） */
   mtimeMs: number;
+  /** fork 会话剔除边界 = header.timestamp（UTC ms，fork 创建时间）；null = 非 fork 会话 */
+  forkTs: number | null;
 }
 
 /** 增量读取结果：本次新增的计入口径消息（单请求 Totals 形状；替换重读含负值扣减项） */
@@ -83,8 +84,9 @@ export class IncrementalReader {
         // 文件替换/截断/重写：扣减旧贡献，重读新内容
         const prev = this.contrib.get(file);
         if (prev) increments.push(negate(prev, file));
-        const { totals: added } = await readEntriesFrom(file, 0, increments);
-        this.states.set(file, stateOf(st));
+        // 复用初始 forkTs（fork 会话替换/重写后复制历史仍不重复计入）
+        const { totals: added } = await readEntriesFrom(file, 0, increments, state.forkTs);
+        this.states.set(file, { ...stateOf(st), forkTs: state.forkTs });
         this.contrib.set(file, added);
       } else if (st.size > state.offset) {
         // 正常追加：从 offset 续读（offset 恒为完整行边界）
@@ -99,8 +101,9 @@ export class IncrementalReader {
     for (const file of files) {
       if (!this.states.has(file)) {
         const st = statSync(file);
-        const { totals: added } = await readEntriesFrom(file, 0, increments);
-        this.states.set(file, stateOf(st));
+        // 首次读取：解析 header 得 forkTs（非 fork 会话为 null），复制历史剔除
+        const { totals: added, forkTs } = await readEntriesFrom(file, 0, increments);
+        this.states.set(file, { ...stateOf(st), forkTs });
         this.contrib.set(file, added);
       }
     }
@@ -109,8 +112,8 @@ export class IncrementalReader {
   }
 }
 
-/** 记录文件状态（offset=当前 size，inode，mtimeMs） */
-function stateOf(st: { size: number | bigint; ino: number | bigint; mtimeMs: number }): FileState {
+/** 记录文件状态（offset=当前 size，inode，mtimeMs）；forkTs 由调用方补充 */
+function stateOf(st: { size: number | bigint; ino: number | bigint; mtimeMs: number }): Omit<FileState, "forkTs"> {
   return { offset: Number(st.size), inode: Number(st.ino), mtimeMs: st.mtimeMs };
 }
 
@@ -133,15 +136,19 @@ async function isSessionFile(file: string): Promise<boolean> {
 
 /**
  * 从指定字节 offset 读取文件中的完整行，解析计入口径消息并 push 到 out。
- * 返回该文件的本次净贡献（Totals）；out 中同步追加解析出的单请求条目。
+ * 返回该文件的本次净贡献（Totals）与 forkTs；out 中同步追加解析出的单请求条目。
  * offset 语义：调用方保证其位于完整行边界；读取后文件尾若有不完整行（无 \n），
  * 不解析且新的 offset 停在最后完整行之后（下轮从此续读，不丢半行）。
+ * forkTs 语义：knownForkTs 显式传入（替换/重读复用初始值）则直接采用；
+ * 未传入且 offset===0（首次全量读）时解析首行 header（parentSession + timestamp → forkTs）；
+ * 追加路径（offset>0）不解析、不过滤（复制历史只存在于文件开头）。
  */
 async function readEntriesFrom(
   file: string,
   offset: number,
   out: Increment[],
-): Promise<{ totals: Totals; bytesRead: number }> {
+  knownForkTs?: number | null,
+): Promise<{ totals: Totals; bytesRead: number; forkTs: number | null }> {
   const st = statSync(file);
   const fd = openSync(file, "r");
   const buf = Buffer.alloc(Math.max(0, st.size - offset));
@@ -168,19 +175,43 @@ async function readEntriesFrom(
     bytesRead -= Buffer.byteLength(last);
   }
 
+  // fork 边界：显式传入（重读复用）或首次全量读时解析首行 header
+  let forkTs = knownForkTs;
+  if (forkTs === undefined) {
+    forkTs = offset === 0 ? resolveForkTs(lines[0] ?? "") : null;
+  }
+
   const totals = emptyTotals();
   for (const line of lines) {
     if (!line.trim()) continue;
-    const usage = extractUsage(line);
-    if (usage === null) continue;
-    addUsage(totals, usage);
+    const hit = extractEntry(line);
+    if (hit === null) continue;
+    // fork 复制历史剔除（与 analyzeFile 口径一致：ts < forkTs 剔除、无效 ts 保守保留）
+    if (forkTs !== null) {
+      const itTs = parseUtcTimestamp(hit.timestamp ?? "");
+      if (!Number.isNaN(itTs) && itTs < forkTs) continue;
+    }
+    addUsage(totals, hit.usage);
     const t = emptyTotals();
-    addUsage(t, usage);
+    addUsage(t, hit.usage);
     finalizeTotals(t);
     out.push({ ...t, file });
   }
   finalizeTotals(totals);
-  return { totals, bytesRead };
+  return { totals, bytesRead, forkTs };
+}
+
+/** 解析首行 header：parentSession 非空的 fork 会话返回 forkTs（header.timestamp UTC ms）；否则 null */
+function resolveForkTs(firstLine: string): number | null {
+  try {
+    const entry = JSON.parse(firstLine) as Record<string, unknown>;
+    if (entry.type !== "session") return null;
+    if (typeof entry.parentSession !== "string" || entry.parentSession.length === 0) return null;
+    const t = parseUtcTimestamp(typeof entry.timestamp === "string" ? entry.timestamp : "");
+    return Number.isNaN(t) ? null : t;
+  } catch {
+    return null;
+  }
 }
 
 /** 合并两份 Totals（contrib 累计用） */
@@ -222,15 +253,18 @@ function negate(t: Totals, file: string): Increment {
   };
 }
 
-/** 从一行 JSON 提取计入口径 usage；非口径 A 行返回 null */
-function extractUsage(line: string): Usage | null {
+/** 从一行 JSON 提取计入口径消息（usage + timestamp）；非口径 A 行返回 null */
+function extractEntry(line: string): { usage: Usage; timestamp: string | null } | null {
   try {
     const entry = JSON.parse(line) as Record<string, unknown>;
     if (entry.type !== "message") return null;
     const msg = entry.message as Record<string, unknown> | null;
     if (msg === null || typeof msg !== "object" || Array.isArray(msg)) return null;
     if (msg.role !== "assistant" || msg.usage == null) return null;
-    return msg.usage as Usage;
+    return {
+      usage: msg.usage as Usage,
+      timestamp: typeof entry.timestamp === "string" ? entry.timestamp : null,
+    };
   } catch {
     return null;
   }
