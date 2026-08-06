@@ -506,6 +506,9 @@ function applyPreset(preset) {
     state.until = null;
     $("#custom-range").classList.add("hidden");
   } else if (preset === "custom") {
+    // 恢复时间框显示并立即应用控件当前值（输入即生效；f404b3d 误删此分支导致时间框不出现）
+    $("#custom-range").classList.remove("hidden");
+    applyCustomRange();
   } else if (preset === "gateway") {
     // 网关可比窗口：since = 网关数据起点（UTC 精确），until 不限
     $("#custom-range").classList.add("hidden");
