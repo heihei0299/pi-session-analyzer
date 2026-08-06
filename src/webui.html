@@ -233,7 +233,8 @@ tbody tr:hover { background: var(--bg-hover); }
     <button data-preset="today">今天</button>
     <button data-preset="7d">7天</button>
     <button data-preset="30d">30天</button>
-    <button data-preset="all" class="active">全部</button>
+    <button data-preset="gateway" class="active">自 8/1（网关可比）</button>
+    <button data-preset="all">全部</button>
     <button data-preset="custom">自定义</button>
   </div>
   <div id="custom-range" class="hidden">
@@ -350,6 +351,7 @@ tbody tr:hover { background: var(--bg-hover); }
 
 // ---------- 全局状态 ----------
 const state = {
+  preset: "gateway", // 当前时间预设（默认网关可比窗口，与按钮静态 active 一致）
   since: null,
   until: null,
   groupBy: "model",
@@ -404,13 +406,15 @@ function showError(msg) { const el = $("#error-banner"); el.textContent = msg; e
 function clearError() { $("#error-banner").classList.remove("show"); }
 
 // ---------- 状态行（范围优先显示当前筛选，未筛选时显示数据范围） ----------
+/** 网关可比窗口起点：pi-switch 网关数据起点（UTC 8/1 00:00 精确；parseTimestamp 支持带时区原样解析） */
+const GATEWAY_SINCE = "2026-08-01T00:00:00Z";
 let lastMeta = null;
 /** 当前筛选范围文本：纯日期（今天/7天/30天预设）since 补 00:00、until 补 23:59:59；自定义完整时间戳去 T */
 function filterRangeText() {
   const fmt = (s, end) => {
     if (!s) return null;
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return end ? `${s} 23:59:59` : `${s} 00:00:00`;
-    return s.replace("T", " ");
+    return s.replace("T", " ").replace(/Z$/, "");
   };
   return { since: fmt(state.since, false), until: fmt(state.until, true) };
 }
@@ -422,7 +426,7 @@ function updateStatusRange() {
   if (!lastMeta) return;
   const { since, until } = filterRangeText();
   const range = since !== null || until !== null
-    ? `${since ?? "开始"} ~ ${until ?? "现在"}`
+    ? `${since ?? "开始"} ~ ${until ?? "现在"}${state.preset === "gateway" ? "（网关可比）" : ""}`
     : `${fmtTimestamp(lastMeta.dataRange.since) || "-"} ~ ${fmtTimestamp(lastMeta.dataRange.until) || "-"}`;
   $("#status-line").innerHTML = `数据目录: <code>${escapeHtml(lastMeta.dir)}</code> · 会话数: ${lastMeta.sessionCount} · 范围: ${range}`;
 }
@@ -494,6 +498,7 @@ async function refreshOverview() {
 
 // ---------- 时间预设 ----------
 function applyPreset(preset) {
+  state.preset = preset;
   document.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("active", b.dataset.preset === preset));
   const now = new Date();
   if (preset === "all") {
@@ -501,10 +506,12 @@ function applyPreset(preset) {
     state.until = null;
     $("#custom-range").classList.add("hidden");
   } else if (preset === "custom") {
-    $("#custom-range").classList.remove("hidden");
-    applyCustomRange();
-  } else {
+  } else if (preset === "gateway") {
+    // 网关可比窗口：since = 网关数据起点（UTC 精确），until 不限
     $("#custom-range").classList.add("hidden");
+    state.since = GATEWAY_SINCE;
+    state.until = null;
+  } else {
     const days = preset === "today" ? 0 : preset === "7d" ? 6 : 29;
     // 本地自然日：本地日期字段推算（setDate 自动处理跨月/跨年）；后端 parseTimestamp 按本地解释
     const since = new Date(now);
@@ -885,7 +892,7 @@ function init() {
   });
   bindDetailInteractions();
   bindSessionManage();
-  refreshAll();
+  applyPreset("gateway"); // 默认窗口 = 网关可比（按钮静态 active；此处同步 state.since 并触发首刷）
 }
 init();
 </script>
