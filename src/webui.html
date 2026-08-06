@@ -403,15 +403,35 @@ async function api(path, params = filterParams()) {
 function showError(msg) { const el = $("#error-banner"); el.textContent = msg; el.classList.add("show"); }
 function clearError() { $("#error-banner").classList.remove("show"); }
 
-// ---------- 状态行 ----------
+// ---------- 状态行（范围优先显示当前筛选，未筛选时显示数据范围） ----------
+let lastMeta = null;
+/** 当前筛选范围文本：纯日期（今天/7天/30天预设）since 补 00:00、until 补 23:59:59；自定义完整时间戳去 T */
+function filterRangeText() {
+  const fmt = (s, end) => {
+    if (!s) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return end ? `${s} 23:59:59` : `${s} 00:00:00`;
+    return s.replace("T", " ");
+  };
+  return { since: fmt(state.since, false), until: fmt(state.until, true) };
+}
 function renderStatus(meta) {
-  $("#status-line").innerHTML = `数据目录: <code>${escapeHtml(meta.dir)}</code> · 会话数: ${meta.sessionCount} · 范围: ${fmtTimestamp(meta.dataRange.since) || "-"} ~ ${fmtTimestamp(meta.dataRange.until) || "-"}`;
+  lastMeta = meta;
+  updateStatusRange();
+}
+function updateStatusRange() {
+  if (!lastMeta) return;
+  const { since, until } = filterRangeText();
+  const range = since !== null || until !== null
+    ? `${since ?? "开始"} ~ ${until ?? "现在"}`
+    : `${fmtTimestamp(lastMeta.dataRange.since) || "-"} ~ ${fmtTimestamp(lastMeta.dataRange.until) || "-"}`;
+  $("#status-line").innerHTML = `数据目录: <code>${escapeHtml(lastMeta.dir)}</code> · 会话数: ${lastMeta.sessionCount} · 范围: ${range}`;
 }
 
 // ---------- 总览卡片 ----------
 function renderCards(totals) {
   setCard("card-requests", fmtCompact(totals.requests));
-  setCard("card-input", fmtCompact(totals.input));
+  // 输入 = 总输入（非缓存 input + 缓存命中 cacheRead），与 pi-switch 网关 Input 字段对齐（ticket 24）
+  setCard("card-input", fmtCompact(totals.input + totals.cacheRead));
   setCard("card-output", fmtCompact(totals.output + totals.reasoning));
   setCard("card-cache", fmtCompact(totals.cacheRead + totals.cacheWrite));
   setCard("card-reasoning", fmtCompact(totals.reasoning));
@@ -438,7 +458,7 @@ const GROUP_COLS = [
 ];
 const GROUP_FMTS = {
   cacheRate: fmtRate,
-  input: fmtCompact,
+  input: (v, r) => fmtCompact((r.input ?? 0) + (r.cacheRead ?? 0)), // 总输入含缓存（ticket 24）
   output: fmtCompact,
   totalTokens: fmtCompact,
   cost: (v) => (v === 0 ? UNPRICED : fmtCost(v)),
@@ -455,7 +475,7 @@ async function refreshGroups() {
 function renderTable(headEl, bodyEl, cols, rows, fmts = {}) {
   headEl.innerHTML = cols.map((c) => `<th data-key="${c.key}">${c.label}</th>`).join("");
   bodyEl.innerHTML = rows
-    .map((r) => "<tr>" + cols.map((c) => { const v = r[c.key]; const f = fmts[c.key]; return `<td>${f ? f(v) : v}</td>`; }).join("") + "</tr>")
+    .map((r) => "<tr>" + cols.map((c) => { const v = r[c.key]; const f = fmts[c.key]; return `<td>${f ? f(v, r) : v}</td>`; }).join("") + "</tr>")
     .join("");
 }
 
@@ -492,6 +512,7 @@ function applyPreset(preset) {
     state.since = dateStr(since);
     state.until = dateStr(now);
   }
+  updateStatusRange(); // 状态行范围随筛选即时更新（不依赖 overview 的 meta 刷新）
   refreshAll();
 }
 
@@ -510,6 +531,7 @@ function applyCustomRange() {
   const v = customRangeValue();
   state.since = v.since;
   state.until = v.until;
+  updateStatusRange();
   refreshAll();
 }
 function bindCustomRange() {
@@ -556,7 +578,7 @@ function toCsv3(totals, sessions, requests) {
   return parts.join("\n");
 }
 
-// ---------- 明细视图（会话/请求）：列定义 + 排序 + 分页 ----------
+// ---------- 明细视图（会话/请求）：列定义 + 服务端排序 + 服务端分页 ----------
 const SESSION_COLS = ["displayName", "sessionId", "timestamp", "cwd", "model", "requests", "input", "output", "cacheRate", "totalTokens", "cost"];
 const REQUEST_COLS = ["displayName", "sessionId", "timestamp", "model", "input", "output", "cache", "reasoning", "cacheRate", "totalTokens", "cost"];
 const METRIC_FMTS = {
@@ -571,44 +593,35 @@ const METRIC_FMTS = {
   cacheRate: fmtRate,
   cost: (v) => (v === 0 ? UNPRICED : fmtCost(v)),
 };
+// 排序/分页在服务端执行（避免明细端点全量传输）；rows=当前页、total=筛选后全量行数
 const detailState = {
-  sessions: { sortKey: null, sortDir: "asc", page: 1, size: 20, rows: [] },
-  requests: { sortKey: "timestamp", sortDir: "desc", page: 1, size: 20, rows: [] },
+  sessions: { sortKey: null, sortDir: "asc", page: 1, size: 20, rows: [], total: 0 },
+  requests: { sortKey: "timestamp", sortDir: "desc", page: 1, size: 20, rows: [], total: 0 },
 };
 
 // kind（API 端点复数）→ HTML id 前缀（单数）：session-*/request-*
 const DETAIL_ID = { sessions: "session", requests: "request" };
 
 async function fetchRows(kind) {
-  const data = await api(kind);
   const st = detailState[kind];
+  const params = filterParams(); // since/until 时间筛选随动（ticket 22：明细应用时间预设）
+  params.set("page", String(st.page));
+  params.set("size", String(st.size));
+  if (st.sortKey) { params.set("sortKey", st.sortKey); params.set("sortDir", st.sortDir); }
+  const data = await api(kind, params);
   st.rows = data.rows;
-  st.page = 1;
+  st.total = data.total;
   return st;
-}
-function sortRows(st) {
-  if (!st.sortKey) return st.rows;
-  const k = st.sortKey;
-  const dir = st.sortDir === "asc" ? 1 : -1;
-  // 请求明细「缓存」列 = cacheRead + cacheWrite（API 行无 cache 字段）
-  const valueOf = (r) => (k === "cache" ? (r.cacheRead ?? 0) + (r.cacheWrite ?? 0) : r[k]);
-  return [...st.rows].sort((a, b) => {
-    const va = valueOf(a);
-    const vb = valueOf(b);
-    if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
-    return String(va).localeCompare(String(vb)) * dir;
-  });
 }
 function renderDetailTable(kind) {
   const st = detailState[kind];
   const headEl = $("#" + DETAIL_ID[kind] + "-head");
   const bodyEl = $("#" + DETAIL_ID[kind] + "-body");
-  const sorted = sortRows(st);
-  const start = (st.page - 1) * st.size;
-  const pageRows = sorted.slice(start, start + st.size);
+  const pageRows = st.rows; // 服务端已按 sortKey/sortDir 排序并分页（当前页）
   const cols = kind === "sessions" ? SESSION_COLS : REQUEST_COLS;
   // 请求明细「缓存」列 = cacheRead + cacheWrite（API 行字段为拆分的 cacheRead/cacheWrite）
-  const valueOf = (r, c) => (c === "cache" ? (r.cacheRead ?? 0) + (r.cacheWrite ?? 0) : r[c]);
+  // 缓存列 = cacheRead+cacheWrite；输入列 = 总输入（非缓存 input + 缓存命中 cacheRead，ticket 24 与网关 Input 对齐）
+  const valueOf = (r, c) => c === "cache" ? (r.cacheRead ?? 0) + (r.cacheWrite ?? 0) : c === "input" ? (r.input ?? 0) + (r.cacheRead ?? 0) : r[c];
   bodyEl.innerHTML = pageRows
     .map((r) => "<tr>" + cols.map((c) => `<td>${(METRIC_FMTS[c] ? METRIC_FMTS[c](valueOf(r, c)) : valueOf(r, c)) ?? ""}</td>`).join("") + "</tr>")
     .join("");
@@ -617,7 +630,7 @@ function renderDetailTable(kind) {
     if (arrow) arrow.textContent = th.dataset.key === st.sortKey ? (st.sortDir === "asc" ? "▲" : "▼") : "";
   });
   const infoEl = $("#" + DETAIL_ID[kind] + "-page-info");
-  const total = sorted.length;
+  const total = st.total;
   const pages = Math.max(1, Math.ceil(total / st.size));
   infoEl.textContent = `${total} 行 · 第 ${st.page}/${pages} 页`;
   // 翻页键状态：首页禁上一页、末页禁下一页
@@ -640,6 +653,14 @@ async function refreshRequestTable() {
 }
 function bindDetailInteractions() {
   for (const kind of ["sessions", "requests"]) {
+    const errLabel = kind === "sessions" ? "会话明细加载失败: " : "请求明细加载失败: ";
+    // 排序/翻页/改页大小 → 重新 fetch（服务端排序 + 分页）
+    const reload = (fn) => {
+      fn();
+      fetchRows(kind)
+        .then(() => renderDetailTable(kind))
+        .catch((e) => showError(errLabel + e.message));
+    };
     $("#" + DETAIL_ID[kind] + "-head").addEventListener("click", (e) => {
       const th = e.target.closest("th");
       if (!th) return;
@@ -648,21 +669,21 @@ function bindDetailInteractions() {
       if (st.sortKey === key) st.sortDir = st.sortDir === "asc" ? "desc" : "asc";
       else { st.sortKey = key; st.sortDir = "asc"; }
       st.page = 1;
-      renderDetailTable(kind);
+      reload(() => {});
     });
     $("#" + DETAIL_ID[kind] + "-page-size").addEventListener("change", (e) => {
       detailState[kind].size = Number(e.target.value);
       detailState[kind].page = 1;
-      renderDetailTable(kind);
+      reload(() => {});
     });
     $("#" + DETAIL_ID[kind] + "-prev").addEventListener("click", () => {
       const st = detailState[kind];
-      if (st.page > 1) { st.page--; renderDetailTable(kind); }
+      if (st.page > 1) { st.page--; reload(() => {}); }
     });
     $("#" + DETAIL_ID[kind] + "-next").addEventListener("click", () => {
       const st = detailState[kind];
-      const pages = Math.max(1, Math.ceil(st.rows.length / st.size));
-      if (st.page < pages) { st.page++; renderDetailTable(kind); }
+      const pages = Math.max(1, Math.ceil(st.total / st.size));
+      if (st.page < pages) { st.page++; reload(() => {}); }
     });
   }
 }
@@ -683,8 +704,16 @@ async function snapshot() {
     const g = await api("groups", gp);
     return JSON.stringify([t, g]);
   }
-  if (state.tab === "sessions") return JSON.stringify((await api("sessions", params)).rows);
-  if (state.tab === "requests") return JSON.stringify((await api("requests", params)).rows);
+  if (state.tab === "sessions" || state.tab === "requests") {
+    // 明细 tab：只对比当前页 + total（服务端分页；全量对比会重新拉取 26MB+ 明细）；时间筛选随动
+    const st = detailState[state.tab];
+    const p = filterParams();
+    p.set("page", String(st.page));
+    p.set("size", String(st.size));
+    if (st.sortKey) { p.set("sortKey", st.sortKey); p.set("sortDir", st.sortDir); }
+    const data = await api(state.tab, p);
+    return JSON.stringify([data.total, data.rows]);
+  }
   // 会话管理 tab：忽略筛选，展示全部会话
   return JSON.stringify((await api("sessions", new URLSearchParams())).rows);
 }

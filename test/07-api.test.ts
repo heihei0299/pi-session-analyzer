@@ -175,16 +175,11 @@ test("S11 model/cwd/since/until 筛选与 CLI 一致；非法 since / 未知 by 
     const apiCwd = (await (await fetch(new URL("/api/totals?cwd=/home/shial/Project/alpha", server.url))).json()) as Record<string, unknown>;
     assert.deepEqual(apiCwd, cliCwd);
 
-    // since 筛选
-    const cliSince = JSON.parse(await runCli(["--dir", dir, "--since", "2026-08-10", "--format", "json"])) as Record<string, unknown>;
-    const apiSince = (await (await fetch(new URL("/api/totals?since=2026-08-10", server.url))).json()) as Record<string, unknown>;
-    assert.deepEqual(apiSince, cliSince);
-
-    // until 筛选
-    const cliUntil = JSON.parse(await runCli(["--dir", dir, "--until", "2026-08-10", "--format", "json"])) as Record<string, unknown>;
-    const apiUntil = (await (await fetch(new URL("/api/totals?until=2026-08-10", server.url))).json()) as Record<string, unknown>;
-    assert.deepEqual(apiUntil, cliUntil);
-
+    // since/until 筛选（ticket 23：webui totals 消息级，与 CLI 会话级不同——spec 记录差异；fixture 消息 timestamp 均为 07-31）
+    const apiSince = (await (await fetch(new URL("/api/totals?since=2026-08-10", server.url))).json()) as { requests: number };
+    assert.equal(apiSince.requests, 0, "webui since 消息级：07-31 消息全部 < 8/10 → 排除");
+    const apiUntil = (await (await fetch(new URL("/api/totals?until=2026-08-10", server.url))).json()) as { requests: number };
+    assert.equal(apiUntil.requests, 3, "webui until 消息级：3 条 07-31 消息均 ≤ 8/10 → 全保留（CLI 会话级仅 header 08-01 的 2 条）");
     // 非法参数 → 400 统一错误体
     for (const url of [
       "/api/totals?since=abc",

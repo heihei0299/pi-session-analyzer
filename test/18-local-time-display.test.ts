@@ -50,10 +50,10 @@ test("时间显示全部转本地：fmtTimestamp 定义 + 明细表/会话管理
     // 会话管理行时间
     assert.match(body, /<span class="ts">\$\{escapeHtml\(fmtTimestamp\(r\.timestamp\)\)\}<\/span>/, "会话管理行时间应经 fmtTimestamp");
 
-    // 状态行数据范围
-    const renderStatus = body.match(/function renderStatus\(meta\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
-    assert.match(renderStatus, /fmtTimestamp\(meta\.dataRange\.since\)/, "状态行 since 应经 fmtTimestamp");
-    assert.match(renderStatus, /fmtTimestamp\(meta\.dataRange\.until\)/, "状态行 until 应经 fmtTimestamp");
+    // 状态行数据范围（无筛选兜底；ticket 22 起筛选时优先显示筛选范围）
+    const updateRange = body.match(/function updateStatusRange\(\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+    assert.match(updateRange, /fmtTimestamp\(lastMeta\.dataRange\.since\)/, "状态行 since 应经 fmtTimestamp");
+    assert.match(updateRange, /fmtTimestamp\(lastMeta\.dataRange\.until\)/, "状态行 until 应经 fmtTimestamp");
 
     // 导出（JSON/CSV）保持原始 UTC：导出路径不应出现 fmtTimestamp
     const exportData = body.match(/async function exportData\(format\) \{([\s\S]*?)\n\}/)?.[1] ?? "";

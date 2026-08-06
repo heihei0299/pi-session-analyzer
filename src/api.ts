@@ -63,7 +63,7 @@ export async function handleApi(
 ): Promise<ApiResponse> {
   try {
     if (method === "GET" && pathname === "/api/totals") {
-      const filtered = await loadFiltered(dir, params);
+      const filtered = await loadFilteredMessageTime(dir, params);
       return { status: 200, body: { window: "totals", ...totalsToObject(totalsFromFiles(filtered)) } };
     }
     if (method === "GET" && pathname === "/api/sessions") {
@@ -78,32 +78,33 @@ export async function handleApi(
           cwdNorm: normalizeCwd(f.cwd),
         };
       });
-      return { status: 200, body: { window: "sessions", rows } };
+      return { status: 200, body: { window: "sessions", ...paginate(rows, params) } };
     }
     if (method === "POST" && pathname === "/api/sessions/rename") {
       return await renameSession(dir, body);
     }
     if (method === "GET" && pathname === "/api/requests") {
-      const filtered = await loadFiltered(dir, params);
+      const timeFiltered = await loadFilteredMessageTime(dir, params);
       // 会话名称映射：sessionId → displayName（会话名称列数据源，与会话管理同规则）
       const nameBySession = new Map<string, string>();
-      for (const f of filtered) nameBySession.set(f.sessionId, displayNameOf(f.fileName ?? "", f.firstUserText));
+      for (const f of timeFiltered) nameBySession.set(f.sessionId, displayNameOf(f.fileName ?? "", f.firstUserText));
+      const rows = requestRowsFromFiles(timeFiltered).map((r) => ({ ...requestToObject(r), displayName: nameBySession.get(r.sessionId) ?? "" }));
       return {
         status: 200,
         body: {
           window: "requests",
-          rows: requestRowsFromFiles(filtered).map((r) => ({ ...requestToObject(r), displayName: nameBySession.get(r.sessionId) ?? "" })),
+          ...paginate(rows, params),
         },
       };
     }
     if (method === "GET" && pathname === "/api/groups") {
       const by = parseGroupBy(params);
-      const filtered = await loadFiltered(dir, params);
+      const filtered = await loadFilteredMessageTime(dir, params);
       return { status: 200, body: { window: "totals", by, rows: groupRowsFromFiles(filtered, by).map(groupToObject) } };
     }
     if (method === "GET" && pathname === "/api/period") {
       const period = parsePeriod(params);
-      const filtered = await loadFiltered(dir, params);
+      const filtered = await loadFilteredMessageTime(dir, params);
       return { status: 200, body: { window: "totals", period, rows: periodRowsFromFiles(filtered, period).map(periodToObject) } };
     }
     if (method === "GET" && pathname === "/api/meta") {
@@ -140,6 +141,18 @@ async function loadFiltered(dir: string, params: URLSearchParams): Promise<Sessi
   return filterFiles(files, filters);
 }
 
+/**
+ * webui 消息级时间筛选路径（ticket 22/23 用户决策）：model/cwd 沿用 filterFiles（model 消息级、cwd 会话级），
+ * since/until 按**消息 timestamp** 过滤——totals/groups/period/requests 均按消息归属（跨天会话的凌晨请求计入当天）；
+ * sessions 明细与会话管理仍走 loadFiltered（会话 header 归属，CLI 口径）。
+ */
+async function loadFilteredMessageTime(dir: string, params: URLSearchParams): Promise<SessionFileData[]> {
+  const files = await loadFiles(dir);
+  const filters = filtersFromParams(params);
+  const filtered = filterFiles(files, { model: filters.model, cwd: filters.cwd });
+  return applyMessageTimeFilter(filtered, filters.since, filters.until);
+}
+
 function filtersFromParams(params: URLSearchParams): { model?: string; cwd?: string; since?: string; until?: string } {
   const since = params.get("since") ?? undefined;
   const until = params.get("until") ?? undefined;
@@ -165,6 +178,116 @@ function filtersFromParams(params: URLSearchParams): { model?: string; cwd?: str
     until,
   };
 }
+
+/**
+ * 明细（单请求级）时间过滤：按**消息 timestamp**（UTC 基准）闭区间过滤，与会话级（header）不同——
+ * 跨天会话中落在 [since, until] 内的请求保留（ticket 22 用户决策：requests 明细消息级；
+ * totals/sessions/groups/period 保持会话级口径不变）。无有效时间戳的条目不参与过滤（与会话级一致）。
+ */
+function applyMessageTimeFilter(
+  files: SessionFileData[],
+  since?: string,
+  until?: string,
+): SessionFileData[] {
+  if (since === undefined && until === undefined) return files;
+  const sinceMs = since !== undefined ? parseTimestamp(since, false) : undefined;
+  const untilMs = until !== undefined ? parseTimestamp(until, true) : undefined;
+  return files
+    .map((f) => ({
+      ...f,
+      items: f.items.filter((it) => {
+        const ts = parseUtcTimestamp(it.timestamp);
+        if (Number.isNaN(ts)) return true;
+        if (sinceMs !== undefined && ts < sinceMs) return false;
+        if (untilMs !== undefined && ts > untilMs) return false;
+        return true;
+      }),
+    }))
+    .filter((f) => f.items.length > 0);
+}
+
+// ---------- 明细端点排序 + 分页（page/size/sortKey/sortDir） ----------
+
+/** 明细端点可排序字段（前端列集；cache 为 cacheRead+cacheWrite 别名） */
+const SORT_KEYS = new Set([
+  "displayName", "sessionId", "timestamp", "cwd", "model",
+  "requests", "input", "output", "cache", "cacheRead", "cacheWrite",
+  "reasoning", "cacheRate", "totalTokens", "cost",
+]);
+/** 数值列（数字排序）；其余列字符串 localeCompare */
+const NUMERIC_SORT_KEYS = new Set([
+  "requests", "input", "output", "cache", "cacheRead", "cacheWrite",
+  "reasoning", "cacheRate", "totalTokens", "cost",
+]);
+
+/**
+ * 明细端点统一分页/排序出口：解析可选参数 → 排序 → 分页。
+ * 响应恒含 total（= 筛选后全量行数，前端「N 行 · 第 X/Y 页」用）；
+ * 传了 page/size 时附加 page/size 字段并只返回当前页。
+ * 参数规则：page 与 size 须成对（1-200），sortKey 与 sortDir 须成对——单独出现 → 400。
+ */
+function paginate<T extends Record<string, unknown>>(
+  rows: T[],
+  params: URLSearchParams,
+): { rows: T[]; total: number; page?: number; size?: number } {
+  const sort = parseSortParams(params);
+  const out = sort !== null ? applySort(rows, sort.sortKey, sort.sortDir) : rows;
+  const paging = parsePagingParams(params);
+  const total = out.length;
+  if (paging === null) return { rows: out, total };
+  const start = (paging.page - 1) * paging.size;
+  return { rows: out.slice(start, start + paging.size), total, page: paging.page, size: paging.size };
+}
+
+/** 解析 sortKey/sortDir（须成对出现）；非法字段或方向 → 400 */
+function parseSortParams(params: URLSearchParams): { sortKey: string; sortDir: "asc" | "desc" } | null {
+  const key = params.get("sortKey");
+  const dir = params.get("sortDir");
+  if (key === null && dir === null) return null;
+  if (key === null || dir === null) {
+    throw new ApiError(400, "Bad Request", "sortKey 与 sortDir 必须同时提供");
+  }
+  if (!SORT_KEYS.has(key)) throw new ApiError(400, "Bad Request", `未知排序字段: ${key}`);
+  if (dir !== "asc" && dir !== "desc") throw new ApiError(400, "Bad Request", `未知排序方向: ${dir}（支持 asc/desc）`);
+  return { sortKey: key, sortDir: dir };
+}
+
+/** 解析 page/size（须成对出现）；非法值 → 400；都未提供 → null（不分页） */
+function parsePagingParams(params: URLSearchParams): { page: number; size: number } | null {
+  const pageRaw = params.get("page");
+  const sizeRaw = params.get("size");
+  if (pageRaw === null && sizeRaw === null) return null;
+  if (pageRaw === null || sizeRaw === null) {
+    throw new ApiError(400, "Bad Request", "page 与 size 必须同时提供");
+  }
+  const page = Number(pageRaw);
+  const size = Number(sizeRaw);
+  if (!Number.isInteger(page) || page < 1) {
+    throw new ApiError(400, "Bad Request", `无效 page: ${pageRaw}（需为正整数）`);
+  }
+  if (!Number.isInteger(size) || size < 1 || size > 200) {
+    throw new ApiError(400, "Bad Request", `无效 size: ${sizeRaw}（需为 1-200 的整数）`);
+  }
+  return { page, size };
+}
+
+/** 应用排序（copy + stable sort）：数值列数字比较，其余 localeCompare；cache 别名 = cacheRead+cacheWrite */
+function applySort<T extends Record<string, unknown>>(
+  rows: T[],
+  sortKey: string,
+  sortDir: "asc" | "desc",
+): T[] {
+  const dir = sortDir === "asc" ? 1 : -1;
+  const valueOf = (r: T): unknown =>
+    sortKey === "cache" ? Number(r.cacheRead ?? 0) + Number(r.cacheWrite ?? 0) : r[sortKey];
+  return [...rows].sort((a, b) => {
+    const va = valueOf(a);
+    const vb = valueOf(b);
+    if (NUMERIC_SORT_KEYS.has(sortKey)) return (Number(va) - Number(vb)) * dir;
+    return String(va).localeCompare(String(vb)) * dir;
+  });
+}
+
 
 function parseGroupBy(params: URLSearchParams): GroupBy {
   const by = params.get("by");
