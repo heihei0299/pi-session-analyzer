@@ -54,7 +54,7 @@ export function assistantUsage(overrides: Record<string, unknown> = {}): Record<
     cacheRead: 200,
     cacheWrite: 10,
     reasoning: 20,
-    totalTokens: 360,
+    totalTokens: 360, // 原始字段保真（组件和值）；聚合不信任此字段，总 token 按网关口径 input+cacheRead+output（ADR-0002）
     cost: { input: 0.01, output: 0.02, cacheRead: 0.03, cacheWrite: 0.04, total: 0.1 },
     ...overrides,
   };

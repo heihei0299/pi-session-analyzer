@@ -38,14 +38,14 @@ test("S1 最小闭环：单个合法会话 + 一条 assistant usage 消息 → �
     assert.equal(row["缓存写"], "10");
     assert.equal(row["推理"], "20");
 
-    // 总 token = 组件和 100+50+200+10 = 360
-    assert.equal(row["总 token"], "360");
+    // 总 token = 总输入+输出 100+200+50 = 350（不含缓存写）
+    assert.equal(row["总 token"], "350");
 
     // 花费 = cost.total = 0.1
     assert.equal(row["花费"], "0.1");
 
-    // 缓存率 = 200 / (100+200+10) = 64.52%
-    assert.equal(row["缓存率"], "64.52%");
+    // 缓存率 = 200 / (100+200) = 66.67%（分母不含缓存写）
+    assert.equal(row["缓存率"], "66.67%");
   } finally {
     removeFixture(dir);
   }

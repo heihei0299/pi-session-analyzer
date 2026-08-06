@@ -1,7 +1,7 @@
 /**
  * 聚合模型：总消耗量窗口指标。
  * 统计口径（spec 决策锚）：仅 type=message && role=assistant 且携带 usage 的消息；
- * 总 token 按组件和计算；花费直接累加 cost.total；缓存率先求和分子分母再除。
+ * 总 token 按网关口径（总输入+输出，不含缓存写）计算；花费直接累加 cost.total；缓存率先求和分子分母再除。
  */
 
 /** 一条计入口径的 usage（assistant 消息的 message.usage） */
@@ -23,11 +23,11 @@ export interface Totals {
   cacheRead: number;
   cacheWrite: number;
   reasoning: number;
-  /** 总 token = input + output + cacheRead + cacheWrite（组件和） */
+  /** 总 token = input + cacheRead + output（总输入+输出，不含 cacheWrite，ADR-0002） */
   totalTokens: number;
   /** 花费 = Σ usage.cost.total */
   cost: number;
-  /** 缓存率 = cacheRead / (input + cacheRead + cacheWrite)，分母 0 记 0 */
+  /** 缓存率 = cacheRead / (input + cacheRead)，分母不含 cacheWrite，0 记 0（ADR-0002） */
   cacheRate: number;
 }
 
@@ -94,11 +94,11 @@ export function addUsage(totals: Totals, usage: Usage): void {
   totals.cost += toFiniteNumber(usage.cost?.total);
 }
 
-/** 聚合收尾：总 token 按组件和、缓存率按分子和/分母和 */
+/** 聚合收尾：总 token 按网关口径（总输入+输出）、缓存率按分子和/分母和 */
 export function finalizeTotals(totals: Totals): void {
-  totals.totalTokens = totals.input + totals.output + totals.cacheRead + totals.cacheWrite;
-  const denominator = totals.input + totals.cacheRead + totals.cacheWrite;
-  totals.cacheRate = denominator === 0 ? 0 : totals.cacheRead / denominator;
+  const totalInput = totals.input + totals.cacheRead;
+  totals.totalTokens = totalInput + totals.output;
+  totals.cacheRate = totalInput === 0 ? 0 : totals.cacheRead / totalInput;
 }
 
 /** 非有限数字一律按 0 处理（字段缺失 / undefined / null / 非数值） */

@@ -42,7 +42,7 @@ test("S5 CSV 输出：--format csv 表头+数据行可解析、字段与表格�
     assert.equal(totals.length, 1);
     assert.equal(totals[0].requests, "3");
     assert.equal(totals[0].input, "900");
-    assert.equal(totals[0].cacheRate, (600 / (900 + 600 + 30)).toString());
+    assert.equal(totals[0].cacheRate, (600 / (900 + 600)).toString());
 
     // sessions：两行，字段含 sessionId/timestamp/cwd/model
     const sessions = parseCsv(await runCli(["sessions", "--dir", dir, "--format", "csv"]));

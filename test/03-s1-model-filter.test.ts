@@ -26,7 +26,7 @@ test("S1 --model 过滤：三窗口仅指定模型计入", async () => {
     const totals = parseTable(await runCli(["totals", "--dir", dir, "--model", "m1"]));
     assert.equal(totals["请求数"], "2", "totals 过滤后请求数应为 2");
     assert.equal(totals["输入"], "300", "totals 过滤后输入应为 300");
-    assert.equal(totals["总 token"], "820", "总 token 应为 m1 两条消息组件和：300+100+400+20 = 820");
+    assert.equal(totals["总 token"], "800", "总 token 应为 m1 两条消息总输入+输出：300+400+100 = 800");
 
     // sessions 窗口：--model m1 → 会话行仅含 m1 数据
     const sessions = parseTableRows(await runCli(["sessions", "--dir", dir, "--model", "m1"]));

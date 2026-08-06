@@ -30,7 +30,7 @@ test("S7 向后兼容：无子命令默认 totals 窗口，issue 01 行为不变
     assert.ok(!("会话ID" in row), "totals 表格不应有会话ID列");
     assert.equal(row["请求数"], "1");
     assert.equal(row["输入"], "100");
-    assert.equal(row["总 token"], "360");
+    assert.equal(row["总 token"], "350");
     assert.equal(row["花费"], "0.1");
   } finally {
     removeFixture(dir);

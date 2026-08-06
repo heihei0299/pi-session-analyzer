@@ -30,7 +30,7 @@ test("S4a JSON totals：窗口字段 + 原始数值（cacheRate 小数）", asyn
     assert.equal(totals.requests, 3);
     assert.equal(totals.input, 900);
     assert.equal(totals.output, 150); // 50×3
-    assert.equal(totals.cacheRate, 600 / (900 + 600 + 30)); // 原始小数非百分比
+    assert.equal(totals.cacheRate, 600 / (900 + 600)); // 原始小数非百分比（分母不含缓存写）
   } finally {
     removeFixture(dir);
   }
