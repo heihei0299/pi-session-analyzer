@@ -369,6 +369,8 @@ export async function analyzeFile(file: string): Promise<SessionFileData | null>
   let header: { id?: unknown; timestamp?: unknown; cwd?: unknown } | null = null;
   const items: SessionFileData["items"] = [];
   let firstUserText: string | undefined;
+  /** fork 边界：header.parentSession 存在（fork 会话）时记录 fork 创建时间，复制历史（ts < forkTs）剔除 */
+  let forkTs: number | undefined;
   try {
     let firstLine = true;
     for await (const line of rl) {
@@ -381,6 +383,10 @@ export async function analyzeFile(file: string): Promise<SessionFileData | null>
           timestamp: entry.timestamp,
           cwd: entry.cwd,
         };
+        if (typeof entry.parentSession === "string" && entry.parentSession.length > 0) {
+          const t = parseUtcTimestamp(typeof entry.timestamp === "string" ? entry.timestamp : "");
+          if (!Number.isNaN(t)) forkTs = t;
+        }
         continue;
       }
       if (!line.trim()) continue;
@@ -388,6 +394,12 @@ export async function analyzeFile(file: string): Promise<SessionFileData | null>
       if (entry === null) continue; // 坏行跳过（不中断整个文件）
       if (entry.type === "message") {
         const msg = entry.message;
+        // fork 复制历史剔除：fork 会话中 timestamp 早于 fork 创建时间的消息是复制快照，
+        // 其 usage 已在原会话（parentSession）统计过——fork 本身未消耗这些 token（ticket 25）
+        if (forkTs !== undefined) {
+          const itTs = parseUtcTimestamp(typeof entry.timestamp === "string" ? entry.timestamp : "");
+          if (!Number.isNaN(itTs) && itTs < forkTs) continue;
+        }
         // 首条 user 消息的文本内容（会话管理显示名用；取 content 第一个 text）
         if (
           firstUserText === undefined &&

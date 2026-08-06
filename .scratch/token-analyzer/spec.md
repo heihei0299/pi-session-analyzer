@@ -22,7 +22,7 @@ pi 是长期使用的编码 agent，其所有会话以 JSONL 形式存储在 `~/
 - **合法会话判定**：仅首行 `type == "session"` 的 JSONL 是会话（当前 208/216）；`type: message` / `type: custom` 文件是单条记录导出/残留，**跳过**。
 - **文件名不作判据**：存在 68 个非标准命名文件（用户扩展/备份导出），尾 UUID 与 header id 一致且首行是完整 session header，是合法会话，必须纳入。
 - **项目归属**：以会话首行 header 的 `cwd` 字段为权威（完整绝对路径、无歧义）；目录名是 cwd 的有损编码（`--` 包裹、`/`→`-`），**不可反解**，仅作展示与辅助分组。聚合时按规范化 cwd（`resolve` 去尾斜杠/符号链接）。
-- 可选增强（第一版可忽略）：10 个会话带 `parentSession`（父会话文件绝对路径），可识别续接/子会话链避免重复计数。
+- **fork 去重**（ticket 25 已实现）：`parentSession`（父会话文件绝对路径）标记 fork 会话——fork 复制历史（message.timestamp < header.timestamp）的 usage 已在原会话统计，analyzeFile 剔除，fork 后新增消息保留（CLI/webui 一致）。
 
 ### 统计口径（决策锚）
 
@@ -114,7 +114,7 @@ pi 是长期使用的编码 agent，其所有会话以 JSONL 形式存储在 `~/
 - **按单价重算花费**——直接采用 pi 的 `cost.total`；不维护独立费率表。
 - **compaction / branch_summary 的 usage 计入**——口径 A 明确忽略（与 pi 自身统计一致）。
 - **pi 进程内插件/事件方案**——实时监控走文件层（tail/轮询），不注入 pi 进程（侵入、版本敏感）。
-- **parentSession 续接/子会话链去重**——可选增强，第一版不实现。
+- **parentSession fork 去重**——ticket 25 已实现（analyzeFile 按 forkTs 剔除复制历史），见上文「fork 去重」条目。
 - **responseModel 别名归一化**——可选增强，第一版不实现。
 - **实现代码**——本 effort 只产出 spec，不写实现。
 
