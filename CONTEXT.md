@@ -42,8 +42,8 @@
 - **cacheRead（缓存命中输入）**：usage.cacheRead，独立维度；单请求总输入 = input + cacheRead（与网关 prompt 一致）。
 - **总输入（webui 展示语义，ticket 24）**：input + cacheRead；webui 卡片/分组/明细的「输入」列显示总输入，与 pi-switch 网关 Input 对齐；CLI 与导出 JSON/CSV 保持原始字段。
 - **output / reasoning**：usage.output（输出）、usage.reasoning（推理，output 子集，不重复累加）。
-- **cacheWrite（缓存写）**：usage.cacheWrite，独立指标列；不计入 totalTokens（ADR-0002），当前 pi 会话恒为 0。
 
 ## 外部对比基准（非数据源）
 
 - **pi-switch 网关**：转发请求日志（`~/.pi-switch/requests.log`），统计口径 total = 总输入 + output（`promptTokens + completionTokens`）。是**对比基准**，不是 token-analyzer 的数据源——token-analyzer 数据只来自 session 目录（用户约束）。两者覆盖范围结构性不同（pi 直连请求只在 session 目录、其他客户端请求只在网关）；fork 去重生效后 8/1 起累计差 0.6%（8/2、8/4 分毫不差），8/1 当天网关刚启用（仅 4 条记录）为最大单日差异源。
+- **对账验证（2026-08-07）**：逐条匹配（时间戳+token 数）确认两侧对同一请求定价**完全一致**（679 条 0 差异），差异全部来自覆盖结构：① **pi 内部请求不计入**——pi 压缩/摘要等内部请求（Magic Context，无会话名，真实计费，约 $0.10/天）不入 session 对话流（compaction entry 无 usage 字段），token-analyzer 结构性漏算；② **其他客户端请求只在网关**——opencode dreamer 后台任务等（约 $0.09/天）。webui 已加口径说明（.scratch/webui-gateway-disclaimer/），用户决策：结构性接受、不引入网关数据源。

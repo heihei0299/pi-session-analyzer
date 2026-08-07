@@ -87,6 +87,7 @@ nav.tabs button.tab.active {
 }
 #status-line { color: var(--text-dim); font-size: 13px; margin-bottom: 8px; min-height: 20px; }
 #status-line .updated { color: var(--ok); }
+#scope-note { color: var(--text-dim); font-size: 12px; margin-bottom: 8px; line-height: 1.5; }
 #error-banner {
   display: none;
   background: rgba(248, 113, 113, 0.12);
@@ -257,6 +258,7 @@ tbody tr:hover { background: var(--bg-hover); }
 </div>
 
 <div id="status-line">加载中… <span id="updated-at" class="updated hidden"></span></div>
+<div id="scope-note">口径说明：统计仅含 pi 会话中的对话请求（assistant+usage）；pi 压缩/摘要等内部请求与 opencode 等其他客户端请求不计入，与 pi-switch 网关数字存在结构性差异（预期行为）。</div>
 <div id="error-banner"></div>
 
 <main>

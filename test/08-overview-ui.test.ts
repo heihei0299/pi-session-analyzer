@@ -51,8 +51,12 @@ test("S13 总览骨架标记：8 卡片 / 分组切换 / 时间预设 / 状态�
     assert.match(body, /data-preset="gateway"[^>]*class="active"/, "「自 8/1」应默认激活");
     assert.doesNotMatch(body, /data-preset="all"[^>]*class="active"/, "「全部」不应默认激活");
 
-    // 状态行 / 导出按钮 / 错误横幅
+    // 状态行 / 口径说明 / 导出按钮 / 错误横幅
     assert.match(body, /id="status-line"/);
+    assert.match(body, /id="scope-note"/, "HTML 应含口径说明元素");
+    assert.match(body, /口径说明：统计仅含 pi 会话中的对话请求/, "口径说明应声明对话请求口径");
+    assert.match(body, /内部请求与 opencode 等其他客户端请求不计入/, "口径说明应声明内部请求/其他客户端不计入");
+    assert.match(body, /结构性差异/, "口径说明应声明与网关的结构性差异");
     assert.match(body, /id="export-json"/);
     assert.match(body, /id="export-csv"/);
     assert.match(body, /id="error-banner"/);
