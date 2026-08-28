@@ -4,7 +4,7 @@
  * 默认窗口 totals（issue 01 行为），默认格式 table，默认数据目录 ~/.pi/agent/sessions/。
  */
 import { homedir } from "node:os";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -53,6 +53,10 @@ export interface CliArgs {
   port: number;
   /** --host <h>：serve 监听地址（默认 127.0.0.1） */
   host: string;
+  /** -h/--help：显示帮助 */
+  help: boolean;
+  /** -v/--version：显示版本 */
+  version: boolean;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -70,11 +74,19 @@ export function parseArgs(argv: string[]): CliArgs {
   let serve = false;
   let port = 50080;
   let host = "127.0.0.1";
+  let help = false;
+  let version = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--dir" && argv[i + 1]) {
+    if (a === "-h" || a === "--help") {
+      help = true;
+    } else if (a === "-v" || a === "--version") {
+      version = true;
+    } else if (a === "--dir" && argv[i + 1]) {
       dir = argv[i + 1];
       i++;
+    } else if (a === "--dir") {
+      throw new Error(`缺少参数: --dir 需要路径`);
     } else if (a === "--port" && argv[i + 1]) {
       const n = Number(argv[i + 1]);
       if (!Number.isInteger(n) || n < 0 || n > 65535) {
@@ -82,9 +94,13 @@ export function parseArgs(argv: string[]): CliArgs {
       }
       port = n;
       i++;
+    } else if (a === "--port") {
+      throw new Error(`缺少参数: --port 需要端口号`);
     } else if (a === "--host" && argv[i + 1]) {
       host = argv[i + 1];
       i++;
+    } else if (a === "--host") {
+      throw new Error(`缺少参数: --host 需要地址`);
     } else if (a === "--format" && argv[i + 1]) {
       const f = argv[i + 1];
       if (f === "json" || f === "csv" || f === "table") {
@@ -93,18 +109,28 @@ export function parseArgs(argv: string[]): CliArgs {
         throw new Error(`未知格式: ${f}（支持 table/json/csv）`);
       }
       i++;
+    } else if (a === "--format") {
+      throw new Error(`缺少参数: --format 需要值`);
     } else if (a === "--model" && argv[i + 1]) {
       model = argv[i + 1];
       i++;
+    } else if (a === "--model") {
+      throw new Error(`缺少参数: --model 需要模型名`);
     } else if (a === "--cwd" && argv[i + 1]) {
       cwd = argv[i + 1];
       i++;
+    } else if (a === "--cwd") {
+      throw new Error(`缺少参数: --cwd 需要路径`);
     } else if (a === "--since" && argv[i + 1]) {
       since = argv[i + 1];
       i++;
+    } else if (a === "--since") {
+      throw new Error(`缺少参数: --since 需要时间`);
     } else if (a === "--until" && argv[i + 1]) {
       until = argv[i + 1];
       i++;
+    } else if (a === "--until") {
+      throw new Error(`缺少参数: --until 需要时间`);
     } else if (a === "--period" && argv[i + 1]) {
       const p = argv[i + 1];
       if (p === "day" || p === "week" || p === "month") {
@@ -113,6 +139,8 @@ export function parseArgs(argv: string[]): CliArgs {
         throw new Error(`未知周期: ${p}（支持 day/week/month）`);
       }
       i++;
+    } else if (a === "--period") {
+      throw new Error(`缺少参数: --period 需要值`);
     } else if (a === "--watch") {
       watch = true;
     } else if (a === "--interval" && argv[i + 1]) {
@@ -122,6 +150,8 @@ export function parseArgs(argv: string[]): CliArgs {
       }
       interval = ms;
       i++;
+    } else if (a === "--interval") {
+      throw new Error(`缺少参数: --interval 需要毫秒`);
     } else if (a === "--by" && argv[i + 1]) {
       const b = argv[i + 1];
       if (b === "model" || b === "cwd" || b === "model,cwd") {
@@ -130,16 +160,25 @@ export function parseArgs(argv: string[]): CliArgs {
         throw new Error(`未知分组: ${b}（支持 model/cwd/model,cwd）`);
       }
       i++;
+    } else if (a === "--by") {
+      throw new Error(`缺少参数: --by 需要值`);
     } else if (a === "totals" || a === "sessions" || a === "requests") {
       window = a;
     } else if (a === "serve") {
       serve = true;
+    } else if (a.startsWith("-")) {
+      throw new Error(`未知参数: ${a}（可用 -h 查看帮助）`);
+    } else {
+      throw new Error(`未知命令: ${a}（支持 totals/sessions/requests/serve，可用 -h 查看帮助）`);
     }
+  }
+  if (help || version) {
+    return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version };
   }
   if (serve) {
     validateServeMode(argv);
   }
-  return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host };
+  return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version };
 }
 
 /** serve 模式参数校验：仅允许 --port/--host/--dir，其余一律拒绝（避免静默忽略） */
@@ -164,6 +203,37 @@ function validateServeMode(argv: string[]): void {
   }
 }
 
+function getVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: string };
+    return pkg.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+const HELP_TEXT = `用法: token-analyzer [totals|sessions|requests] --dir <path> [选项]
+
+窗口（位置参数，默认 totals）:
+  totals      总消耗量
+  sessions    会话级（每会话一行）
+  requests    单请求级（逐 assistant 消息）
+
+选项:
+  --dir <path>              数据目录（默认 ~/.pi/agent/sessions/）
+  --format <table|json|csv> 输出格式（默认 table）
+  --model <id>              只统计指定模型
+  --cwd <path>              只统计指定项目
+  --since <时间>            只统计会话时间戳 ≥ 该值的会话
+  --until <时间>            只统计会话时间戳 ≤ 该值的会话
+  --by <model|cwd|model,cwd> 仅 totals 窗口：按维度分组
+  --period <day|week|month>   仅 totals 窗口：按周期汇总
+  --watch [--interval <ms>] 实时监控（默认 1000ms）
+  serve [--port <n>] [--host <h>] [--dir <path>] 启动 Web 面板（默认 127.0.0.1:50080）
+  -h, --help                显示帮助
+  -v, --version             显示版本
+`;
+
 /** serve 子命令：启动 Web 服务器、打印访问 URL、Ctrl+C 优雅退出（长驻） */
 async function runServeCli(args: { dir: string; host: string; port: number }): Promise<string> {
   const server = await startWebServer({ dir: args.dir, host: args.host, port: args.port });
@@ -179,7 +249,9 @@ async function runServeCli(args: { dir: string; host: string; port: number }): P
 }
 /** 运行分析，返回输出文本（供 CLI 打印与测试断言）；目录只扫描一次，派生三窗口 */
 export async function runCli(argv: string[]): Promise<string> {
-  const { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host } = parseArgs(argv);
+  const { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version } = parseArgs(argv);
+  if (help) return HELP_TEXT;
+  if (version) return getVersion() + "\n";
   if (serve) {
     // Web 服务器模式：启动、打印访问 URL、Ctrl+C 优雅退出（长驻，正常退出时返回空串）
     return runServeCli({ dir, host, port });

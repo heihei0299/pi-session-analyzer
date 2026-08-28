@@ -14,7 +14,7 @@ npm i -g token-analyzer    # 从 npm 安装（Node ≥ 18）
 
 ```bash
 npm install      # 安装 typescript + @types/node（devDependencies）
-npm test         # 运行全部测试（114 用例；固定 TZ=Asia/Shanghai 保证时区确定性）
+npm test         # 运行全部测试（132 用例；固定 TZ=Asia/Shanghai 保证时区确定性）
 npm run build    # tsc 编译到 dist/ + 复制 webui.html（发布产物）
 ```
 
@@ -34,6 +34,7 @@ token-analyzer [totals|sessions|requests] --dir <path> [选项]
 - **时间汇总**（仅 totals 窗口）：`--period day|week|month` 按周期汇总
 - **实时监控**：`--watch [--interval <ms>]` 长驻跟随（默认 1s 轮询）
 - **Web 面板**：`serve [--port <n>] [--host <h>] [--dir <path>]` 启动零依赖 HTTP 服务（默认 `127.0.0.1:50080`，仅本机；serve 模式仅支持这三个参数）
+- **帮助/版本**：`-h/--help` 显示用法，`-v/--version` 显示版本；未知参数/命令显式报错（可用 `-h` 查看）
 
 ### 示例
 
@@ -68,7 +69,7 @@ token-analyzer serve
 push `v<版本>` tag 由 GitHub Actions（[`.github/workflows/publish.yml`](.github/workflows/publish.yml)）自动完成 typecheck + test + build + `npm publish`：
 
 ```bash
-npm version 2026.8.7 && git push && git push --tags
+npm version 2026.8.28 && git push && git push --tags
 ```
 
 - **版本**：日期式 semver（`YYYY.M.D`）；同日再次发布用 prerelease 后缀（`2026.8.6-1`）
@@ -79,7 +80,8 @@ npm version 2026.8.7 && git push && git push --tags
 
 `token-analyzer serve` 启动本地 Web 服务（零依赖，Node 原生 `http` + 单 HTML 内联前端），浏览器访问 `http://127.0.0.1:50080/`：
 
-- **四个 tab**：总览（8 张汇总卡片 + 按模型/cwd 分组表）/ 会话明细 / 请求明细 / 会话管理（按项目 cwd 分组 + 重命名会话）
+- **四个 tab**：总览（8 张汇总卡片 + 按模型/cwd 分组表 + Token tape 构成条）/ 会话明细 / 请求明细 / 会话管理（按项目 cwd 分组 + 重命名会话）
+- **视觉**：暖纸账本（`#F5F4ED`）+ 墨 `#0E1320` + 陶土 `#D97757`，`Instrument Serif`（标题/数值）/ `Inter`（正文）/ `JetBrains Mono`（数据）三栈参照 claude.ai（`Anthropic Serif/Sans/Mono` 近似）
 - **时间范围**：今天 / 7天 / 30天 / 自 8/1（网关可比，默认） / 全部 / 自定义（date 日期 + 时分下拉，按本地时间解释），作用于总览与明细与导出；默认窗口 = 网关可比（since=`2026-08-01T00:00:00Z` UTC 精确，状态行标注「（网关可比）」）；状态行「范围」随筛选即时显示（未筛选时显示数据范围 min/max）
 - **明细服务端分页排序**：会话/请求明细每页 20/50/100 行，点击列头排序——翻页/排序/改页大小重新 fetch（page/size/sortKey/sortDir），不再全量拉取（真实数据 /api/requests 26.7MB → 每页 ~20KB）
 - **统计口径（webui）**：时间筛选按**消息 timestamp 消息级**归属（跨天会话的凌晨请求计入当天，与明细一致）；「输入」列显示**总输入**（非缓存 input + 缓存命中 cacheRead，与 pi-switch 网关 Input 对齐）；CLI 与导出保持原始字段
@@ -111,16 +113,18 @@ HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` 
 CONTEXT.md      领域术语表（统计口径、fork 会话、字段语义）
 docs/adr/       架构决策记录（0001-fork-session-dedup、0002-total-tokens-gateway-alignment）
 src/
-  analyze.ts    数据读取层（目录遍历、合法会话判定、fork 去重、三窗口派生、过滤/分组/时间汇总）
+  session-data.ts 深模块：会话数据仓（目录→窗口派生唯一 seam，单一 query(filter,view)，内聚 fork 去重/缓存/派生/分页，branded TimeRange）
+  time-range.ts   时间范围单引擎：makeSessionRange/makeMessageRange/applyTimeRange（本地时区严格校验）
+  analyze.ts    薄 shim（re-export session-data，保留 1 版本兼容旧 import）
   aggregate.ts  聚合模型（Totals 类型、指标计算）
   render.ts     终端表格渲染
   serialize.ts  JSON / CSV 序列化
-  cli.ts        CLI 入口（参数解析、窗口路由、watch/serve 集成）
+  cli.ts        CLI 入口（参数解析含 -h/--help/-v/--version、未知参数显式报错、窗口路由、watch/serve 集成）
   watch.ts      实时监控增量读取器
   server.ts     serve HTTP 服务器（路由分发、生命周期、EADDRINUSE 友好提示）
-  api.ts        HTTP API 层（端点处理、筛选、分页排序、统一错误体、会话重命名）
-  webui.html    单 HTML 内联前端（深色主题、4 tab、fetch API、服务端分页、自动刷新、导出）
-test/           node:test 测试（fixture JSONL → CLI 输出断言；serve → HTTP 端点断言）
+  api.ts        HTTP API 层（薄路由，委托 session-data.query，统一错误体、会话重命名）
+  webui.html    单 HTML 内联前端（暖纸账本 + Token tape，claude.ai 字体栈近似，4 tab、服务端分页、自动刷新、导出）
+test/           node:test 测试（132 用例；fixture JSONL → CLI 输出断言；serve → HTTP 端点断言）
 dist/           构建产物（npm 发布内容；不入库）
 .scratch/       功能规格与 issue（token-analyzer / token-analyzer-webui / webui-fixes / npm-publish）
 .github/workflows/publish.yml  tag 触发自动发布
