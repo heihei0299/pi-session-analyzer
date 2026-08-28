@@ -9,7 +9,7 @@
 - **header**：会话文件首行 JSON entry，权威字段 = `id`（会话 ID）、`timestamp`（会话创建时间）、`cwd`（项目归属）、`parentSession`（fork 标记，见下）。
 - **项目归属（cwd）**：以 header `cwd` 为权威（完整绝对路径）；目录名是 cwd 的有损编码（`--` 包裹、`/`→`-`），不可反解，仅展示/辅助分组。聚合按规范化 cwd（resolve 去尾斜杠/符号链接）。
 - **计入口径消息（口径 A）**：`type == "message"` 且 `message.role == "assistant"` 且 `message.usage != null`。toolResult / compaction / branch_summary 等一律不计入。
-
+- **会话数据仓（SessionData）**：会话目录 → 派生窗口（totals/sessions/requests/groups/period/meta）的唯一深模块；单一 `query(filter, view)` interface 内聚 fork 去重（ADR-0001）、cwd 归一缓存、文件级快照缓存、派生、分页排序；CLI / API / watch 为其薄 adapter。
 ## 统计窗口
 
 - **totals（总窗口）**：全量计入口径消息的汇总（requests / input / output / cacheRead / cacheWrite / reasoning / totalTokens / cost / cacheRate）。
@@ -20,10 +20,10 @@
 
 ## 时间归属
 
-- **消息级归属**（webui 统计端点 totals/groups/period/requests 的 since/until 语义）：按消息 `timestamp` 闭区间过滤，跨天会话中落在范围内的请求/消耗计入当天。用户决策（ticket 22/23）。
-- **会话级归属**（sessions 明细端点、CLI `--since/--until`）：按会话 header timestamp 过滤，跨天会话整段归 header 日。口径 A 原语义。
-- 两个层级在跨天场景数字有**预期差异**（webui 统计 vs CLI），spec 已记录。
-
+- **时间范围（TimeRange）**：branded 双语义 — `SessionTimeRange`（`kind: "session"`，按会话 header `timestamp` 闭区间，CLI `--since/--until` 与 sessions 明细/会话管理用）vs `MessageTimeRange`（`kind: "message"`，按消息 `timestamp` 逐条闭区间，webui 统计端点 totals/groups/period/requests 用）。`since` 纯日期按本地 00:00，`until` 按本地 23:59:59.999；无效时间戳消息保守保留。
+- **消息级归属**（`MessageTimeRange`）：webui 统计端点 totals/groups/period/requests 的 since/until 语义，跨天会话中落在范围内的请求/消耗计入当天。用户决策（ticket 22/23）。
+- **会话级归属**（`SessionTimeRange`）：sessions 明细端点与 CLI `--since/--until` 按会话 header timestamp 过滤，跨天会话整段归 header 日。口径 A 原语义。
+- 两个层级在跨天场景数字有**预期差异**（webui 统计 vs CLI），spec 已记录；TimeRange 的 `kind` 在类型层面杜绝传错（SessionData 深模块内单引擎分派）。
 ## 时间语义与网关可比窗口
 
 - **时间参数时区**：webui/CLI 的 since/until 按**本地时区**解释日期（CST）；网关日志 ts 为 UTC。对账时以本地时区解释网关 ts（用户决策 2026-08-06）。
