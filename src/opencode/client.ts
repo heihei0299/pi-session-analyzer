@@ -60,6 +60,9 @@ export class OpenCodeClient {
       if (res.status === 401 || res.status === 403) {
         throw new Error(`认证失效: OpenCode 凭证已过期或无效（HTTP ${res.status}），请刷新 auth cookie（凭证过期）`);
       }
+      if (res.status === 404) {
+        throw new Error(`请求失败: OpenCode 返回 HTTP 404（Function ID 可能已随前端发版更换，或工作区不存在）。请先确认 OPENCODE_AUTH/OPENCODE_WORKSPACE_ID 已配置；若已配置仍 404，需更新 src/opencode/client.ts 中 3 个 FN 哈希（见 spec Further Notes）`);
+      }
       if (res.status >= 500) {
         throw new Error(`服务器错误: OpenCode 服务异常（HTTP ${res.status}），请稍后重试`);
       }

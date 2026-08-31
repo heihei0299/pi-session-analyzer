@@ -1368,7 +1368,8 @@ async function doOpencodeSync(){
     if(scEl) scEl.textContent=res.added+" 新增";
   }catch(e){
     showOpencodeToast("同步失败："+e.message,true);
-    const eb=$("#error-banner"); if(eb){ eb.textContent="OpenCode 同步失败："+e.message; eb.classList.add("show"); }
+    // 降噪：Opencode 同步失败仅走 Toast，不写入全局 error-banner（避免盖住总览筛选项与水印条）
+    // const eb=$("#error-banner"); if(eb){ eb.textContent="OpenCode 同步失败："+e.message; eb.classList.add("show"); }
   }finally{
     btn.disabled=false; btn.classList.remove("syncing"); btn.textContent="🔄 立即同步";
   }

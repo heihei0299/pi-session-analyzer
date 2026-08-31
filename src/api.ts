@@ -119,7 +119,7 @@ export async function handleApi(
       await storage.ensureDataDir();
       const costs = await storage.getCosts(year, month);
       if (costs === null) {
-        throw new ApiError(404, "Not Found", `未找到 ${year}-${String(month).padStart(2, "0")} 的成本数据`);
+        return { status: 200, body: { year, month, costs: { usage: [], keys: [] } } };
       }
       return { status: 200, body: { year, month, costs } };
     }

@@ -122,16 +122,17 @@ test("T1 costs 非法 year/month 格式 400", async () => {
   } finally { removeFixture(sessionDir); restore(); cleanup(opDir); }
 });
 
-test("T1 costs 未找到时 404", async () => {
+test("T1 costs 未找到时返回空 usage（200）", async () => {
   const opDir = tmpDir();
   const { restore } = withOpencodeEnv(opDir);
   const sessionDir = makeFixture({});
   try {
     const res = await handleApi("GET", "/api/opencode/costs", new URLSearchParams("year=2026&month=9"), sessionDir);
-    assert.equal(res.status, 404);
-    const body = res.body as { error: string; detail: string };
-    assert.equal(body.error, "Not Found");
-    assert.ok(body.detail.includes("2026-09") || body.detail.includes("未找到"));
+    assert.equal(res.status, 200);
+    const body = res.body as { year: number; month: number; costs: OpenCodeCostsResult };
+    assert.equal(body.year, 2026);
+    assert.equal(body.month, 9);
+    assert.deepEqual(body.costs, { usage: [], keys: [] });
   } finally { removeFixture(sessionDir); restore(); cleanup(opDir); }
 });
 
