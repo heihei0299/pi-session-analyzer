@@ -81,7 +81,7 @@ npm version 2026.8.28 && git push && git push --tags
 `token-analyzer serve` 启动本地 Web 服务（零依赖，Node 原生 `http` + 单 HTML 内联前端），浏览器访问 `http://127.0.0.1:50080/`：
 
 - **四个 tab**：总览（8 张汇总卡片 + 按模型/cwd 分组表 + Token tape 构成条）/ 会话明细 / 请求明细 / 会话管理（按项目 cwd 分组 + 重命名会话）
-- **视觉**：暖纸账本（`#F5F4ED`）+ 墨 `#0E1320` + 陶土 `#D97757`，`Instrument Serif`（标题/数值）/ `Inter`（正文）/ `JetBrains Mono`（数据）三栈参照 claude.ai（`Anthropic Serif/Sans/Mono` 近似）
+- **视觉**：仪器台（bakelite 台面 `#0F1312` + enamel 纸面 `#FFFEF8` + 黄铜 `#C5A254` + 仪表青 `#0FA08C` + 报警朱 `#E2452E`，鼓轮读数 + 黄铜铆钉 + 链孔纸带），`Fraunces`（标题/数值）/ `IBM Plex Sans`（正文）/ `JetBrains Mono`（数据）
 - **时间范围**：今天（默认） / 7天 / 30天 / 全部 / 自定义（date 日期 + 时分下拉 00:00-23:59，按本地时间解释，打开时自动预填当前筛选或数据范围），作用于总览与明细与导出；默认窗口 = 今天（本地今天 00:00-23:59:59.999）；头部「范围」胶囊随筛选即时显示，下方状态行范围提示已移除
 - **明细服务端分页排序**：会话/请求明细每页 20/50/100 行，点击列头排序——翻页/排序/改页大小重新 fetch（page/size/sortKey/sortDir），不再全量拉取（真实数据 /api/requests 26.7MB → 每页 ~20KB）；会话明细显示筛选合计（总 tokens/请求/会话数，含任务）且任务会话带“任务”角标
 - **统计口径（webui）**：时间筛选按**消息 timestamp 消息级**归属（跨天会话的凌晨请求计入当天，与明细一致）；「输入」列显示**总输入**（非缓存 input + 缓存命中 cacheRead，与 pi-switch 网关 Input 对齐）；CLI 与导出保持原始字段
@@ -123,7 +123,7 @@ src/
   watch.ts      实时监控增量读取器
   server.ts     serve HTTP 服务器（路由分发、生命周期、EADDRINUSE 友好提示）
   api.ts        HTTP API 层（薄路由，委托 session-data.query，统一错误体、会话重命名）
-  webui.html    单 HTML 内联前端（暖纸账本 + Token tape，claude.ai 字体栈近似，4 tab、服务端分页、自动刷新、导出）
+  webui.html    单 HTML 内联前端（仪器台 dark bench + 鼓轮读数 + 链孔纸带，4 tab、服务端分页、自动刷新、导出）
 test/           node:test 测试（132 用例；fixture JSONL → CLI 输出断言；serve → HTTP 端点断言）
 dist/           构建产物（npm 发布内容；不入库）
 .scratch/       功能规格与 issue（token-analyzer / token-analyzer-webui / webui-fixes / npm-publish）

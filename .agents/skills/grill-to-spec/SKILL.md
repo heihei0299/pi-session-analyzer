@@ -1,6 +1,6 @@
 ---
 name: grill-to-spec
-description: "Router：编排 grill-with-docs → to-spec，只打磨设计与产出文档/spec，不写代码。"
+description: "Router：编排 grill-with-docs → to-spec，把模糊想法打磨成可执行 Spec。Use when the user asks to grill/design/polish an idea into a spec——只产出领域文档与 spec，不写代码。"
 disable-model-invocation: true
 ---
 
@@ -32,7 +32,8 @@ disable-model-invocation: true
    2. 草稿：按 ADR-FORMAT 把完整标题+正文展示给用户审阅，等待反馈
    3. 确认：用户显式说「确认/写入」才落盘；用户拒绝则不写、继续访谈；用户要求修改则改草稿重新确认
    4. 未确认前不得创建或写入 `docs/adr/` 下的任何文件
-② 加载 `/to-spec`：探索代码（glossary 词汇贯穿 spec、尊重相关 ADR）→ 确认 seams（既有优先、最高 seam、理想一个）→ 按七节模板编写 spec 草稿 → 展示给用户确认（只展示等决定，不新增采访提问）→ 发布到 `.scratch/<feature-slug>/spec.md` 并标 `ready-for-agent`。出口：spec 已发布。
+
+② 加载 `/to-spec`：探索代码（glossary 词汇贯穿 spec、尊重相关 ADR）→ 确认 seams（既有优先、最高 seam、理想一个）→ 编写 spec 草稿 → 展示给用户确认（只展示等决定，不新增采访提问）→ 发布到 `.scratch/<feature-slug>/spec.md` 并标 `ready-for-agent`。出口：spec 已发布。
 
 ## 产出物（格式严格对齐下游技能）
 
@@ -44,32 +45,18 @@ disable-model-invocation: true
 | ADR | `docs/adr/NNNN-slug.md`（多上下文：系统级在根，上下文级在 `src/<ctx>/docs/adr/`） | [ADR-FORMAT.md](.agents/skills/domain-modeling/ADR-FORMAT.md) |
 | Spec | 发布到 issue tracker：`.scratch/<feature-slug>/spec.md` | [to-spec 七节模板](.agents/skills/to-spec/SKILL.md) |
 
-### Glossary 守则
-- 懒创建：首个术语解析时才建 `CONTEXT.md`；多上下文时先确认归属，归属不清则询问
-- 只是 glossary：零实现细节，不当 spec/scratch pad
-- 只收本上下文特有术语，通用编程概念不收
-- 定义 WHAT 非 HOW，1-2 句；opinionated，同义词列 `_Avoid_`；术语解析即 inline 更新，不批量
+三类产出物的格式细则（Glossary 守则 / ADR 守则 / Spec 守则）见 [references/rules.md](references/rules.md)——SKILL.md 不重复细节。
 
-### ADR 守则
-- 三条件全满足才提议（难逆转 / 无上下文费解 / 真实权衡）；`docs/adr/` 懒创建
-- 格式：标题 + 1-3 句正文；可选节（Status/Considered Options/Consequences）按需，大多数不需要
-- 编号：`0001-slug.md` 顺序递增，扫描最高号 +1
-- 草稿经用户显式确认后落盘，任何情况无例外（见流程①）
+## 不可协商规则（无任何例外）
 
-### Spec 守则
-- 完整七节模板逐节不缺：Problem Statement / Solution / User Stories / Implementation Decisions / Testing Decisions / Out of Scope / Further Notes
-- User Stories：长编号列表，`As an <actor>, I want a <feature>, so that <benefit>` 格式
-- Implementation Decisions：不含文件路径/代码片段；例外——原型产出的决策密集片段可 inline，注明来源并裁剪至决策部分
-- 全文贯穿 glossary 词汇；尊重所触区域既有 ADR
-- seams：既有优先于新建、取最高、理想数量 1，与用户确认
-- 发布后标 `ready-for-agent`，triage 状态以 issue 文件顶部 `Status:` 行记录
+- **写入 ADR 必须由用户显式确认，无论任何情况、无任何例外**：三条件全满足、决策看似显然、② 补记，均不豁免。ADR 一旦落盘记录不可撤销（可 supersede，但痕迹永存），全部门槛都在写入之前
+- **ADR 与 glossary 不对称**：`CONTEXT.md` 术语可随访谈 inline 更新（domain-modeling 规则），ADR 必须先审草稿、用户确认后才落盘——禁止把 inline 逻辑套用到 ADR
 
 ## 回退
 
 | 触发点 | 条件 | 动作 |
 |--------|------|------|
 | ② seam 确认 | 用户不同意 seams | → ① 补充 |
-| ② 综合时 | 关键信息缺失 | → ① 补采 |
 | ② 发布后 | spec 有问题 | → ① 重新循环 |
 
 ## 异常终止
@@ -84,9 +71,6 @@ disable-model-invocation: true
 
 - ① 出口达成后方可进入 ②
 - 全程不写代码、不动源码：唯一允许写入的文件是领域文档（`CONTEXT.md`/ADR）与 spec
-- ② 探索代码只为确认 seams 与术语——只读不改
-- **写入 ADR 必须由用户显式确认，无论任何情况、无任何例外**：三条件全满足、决策看似显然、② 补记，均不豁免。ADR 一旦落盘记录不可撤销（可 supersede，但痕迹永存），全部门槛都在写入之前
-- **ADR 与 glossary 不对称**：`CONTEXT.md` 术语可随访谈 inline 更新（domain-modeling 规则），ADR 必须先审草稿、用户确认后才落盘——禁止把 inline 逻辑套用到 ADR
 
 ## 引用
 

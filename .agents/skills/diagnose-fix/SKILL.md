@@ -34,7 +34,6 @@ description: "Complete diagnosis→fix→regression channel for bugs: diagnose, 
 
 - **无逃生舱**：不存在正确 seam 时，**本身即 finding**——向用户明确说明"架构阻止锁定该 bug"，请求 seam 决策或记录为架构改进建议（可转交 `/improve-codebase-architecture`）；**不得**绕过测试直接改代码。
 - **轻量声明**：本技能不套用 tdd-implement 的重流程——不做逐 todo 的循环编排、不设 seams 确认步骤、无 typecheck/commit 前置门禁；单 seam 修复场景直走红-绿。
-
 **出口条件**：回归测试先红 → 写最小修复 → 回归测试变绿。
 
 ## ③ 回归验证
