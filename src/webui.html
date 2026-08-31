@@ -496,14 +496,18 @@ function updateStatusRange() {
   if (!lastMeta) return;
   const { since, until } = filterRangeText();
   const rangeEl=$("#meta-range");
-  const statusLine=$("#status-line");
   const pillText = since !== null || until !== null ? `${since ?? "开始"} ~ ${until ?? "现在"}` : `${fmtTimestamp(lastMeta.dataRange.since) || "-"} ~ ${fmtTimestamp(lastMeta.dataRange.until) || "-"}`;
   if(rangeEl) rangeEl.textContent=pillText;
+  const statusLine=$("#status-line");
   if(statusLine){
     const upd=$("#updated-at");
     const updHtml = upd && !upd.classList.contains("hidden") ? upd.outerHTML : "";
-    statusLine.innerHTML=`范围: ${pillText} ${updHtml}`;
-    if(upd && upd.textContent) statusLine.querySelector("#updated-at").textContent=upd.textContent;
+    statusLine.innerHTML = updHtml ? `${updHtml}` : "";
+    if(upd && upd.textContent) {
+      const el = statusLine.querySelector("#updated-at");
+      if(el) el.textContent=upd.textContent;
+    }
+    statusLine.style.display = updHtml ? "" : "none";
   }
 }
 function renderCards(totals){
@@ -569,8 +573,51 @@ function applyPreset(preset) {
     state.until = null;
     $("#custom-range").classList.add("hidden");
   } else if (preset === "custom") {
-    // 恢复时间框显示并立即应用控件当前值（输入即生效；f404b3d 误删此分支导致时间框不出现）
     $("#custom-range").classList.remove("hidden");
+    (function(){
+      const pad=n=>String(n).padStart(2,"0");
+      const setCustom=(dateSel,hourSel,minuteSel,val,isUntil)=>{
+        const dateEl=$(dateSel), hourEl=$(hourSel), minuteEl=$(minuteSel);
+        if(!dateEl||!hourEl||!minuteEl) return;
+        if(!val){
+          dateEl.value=""; hourEl.value=""; minuteEl.value="";
+          return;
+        }
+        let d;
+        if(/^\d{4}-\d{2}-\d{2}$/.test(val)){
+          d=new Date(val+"T00:00:00");
+          dateEl.value=val;
+          hourEl.value=isUntil?"23":"00";
+          minuteEl.value=isUntil?"59":"00";
+          return;
+        }
+        if(val.endsWith("Z")){
+          d=new Date(val);
+        }else{
+          d=new Date(val);
+        }
+        if(Number.isNaN(d.getTime())){
+          dateEl.value=""; hourEl.value=""; minuteEl.value="";
+          return;
+        }
+        dateEl.value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+        if(val.includes("T")||val.includes(":")){
+          hourEl.value=pad(d.getHours());
+          const m=d.getMinutes();
+          const allowed=["00","15","30","45","59"];
+          const ms=pad(m);
+          minuteEl.value=allowed.includes(ms)?ms:(m>=59?"59":m>=45?"45":m>=30?"30":m>=15?"15":"00");
+        }else{
+          hourEl.value=""; minuteEl.value="";
+        }
+      };
+      const sVal=state.since ?? (lastMeta?.dataRange?.since ?? null);
+      const uVal=state.until ?? (lastMeta?.dataRange?.until ?? null);
+      // 若无任何值（首次加载且无数据），用今天
+      const today=dateStr(new Date());
+      setCustom("#since-date","#since-hour","#since-minute", sVal ?? today, false);
+      setCustom("#until-date","#until-hour","#until-minute", uVal ?? today, true);
+    })();
     applyCustomRange();
   } else {
     const days = preset === "today" ? 0 : preset === "7d" ? 6 : 29;
