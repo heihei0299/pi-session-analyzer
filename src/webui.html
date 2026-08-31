@@ -408,6 +408,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
         <tbody id="session-body"></tbody>
       </table>
     </div>
+    <div id="session-summary" style="margin:8px 0 4px;font:500 12px var(--font-mono);color:var(--slate)"></div>
     <div class="pager">
       <label>每页 <select id="session-page-size"><option value="20" selected>20</option><option value="50">50</option><option value="100">100</option></select> 行</label>
       <button id="session-prev" class="page-btn">上一页</button>
@@ -639,7 +640,7 @@ const METRIC_FMTS = {
 };
 // 排序/分页在服务端执行（避免明细端点全量传输）；rows=当前页、total=筛选后全量行数
 const detailState = {
-  sessions: { sortKey: null, sortDir: "asc", page: 1, size: 20, rows: [], total: 0 },
+  sessions: { sortKey: null, sortDir: "asc", page: 1, size: 20, rows: [], total: 0, totals: null },
   requests: { sortKey: "timestamp", sortDir: "desc", page: 1, size: 20, rows: [], total: 0 },
 };
 
@@ -654,6 +655,7 @@ async function fetchRows(kind) {
   const data = await api(kind, params);
   st.rows = data.rows;
   st.total = data.total;
+  if (kind === "sessions" && data.totals) st.totals = data.totals;
   return st;
 }
 function renderDetailTable(kind) {
@@ -666,7 +668,16 @@ function renderDetailTable(kind) {
   // 缓存列 = cacheRead+cacheWrite；输入列 = 总输入（非缓存 input + 缓存命中 cacheRead，ticket 24 与网关 Input 对齐）
   const valueOf = (r, c) => c === "cache" ? (r.cacheRead ?? 0) + (r.cacheWrite ?? 0) : c === "input" ? (r.input ?? 0) + (r.cacheRead ?? 0) : r[c];
   bodyEl.innerHTML = pageRows
-    .map((r) => "<tr>" + cols.map((c) => `<td>${(METRIC_FMTS[c] ? METRIC_FMTS[c](valueOf(r, c)) : valueOf(r, c)) ?? ""}</td>`).join("") + "</tr>")
+    .map((r) => "<tr>" + cols.map((c) => {
+      if (kind === "sessions" && c === "displayName" && r.isTask) {
+        const v = valueOf(r, c);
+        const base = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
+        return `<td>${base} <span style="background:var(--cache-soft);border:1px solid #E8D8A6;border-radius:999px;padding:1px 6px;font:600 10px var(--font-mono);color:var(--slate)">任务</span></td>`;
+      }
+      const v = valueOf(r, c);
+      const out = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
+      return `<td>${out}</td>`;
+    }).join("") + "</tr>")
     .join("");
   headEl.querySelectorAll("th").forEach((th) => {
     const arrow = th.querySelector(".arrow");
@@ -679,6 +690,14 @@ function renderDetailTable(kind) {
   // 翻页键状态：首页禁上一页、末页禁下一页
   $("#" + DETAIL_ID[kind] + "-prev").disabled = st.page <= 1;
   $("#" + DETAIL_ID[kind] + "-next").disabled = st.page >= pages;
+  if (kind === "sessions" && st.totals) {
+    const sumEl = $("#session-summary");
+    if (sumEl) {
+      const hasTask = (st.totals && st.rows.some(r=>r.isTask)) || st.rows.some(r=>r.isTask);
+      sumEl.textContent = `筛选合计: ${fmtCompact(st.totals.totalTokens)} tokens · ${st.totals.requests} 请求 · ${st.total} 会话${hasTask ? " · 含任务" : ""} ｜ 当前页 ${st.rows.length} 行`;
+      sumEl.title = `总计 ${st.totals.totalTokens.toLocaleString()} tokens，${st.totals.requests} 请求，${st.total} 会话（已按时间与筛选条件聚合，含子代理任务）`;
+    }
+  }
 }
 async function refreshSessionTable(){try{clearError(); await fetchRows("sessions"); renderDetailTable("sessions")}catch(e){showError("会话明细加载失败: "+e.message)}}
 async function refreshRequestTable(){try{clearError(); await fetchRows("requests"); renderDetailTable("requests")}catch(e){showError("请求明细加载失败: "+e.message)}}

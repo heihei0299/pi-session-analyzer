@@ -12,8 +12,11 @@
  * - 明细 tab fetchRows/snapshot 携带 since/until（filterParams()）。
  * - /api/requests 时间过滤改为**消息级**（按消息 timestamp，跨天会话保留范围内请求）；
  *   /api/sessions、totals、groups、period 保持会话级（口径不变）。
+ * 修复（2026-09-01 总览与会话明细对不上 bugfix）：
+ * - /api/sessions 亦改为**消息级**，跨天会话的当日请求计入会话明细，使总览 totals 与会话明细求和一致
+ *   （修复前 totals 消息级 79M vs sessions 会话级 33M；修复后均为消息级 82M 对齐）。
  *
- * 断言：API 消息级/会话级差异、前端 fetchRows 携带筛选、状态行筛选范围逻辑、非法参数 400。
+ * 断言：API 消息级差异、前端 fetchRows 携带筛选、状态行筛选范围逻辑、非法参数 400。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -68,20 +71,29 @@ test("requests 明细消息级时间过滤：跨天会话保留范围内消息�
   });
 });
 
-test("sessions 保持会话级；totals 消息级（ticket 23：总览统计含跨天凌晨请求）", async () => {
+test("sessions 与 totals 均为消息级（2026-09-01 修复：会话明细与总览对齐，含跨天会话当日请求）", async () => {
   await withServer(async (url) => {
     const s = (await (await fetch(new URL("/api/sessions?since=2026-08-06&until=2026-08-06", url))).json()) as {
-      rows: { sessionId: string }[];
+      rows: { sessionId: string; requests: number; input: number }[];
       total: number;
+      page?: number; size?: number;
     };
-    assert.equal(s.total, 1, "sessions 会话级：仅会话 B（header 8/6）");
-    assert.deepEqual(s.rows.map((r) => r.sessionId), ["b2"]);
+    // 消息级：会话 A 因含 m1（本地 8/6 00:30）而保留，会话 B 因含 m3 保留，共 2 行
+    assert.equal(s.total, 2, "sessions 消息级：跨天会话 A + 会话 B（均含范围内消息）");
+    assert.deepEqual(s.rows.map((r) => r.sessionId).sort(), ["a1", "b2"]);
+    // 会话 A 的聚合仅含范围内消息 m1（input 100），m2（本地 8/5 23:00）已在消息级被剔除
+    const a1 = s.rows.find((r) => r.sessionId === "a1")!;
+    assert.equal(a1.requests, 1, "会话 A 仅计入范围内消息 m1");
+    assert.equal(a1.input, 100, "会话 A input 仅为 m1 的 100（m2 已过滤）");
 
     // totals 消息级：m1（本地 8/6 00:30，跨天会话 A）+ m3（本地 8/6 10:30，会话 B）
     const t = (await (await fetch(new URL("/api/totals?since=2026-08-06&until=2026-08-06", url))).json()) as {
       requests: number;
     };
     assert.equal(t.requests, 2, "totals 消息级：m1 + m3（含跨天会话 A 的凌晨请求）");
+    // 校验 sessions 求和与 totals 一致（修复目标：总览与明细总 token 对得上）
+    const sumRequests = s.rows.reduce((sum, r) => sum + r.requests, 0);
+    assert.equal(sumRequests, t.requests, "sessions 求和与 totals 一致");
   });
 });
 

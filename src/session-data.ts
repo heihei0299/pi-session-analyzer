@@ -36,6 +36,8 @@ export interface SessionFileData {
   timestamp: string;
   cwd: string;
   fileName?: string;
+  /** 是否为子代理任务会话（路径含 /tasks/） */
+  isTask?: boolean;
   firstUserText?: string;
   items: { timestamp: string; model: string; usage: Usage }[];
 }
@@ -57,11 +59,11 @@ export type View =
   | { kind: "period"; period: Period }
   | { kind: "meta" };
 
-export type SessionRowEnriched = SessionRow & { fileName: string; displayName: string; cwdNorm: string };
+export type SessionRowEnriched = SessionRow & { fileName: string; displayName: string; cwdNorm: string; isTask: boolean };
 export type RequestRowEnriched = RequestRow & { displayName: string };
 
 export interface QueryResultTotals { window: "totals"; totals: Totals }
-export interface QueryResultSessions { window: "sessions"; rows: SessionRowEnriched[]; total: number; page?: number; size?: number }
+export interface QueryResultSessions { window: "sessions"; rows: SessionRowEnriched[]; total: number; page?: number; size?: number; totals: Totals }
 export interface QueryResultRequests { window: "requests"; rows: RequestRowEnriched[]; total: number; page?: number; size?: number }
 export interface QueryResultGroups { window: "totals"; by: GroupBy; rows: GroupRow[] }
 export interface QueryResultPeriod { window: "totals"; period: Period; rows: PeriodRow[] }
@@ -196,7 +198,7 @@ export class SessionData {
       }
     } finally { rl.close(); }
     if (header === null) return null;
-    return { sessionId: typeof header.id === "string" ? header.id : "", timestamp: typeof header.timestamp === "string" ? header.timestamp : "", cwd: typeof header.cwd === "string" ? header.cwd : "", fileName: basename(file), firstUserText, items };
+    return { sessionId: typeof header.id === "string" ? header.id : "", timestamp: typeof header.timestamp === "string" ? header.timestamp : "", cwd: typeof header.cwd === "string" ? header.cwd : "", fileName: basename(file), isTask: file.includes("/tasks/") || file.includes("\\tasks\\"), firstUserText, items };
   }
 
   async readSessionFiles(dir: string): Promise<SessionFileData[]> {
@@ -380,11 +382,11 @@ export class SessionData {
         const rowsRaw = this.sessionRowsFromFiles(filtered).map((r, i) => {
           const f = filtered[i];
           const fileName = f.fileName ?? "";
-          return { ...r, fileName, displayName: this.displayNameOf(fileName, f.firstUserText), cwdNorm: this.normalizeCwd(f.cwd) } as SessionRowEnriched;
+          return { ...r, fileName, displayName: this.displayNameOf(fileName, f.firstUserText), cwdNorm: this.normalizeCwd(f.cwd), isTask: f.isTask ?? false } as SessionRowEnriched;
         });
         // 转为 Record 以复用 paginate 的排序（需将 enriched 视为 Record）
         const paged = this.paginate(rowsRaw as unknown as Record<string, unknown>[], view.page, view.size, view.sortKey, view.sortDir);
-        return { window: "sessions", rows: paged.rows as unknown as SessionRowEnriched[], total: paged.total, page: paged.page, size: paged.size };
+        return { window: "sessions", rows: paged.rows as unknown as SessionRowEnriched[], total: paged.total, page: paged.page, size: paged.size, totals: this.totalsFromFiles(filtered) };
       }
       case "requests": {
         const nameBySession = new Map<string, string>();

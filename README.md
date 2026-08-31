@@ -83,13 +83,13 @@ npm version 2026.8.28 && git push && git push --tags
 - **四个 tab**：总览（8 张汇总卡片 + 按模型/cwd 分组表 + Token tape 构成条）/ 会话明细 / 请求明细 / 会话管理（按项目 cwd 分组 + 重命名会话）
 - **视觉**：暖纸账本（`#F5F4ED`）+ 墨 `#0E1320` + 陶土 `#D97757`，`Instrument Serif`（标题/数值）/ `Inter`（正文）/ `JetBrains Mono`（数据）三栈参照 claude.ai（`Anthropic Serif/Sans/Mono` 近似）
 - **时间范围**：今天 / 7天 / 30天 / 自 8/1（网关可比，默认） / 全部 / 自定义（date 日期 + 时分下拉，按本地时间解释），作用于总览与明细与导出；默认窗口 = 网关可比（since=`2026-08-01T00:00:00Z` UTC 精确，状态行标注「（网关可比）」）；状态行「范围」随筛选即时显示（未筛选时显示数据范围 min/max）
-- **明细服务端分页排序**：会话/请求明细每页 20/50/100 行，点击列头排序——翻页/排序/改页大小重新 fetch（page/size/sortKey/sortDir），不再全量拉取（真实数据 /api/requests 26.7MB → 每页 ~20KB）
+- **明细服务端分页排序**：会话/请求明细每页 20/50/100 行，点击列头排序——翻页/排序/改页大小重新 fetch（page/size/sortKey/sortDir），不再全量拉取（真实数据 /api/requests 26.7MB → 每页 ~20KB）；会话明细显示筛选合计（总 tokens/请求/会话数，含任务）且任务会话带“任务”角标
 - **统计口径（webui）**：时间筛选按**消息 timestamp 消息级**归属（跨天会话的凌晨请求计入当天，与明细一致）；「输入」列显示**总输入**（非缓存 input + 缓存命中 cacheRead，与 pi-switch 网关 Input 对齐）；CLI 与导出保持原始字段
 - **自动刷新**：Off / 5s / 30s / 5min（后端每请求全量重算），数据变化时状态行显示「已更新 HH:MM:SS」
 - **导出**：JSON（`{ totals, sessions, requests }`）与 CSV（`# totals` / `# sessions` / `# requests` 三段式）下载当前筛选范围
 - **会话管理**：按规范化 cwd 分组展示全部会话（组可折叠），点击名称行内编辑重命名——改文件名前缀保留尾 UUID（`<显示名>_<UUID>.jsonl`），仅非活跃会话（mtime > 5min）可改，非法名 400 / 不存在 404 / 活跃与重名 409
 
-HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` / `sessions` / `requests` / `groups?by=` / `period?period=` / `meta`（筛选参数 `model`/`cwd`/`since`/`until`；明细端点另支持 `page`/`size`/`sortKey`/`sortDir`，响应含 `total`）+ `POST /api/sessions/rename`；错误统一 `{ error, detail }`（400/404/409/500）。
+HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` / `sessions` / `requests` / `groups?by=` / `period?period=` / `meta`（筛选参数 `model`/`cwd`/`since`/`until`；明细端点另支持 `page`/`size`/`sortKey`/`sortDir`，响应含 `total`，`sessions` 另含 `totals` 聚合计与行 `isTask` 任务标记）+ `POST /api/sessions/rename`；错误统一 `{ error, detail }`（400/404/409/500）。
 
 ## 统计口径（口径 A）
 
@@ -101,7 +101,7 @@ HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` 
 - **花费**：直接累加 `usage.cost.total`；全 0 花费标注「费率未配置（免费/未定价）」
 - **模型归属**：请求级（每条消息的 `model` 字段）
 - **cwd 归属**：会话 header `cwd` 为权威键，规范化（绝对路径、去尾斜杠、符号链接解析）；目录名有损编码不参与归属
-- **时间归属**：CLI `--since`/`--until` 按会话 header timestamp 闭区间（含端点）；webui 统计端点按消息 timestamp（跨天差异见 spec/ADR）
+- **时间归属**：CLI `--since`/`--until` 按会话 header timestamp 闭区间（含端点）；webui 全端点（`totals`/`sessions`/`requests`/`groups`/`period`）按消息 timestamp 消息级（跨天会话凌晨请求计入当天，总览与会话明细求和一致；与 CLI 在跨天场景有预期差异）
 - **网关可比窗口**：pi-switch 网关数据起点 = `2026-08-01T00:00:00Z`（UTC）；webui「自 8/1」预设即此起点（默认窗口），切「全部」查看含 8/1 前数据的完整历史
 - **时区语义**：webui/CLI 时间参数按本地时区解释（CST 自然日）；网关日志 `ts` 为 UTC——对账时以本地时区解释网关 ts，「今天」边界差 8 小时属预期
 - **与网关对比**（2026-08-06 对账）：8/1 起累计 session 940.5M vs 网关 935.0M（差 0.6%）；8/2、8/4 分毫不差；差异全部为覆盖结构——8/1 网关刚启用（仅 4 条记录，+37.2M）、8/3/8/5 网关多出其他客户端请求、pi 直连请求只在 session 目录；CLI 全量窗口含 8/1 前数据（≈494M）与网关不可比

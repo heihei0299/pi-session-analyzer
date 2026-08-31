@@ -47,7 +47,7 @@ export async function handleApi(
       return { status: 200, body: { window: "totals", ...totalsToObject(result.totals) } };
     }
     if (method === "GET" && pathname === "/api/sessions") {
-      const filter = filterFromParams(params, "session");
+      const filter = filterFromParams(params, "message");
       const paging = parsePagingAndSort(params);
       const result = await defaultSessionData.query(dir, filter, {
         kind: "sessions",
@@ -55,15 +55,16 @@ export async function handleApi(
         size: paging.paging?.size,
         sortKey: paging.sort?.sortKey,
         sortDir: paging.sort?.sortDir,
-      }) as { rows: unknown[]; total: number; page?: number; size?: number };
+      }) as { rows: unknown[]; total: number; page?: number; size?: number; totals: import("./aggregate.ts").Totals };
       // 将 SessionData 的 enriched 行转为 API 响应（已含 fileName/displayName/cwdNorm，补充 serialize）
       const rows = (result.rows as Array<Record<string, unknown>>).map((r) => ({
         ...sessionToObject(r as unknown as import("./aggregate.ts").SessionRow),
         fileName: r.fileName,
         displayName: r.displayName,
         cwdNorm: r.cwdNorm,
+        isTask: r.isTask,
       }));
-      const out: Record<string, unknown> = { window: "sessions", rows, total: result.total };
+      const out: Record<string, unknown> = { window: "sessions", rows, total: result.total, totals: totalsToObject(result.totals) };
       if (result.page !== undefined) { out.page = result.page; out.size = result.size; }
       return { status: 200, body: out };
     }
