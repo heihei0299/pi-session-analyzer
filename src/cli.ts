@@ -21,11 +21,26 @@ import { emptyTotals, type GroupBy, type Period, type Totals } from "./aggregate
 import { renderTotalsTable, renderSessionTable, renderRequestTable, renderGroupTable, renderPeriodTable } from "./render.ts";
 import { serializeJson, serializeCsv, serializeGroupJson, serializeGroupCsv, serializePeriodJson, serializePeriodCsv } from "./serialize.ts";
 import { startWebServer } from "./server.ts";
+import { runOpencodeSync, runOpencodeExport } from "./opencode/cli.ts";
 
 const DEFAULT_DIR = join(homedir(), ".pi", "agent", "sessions");
 
 export type WindowName = "totals" | "sessions" | "requests";
 export type FormatName = "table" | "json" | "csv";
+
+export interface OpencodeSyncCliOpts {
+  auth?: string;
+  workspace?: string;
+  full: boolean;
+  limit?: number;
+  dataDir: string;
+}
+export interface OpencodeExportCliOpts {
+  format: "json" | "csv";
+  output?: string;
+  month?: string;
+  dataDir: string;
+}
 
 export interface CliArgs {
   window: WindowName;
@@ -57,9 +72,18 @@ export interface CliArgs {
   help: boolean;
   /** -v/--version：显示版本 */
   version: boolean;
+  /** opencode 子命令 */
+  opencode?: "sync" | "export";
+  opencodeSync?: OpencodeSyncCliOpts;
+  opencodeExport?: OpencodeExportCliOpts;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
+  // opencode 子命令优先处理（要求位于首位）
+  if (argv.length > 0 && argv[0] === "opencode") {
+    return parseOpencodeArgs(argv);
+  }
+
   let window: WindowName = "totals";
   let dir = DEFAULT_DIR;
   let format: FormatName = "table";
@@ -181,6 +205,196 @@ export function parseArgs(argv: string[]): CliArgs {
   return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version };
 }
 
+function parseOpencodeArgs(argv: string[]): CliArgs {
+  // argv[0] === "opencode"
+  let dir = DEFAULT_DIR;
+  let format: FormatName = "table";
+  let model: string | undefined;
+  let cwd: string | undefined;
+  let by: GroupBy | undefined;
+  let since: string | undefined;
+  let until: string | undefined;
+  let period: Period | undefined;
+  let watch = false;
+  let interval = 1000;
+  let serve = false;
+  let port = 50080;
+  let host = "127.0.0.1";
+  let help = false;
+  let version = false;
+
+  // 全局 help/version 预检
+  for (const a of argv) {
+    if (a === "-h" || a === "--help") help = true;
+    if (a === "-v" || a === "--version") version = true;
+  }
+  if (help || version) {
+    // 帮助模式仍返回基础结构，opencode 子类型按需解析
+    const sub = argv[1] as "sync" | "export" | undefined;
+    if (sub === "sync" || sub === "export") {
+      return {
+        window: "totals",
+        dir,
+        format,
+        model,
+        cwd,
+        by,
+        since,
+        until,
+        period,
+        watch,
+        interval,
+        serve,
+        port,
+        host,
+        help,
+        version,
+        opencode: sub,
+        opencodeSync: sub === "sync" ? { auth: undefined, workspace: undefined, full: false, limit: undefined, dataDir: "data/opencode" } : undefined,
+        opencodeExport: sub === "export" ? { format: "json", output: undefined, month: undefined, dataDir: "data/opencode" } : undefined,
+      };
+    }
+    return { window: "totals", dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version };
+  }
+
+  const sub = argv[1];
+  if (!sub) {
+    throw new Error(`缺少 opencode 子命令（支持 sync/export）`);
+  }
+  if (sub !== "sync" && sub !== "export") {
+    throw new Error(`未知 opencode 子命令: ${sub}（支持 sync/export）`);
+  }
+
+  if (sub === "sync") {
+    let auth: string | undefined;
+    let workspace: string | undefined;
+    let full = false;
+    let limit: number | undefined;
+    let dataDir = "data/opencode";
+    for (let i = 2; i < argv.length; i++) {
+      const b = argv[i];
+      if (b === "--auth" && argv[i + 1]) {
+        auth = argv[i + 1];
+        i++;
+      } else if (b === "--auth") {
+        throw new Error(`缺少参数: --auth 需要凭证`);
+      } else if (b === "--workspace" && argv[i + 1]) {
+        workspace = argv[i + 1];
+        i++;
+      } else if (b === "--workspace") {
+        throw new Error(`缺少参数: --workspace 需要工作区ID`);
+      } else if (b === "--full") {
+        full = true;
+      } else if (b === "--limit" && argv[i + 1]) {
+        const n = Number(argv[i + 1]);
+        if (!Number.isInteger(n) || n <= 0) {
+          throw new Error(`无效 limit: ${argv[i + 1]}（需为正整数）`);
+        }
+        limit = n;
+        i++;
+      } else if (b === "--limit") {
+        throw new Error(`缺少参数: --limit 需要页数`);
+      } else if ((b === "--data-dir" || b === "--dataDir") && argv[i + 1]) {
+        dataDir = argv[i + 1];
+        i++;
+      } else if (b === "--data-dir" || b === "--dataDir") {
+        throw new Error(`缺少参数: --data-dir 需要目录`);
+      } else if (b === "-h" || b === "--help" || b === "-v" || b === "--version") {
+        // 已在顶部处理，此处忽略
+        continue;
+      } else if (b.startsWith("-")) {
+        throw new Error(`未知参数: ${b}（可用 -h 查看帮助）`);
+      } else {
+        throw new Error(`未知参数: ${b}（可用 -h 查看帮助）`);
+      }
+    }
+    return {
+      window: "totals",
+      dir,
+      format,
+      model,
+      cwd,
+      by,
+      since,
+      until,
+      period,
+      watch,
+      interval,
+      serve,
+      port,
+      host,
+      help,
+      version,
+      opencode: "sync",
+      opencodeSync: { auth, workspace, full, limit, dataDir },
+    };
+  } else {
+    // export
+    let expFormat: "json" | "csv" = "json";
+    let output: string | undefined;
+    let month: string | undefined;
+    let dataDir = "data/opencode";
+    for (let i = 2; i < argv.length; i++) {
+      const b = argv[i];
+      if (b === "--format" && argv[i + 1]) {
+        const f = argv[i + 1];
+        if (f !== "json" && f !== "csv") {
+          throw new Error(`未知格式: ${f}（支持 json/csv）`);
+        }
+        expFormat = f as "json" | "csv";
+        i++;
+      } else if (b === "--format") {
+        throw new Error(`缺少参数: --format 需要值`);
+      } else if (b === "--output" && argv[i + 1]) {
+        output = argv[i + 1];
+        i++;
+      } else if (b === "--output") {
+        throw new Error(`缺少参数: --output 需要路径`);
+      } else if (b === "--month" && argv[i + 1]) {
+        const m = argv[i + 1];
+        if (!/^\d{4}-\d{2}$/.test(m) || Number(m.slice(5)) < 1 || Number(m.slice(5)) > 12) {
+          throw new Error(`无效月份: ${m}（需为 YYYY-MM）`);
+        }
+        month = m;
+        i++;
+      } else if (b === "--month") {
+        throw new Error(`缺少参数: --month 需要值`);
+      } else if ((b === "--data-dir" || b === "--dataDir") && argv[i + 1]) {
+        dataDir = argv[i + 1];
+        i++;
+      } else if (b === "--data-dir" || b === "--dataDir") {
+        throw new Error(`缺少参数: --data-dir 需要目录`);
+      } else if (b === "-h" || b === "--help" || b === "-v" || b === "--version") {
+        continue;
+      } else if (b.startsWith("-")) {
+        throw new Error(`未知参数: ${b}（可用 -h 查看帮助）`);
+      } else {
+        throw new Error(`未知参数: ${b}（可用 -h 查看帮助）`);
+      }
+    }
+    return {
+      window: "totals",
+      dir,
+      format,
+      model,
+      cwd,
+      by,
+      since,
+      until,
+      period,
+      watch,
+      interval,
+      serve,
+      port,
+      host,
+      help,
+      version,
+      opencode: "export",
+      opencodeExport: { format: expFormat, output, month, dataDir },
+    };
+  }
+}
+
 /** serve 模式参数校验：仅允许 --port/--host/--dir，其余一律拒绝（避免静默忽略） */
 function validateServeMode(argv: string[]): void {
   const FORBIDDEN = [
@@ -232,6 +446,15 @@ const HELP_TEXT = `用法: token-analyzer [totals|sessions|requests] --dir <path
   serve [--port <n>] [--host <h>] [--dir <path>] 启动 Web 面板（默认 127.0.0.1:50080）
   -h, --help                显示帮助
   -v, --version             显示版本
+
+OpenCode 数据同步（外部对比基准）:
+  opencode sync [--auth <cookie>] [--workspace <id>] [--full] [--limit <n>] [--data-dir <dir>]
+                            同步 OpenCode 云端用量到本地 data/opencode/
+                            凭证优先级: --auth > OPENCODE_AUTH env > .env
+                            --full 全量同步（忽略增量游标），--limit 限制最大页数
+  opencode export [--format <json|csv>] [--output <file>] [--month <YYYY-MM>] [--data-dir <dir>]
+                            导出本地已同步的 OpenCode 历史
+                            --format 输出格式（默认 json），--month 按月过滤
 `;
 
 /** serve 子命令：启动 Web 服务器、打印访问 URL、Ctrl+C 优雅退出（长驻） */
@@ -249,9 +472,19 @@ async function runServeCli(args: { dir: string; host: string; port: number }): P
 }
 /** 运行分析，返回输出文本（供 CLI 打印与测试断言）；目录只扫描一次，派生三窗口 */
 export async function runCli(argv: string[]): Promise<string> {
-  const { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version } = parseArgs(argv);
+  const parsed = parseArgs(argv);
+  const { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version } = parsed;
   if (help) return HELP_TEXT;
   if (version) return getVersion() + "\n";
+  // opencode 子命令分发（优先于其他窗口）
+  if (parsed.opencode === "sync" && parsed.opencodeSync) {
+    const s = parsed.opencodeSync;
+    return runOpencodeSync({ auth: s.auth, workspace: s.workspace, full: s.full, limit: s.limit, dataDir: s.dataDir });
+  }
+  if (parsed.opencode === "export" && parsed.opencodeExport) {
+    const e = parsed.opencodeExport;
+    return runOpencodeExport({ format: e.format, output: e.output, month: e.month, dataDir: e.dataDir });
+  }
   if (serve) {
     // Web 服务器模式：启动、打印访问 URL、Ctrl+C 优雅退出（长驻，正常退出时返回空串）
     return runServeCli({ dir, host, port });
@@ -293,7 +526,12 @@ export async function runCli(argv: string[]): Promise<string> {
 }
 
 /** 参数合法性校验（IO 之前） */
-function validateArgs(args: { window: WindowName; by?: GroupBy; period?: Period }): void {
+function validateArgs(args: { window: WindowName; by?: GroupBy; period?: Period; opencode?: string }): void {
+  if (args.opencode) {
+    if (args.by !== undefined) throw new Error(`opencode 模式不支持 --by`);
+    if (args.period !== undefined) throw new Error(`opencode 模式不支持 --period`);
+    return;
+  }
   if (args.period !== undefined && args.window !== "totals") {
     throw new Error(`--period 汇总仅支持 totals 窗口（当前 ${args.window}）`);
   }
