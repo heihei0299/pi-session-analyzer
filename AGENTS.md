@@ -31,7 +31,7 @@
 命中即行动，回复中简短声明所用技能与原因。
 
 - 探索/定位/理解代码库 → explore 子代理（内部优先 codegraph_explore）
-- 后台调研 → research；原型验证 → prototype
+- 后台调研 → research；原型验证 → prototype；前端设计 → frontend-design
 - 实现（有 spec）→ tdd-implement（无 spec 先 to-spec）；测试先行 → tdd
 - 设计打磨 → grilling；达成共识→spec → grill-to-spec（grilling→domain-modeling→to-spec）
 - 领域术语/ADR → domain-modeling；模块接口 → codebase-design
