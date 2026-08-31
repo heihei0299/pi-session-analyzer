@@ -317,10 +317,9 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 <div class="ruler-wrap">
   <div class="ruler">
     <div class="presets">
-      <button data-preset="today">今天</button>
+      <button data-preset="today" class="active">今天</button>
       <button data-preset="7d">7天</button>
       <button data-preset="30d">30天</button>
-      <button data-preset="gateway" class="active">自 8/1（网关可比）</button>
       <button data-preset="all">全部</button>
       <button data-preset="custom">自定义</button>
     </div>
@@ -451,7 +450,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 
 <script>
 "use strict";
-const state={preset:"gateway",since:null,until:null,groupBy:"model",tab:"overview",autoRefresh:"off",refreshTimer:null,sessions:[],requests:[]};
+const state={preset:"today",since:null,until:null,groupBy:"model",tab:"overview",autoRefresh:"off",refreshTimer:null,sessions:[],requests:[]};
 const $=sel=>document.querySelector(sel);
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function fmtCompact(n){ if(n>=1e6) return (n/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(n>=1e4) return (n/1e3).toFixed(1).replace(/\.0$/,"")+"k"; return n.toLocaleString("en-US"); }
@@ -471,7 +470,6 @@ function filterParams(){const p=new URLSearchParams(); if(state.since) p.set("si
 async function api(path,params=filterParams()){const res=await fetch("/api/"+path+(params&&params.toString()?"?"+params:"")); if(!res.ok){let detail=""; try{detail=(await res.json()).detail??""}catch{} throw new Error(detail||`HTTP ${res.status}`)} return res.json()}
 function showError(msg){const el=$("#error-banner"); el.textContent=msg; el.classList.add("show")}
 function clearError(){$("#error-banner").classList.remove("show")}
-const GATEWAY_SINCE="2026-08-01T00:00:00Z";
 let lastMeta=null;
 /** 当前筛选范围文本：纯日期（今天/7天/30天预设）since 补 00:00、until 补 23:59:59；自定义完整时间戳去 T */
 function filterRangeText() {
@@ -495,7 +493,7 @@ function updateStatusRange() {
   const { since, until } = filterRangeText();
   const rangeEl=$("#meta-range");
   const statusLine=$("#status-line");
-  const pillText = since !== null || until !== null ? `${since ?? "开始"} ~ ${until ?? "现在"}${state.preset === "gateway" ? "（网关可比）" : ""}` : `${fmtTimestamp(lastMeta.dataRange.since) || "-"} ~ ${fmtTimestamp(lastMeta.dataRange.until) || "-"}`;
+  const pillText = since !== null || until !== null ? `${since ?? "开始"} ~ ${until ?? "现在"}` : `${fmtTimestamp(lastMeta.dataRange.since) || "-"} ~ ${fmtTimestamp(lastMeta.dataRange.until) || "-"}`;
   if(rangeEl) rangeEl.textContent=pillText;
   if(statusLine){
     const upd=$("#updated-at");
@@ -570,11 +568,6 @@ function applyPreset(preset) {
     // 恢复时间框显示并立即应用控件当前值（输入即生效；f404b3d 误删此分支导致时间框不出现）
     $("#custom-range").classList.remove("hidden");
     applyCustomRange();
-  } else if (preset === "gateway") {
-    // 网关可比窗口：since = 网关数据起点（UTC 精确），until 不限
-    $("#custom-range").classList.add("hidden");
-    state.since = GATEWAY_SINCE;
-    state.until = null;
   } else {
     const days = preset === "today" ? 0 : preset === "7d" ? 6 : 29;
     // 本地自然日：本地日期字段推算（setDate 自动处理跨月/跨年）；后端 parseTimestamp 按本地解释
@@ -792,7 +785,7 @@ async function refreshSessionGroups(){
     for(const r of data.rows){const key=r.cwdNorm||r.cwd||"(未知)"; if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(r)}
     const wrap=$("#session-groups"); wrap.innerHTML="";
     for(const [cwd,rows] of groups){
-      const g=document.createElement("div"); g.className="session-group";
+      const g=document.createElement("div"); g.className="session-group collapsed";
       const h3=document.createElement("h3"); h3.innerHTML=`项目 ${escapeHtml(cwd)} <span class="count">(${rows.length})</span>`;
       const body=document.createElement("div"); body.className="group-body"; body.innerHTML=rows.map(sessionRowHtml).join("");
       h3.addEventListener("click",()=>g.classList.toggle("collapsed"));
@@ -843,7 +836,7 @@ function init(){
   $("#auto-refresh").addEventListener("change",e=>{const v=e.target.value; setAutoRefresh(v==="off"?0:Number(v))});
   bindDetailInteractions();
   bindSessionManage();
-  applyPreset("gateway");
+  applyPreset("today");
 }
 init();
 </script>

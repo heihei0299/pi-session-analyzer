@@ -44,13 +44,13 @@ test("S13 总览骨架标记：8 卡片 / 分组切换 / 时间预设 / 状态�
     assert.match(body, /data-group="model"/);
     assert.match(body, /data-group="cwd"/);
 
-    // 时间预设按钮（今天/7天/30天/自8/1/全部/自定义），「自 8/1」默认激活（网关可比窗口）
-    for (const preset of ["today", "7d", "30d", "gateway", "all", "custom"]) {
+    // 时间预设按钮（今天/7天/30天/全部/自定义），「今天」默认激活
+    for (const preset of ["today", "7d", "30d", "all", "custom"]) {
       assert.match(body, new RegExp(`data-preset="${preset}"`), `HTML 应含时间预设 ${preset}`);
     }
-    assert.match(body, /data-preset="gateway"[^>]*class="active"/, "「自 8/1」应默认激活");
+    assert.match(body, /data-preset="today"[^>]*class="active"/, "「今天」应默认激活");
+    assert.doesNotMatch(body, /data-preset="gateway"/, "不应含网关预设「自 8/1」");
     assert.doesNotMatch(body, /data-preset="all"[^>]*class="active"/, "「全部」不应默认激活");
-
     // 状态行 / 口径说明 / 导出按钮 / 错误横幅
     assert.match(body, /id="status-line"/);
     assert.match(body, /id="scope-note"/, "HTML 应含口径说明元素");
