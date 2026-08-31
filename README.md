@@ -82,12 +82,12 @@ npm version 2026.8.28 && git push && git push --tags
 
 - **四个 tab**：总览（8 张汇总卡片 + 按模型/cwd 分组表 + Token tape 构成条）/ 会话明细 / 请求明细 / 会话管理（按项目 cwd 分组 + 重命名会话）
 - **视觉**：暖纸账本（`#F5F4ED`）+ 墨 `#0E1320` + 陶土 `#D97757`，`Instrument Serif`（标题/数值）/ `Inter`（正文）/ `JetBrains Mono`（数据）三栈参照 claude.ai（`Anthropic Serif/Sans/Mono` 近似）
-- **时间范围**：今天（默认） / 7天 / 30天 / 全部 / 自定义（date 日期 + 时分下拉，按本地时间解释），作用于总览与明细与导出；默认窗口 = 今天（本地今天 00:00-23:59:59.999）；状态行「范围」随筛选即时显示（未筛选时显示数据范围 min/max）
+- **时间范围**：今天（默认） / 7天 / 30天 / 全部 / 自定义（date 日期 + 时分下拉 00:00-23:59，按本地时间解释），作用于总览与明细与导出；默认窗口 = 今天（本地今天 00:00-23:59:59.999）；状态行「范围」随筛选即时显示（未筛选时显示数据范围 min/max）
 - **明细服务端分页排序**：会话/请求明细每页 20/50/100 行，点击列头排序——翻页/排序/改页大小重新 fetch（page/size/sortKey/sortDir），不再全量拉取（真实数据 /api/requests 26.7MB → 每页 ~20KB）；会话明细显示筛选合计（总 tokens/请求/会话数，含任务）且任务会话带“任务”角标
 - **统计口径（webui）**：时间筛选按**消息 timestamp 消息级**归属（跨天会话的凌晨请求计入当天，与明细一致）；「输入」列显示**总输入**（非缓存 input + 缓存命中 cacheRead，与 pi-switch 网关 Input 对齐）；CLI 与导出保持原始字段
 - **自动刷新**：Off / 5s / 30s / 5min（后端每请求全量重算），数据变化时状态行显示「已更新 HH:MM:SS」
 - **导出**：JSON（`{ totals, sessions, requests }`）与 CSV（`# totals` / `# sessions` / `# requests` 三段式）下载当前筛选范围
-- **会话管理**：按规范化 cwd 分组展示全部会话（默认收起，组可折叠，点击标题展开），点击名称行内编辑重命名——改文件名前缀保留尾 UUID（`<显示名>_<UUID>.jsonl`），仅非活跃会话（mtime > 5min）可改，非法名 400 / 不存在 404 / 活跃与重名 409
+- **会话管理**：顶部最近会话 10 条 + 按规范化 cwd 分组展示全部会话（默认收起，组可折叠，点击标题展开），点击名称行内编辑重命名——改文件名前缀保留尾 UUID（`<显示名>_<UUID>.jsonl`），仅非活跃会话（mtime > 5min）可改，非法名 400 / 不存在 404 / 活跃与重名 409
 
 HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` / `sessions` / `requests` / `groups?by=` / `period?period=` / `meta`（筛选参数 `model`/`cwd`/`since`/`until`；明细端点另支持 `page`/`size`/`sortKey`/`sortDir`，响应含 `total`，`sessions` 另含 `totals` 聚合计与行 `isTask` 任务标记）+ `POST /api/sessions/rename`；错误统一 `{ error, detail }`（400/404/409/500）。
 

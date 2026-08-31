@@ -2,7 +2,7 @@
  * Bugfix — 自定义时间范围：本地时间语义 + 时分下拉选择。
  * 1. parseTimestamp 完整时间戳与纯日期均按本地时区解释（东八区：本地 14:00 = UTC 06:00，
  *    本地 8/5 全天 = UTC 8/4 16:00 ~ 8/5 15:59:59.999）——与预设按钮（本地自然日）一致。
- * 2. 自定义输入 UI 为 date + 时分下拉（时 00-23 / 分 00/15/30/45）：Firefox 原生 time
+ * 2. 自定义输入 UI 为 date + 时分下拉（时 00-23 / 分 00/15/30/45/59）：Firefox 原生 time
  *    输入框点击时分字段无反应（平台限制），下拉选择稳定可点。
  */
 import { test } from "node:test";
@@ -59,11 +59,11 @@ test("自定义时间输入为 date + 时分下拉，input 事件输入即生效
     assert.match(body, /<select id="since-minute"/, "since 应为分钟下拉");
     assert.doesNotMatch(body, /type="time"/, "不应再使用原生 time 输入框（Firefox 点击时分字段无反应）");
 
-    // 时 00-23、分 00/15/30/45 选项
+    // 时 00-23、分 00/15/30/45/59 选项（59 用于 23:59 边界）
     const hourSel = body.match(/<select id="since-hour"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
     assert.ok(hourSel.includes("00") && hourSel.includes("23"), "小时下拉应含 00-23");
     const minSel = body.match(/<select id="since-minute"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
-    assert.match(minSel, /value="(00|15|30|45)"/, "分钟下拉应为 00/15/30/45 档位");
+    assert.match(minSel, /value="(00|15|30|45|59)"/, "分钟下拉应为 00/15/30/45/59 档位");
 
     // 拼接逻辑：只有日期 → 纯日期；日期+时分 → YYYY-MM-DDTHH:MM（本地时间，后端按本地解释）
     assert.match(body, /timeOf\(sh, sm\)/, "应有时分拼接辅助");
