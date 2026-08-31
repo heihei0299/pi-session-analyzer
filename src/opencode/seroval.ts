@@ -68,6 +68,48 @@ export function decodeStreamChunk(chunk: string): unknown {
 export function decodeResponseText(text: string): unknown {
   const trimmed = text.trim();
   if (trimmed === "") return null;
+  // 1) 优先处理 SolidStart JS chunk（self.$R）—— /_server 成功响应为 JS 而非纯 JSON，需 JS 求值提取
+  if (trimmed.includes("self.$R") || trimmed.includes("$R[0]=")) {
+    try {
+      const dataStart = trimmed.indexOf("$R[0]=");
+      if (dataStart !== -1) {
+        const after = trimmed.slice(dataStart + 6);
+        const endIdx = after.indexOf(")($R");
+        if (endIdx !== -1) {
+          const dataStr = after.slice(0, endIdx);
+          // dataStr 可能是 `[$R[1]={id:...},$R[2]={...}]` 或 `{usage:[...],keys:[...]}` 等 JS 字面量，需在 $R 上下文中求值
+          // 使用 Function 在受控 $R 数组上求值，避免直接 eval 全局污染
+          const $R: unknown[] = [];
+          // eslint-disable-next-line no-new-func
+          const fn = new Function("$R", `return ${dataStr}`);
+          const result = fn($R);
+          // 对于 $R[1]= 形式，$R 数组本身也可能被填充，若 result 为数组且含 undefined 首位，需过滤
+          if (Array.isArray(result)) {
+            // 若数组含 $R 赋值产生的稀疏，取非空
+            const compact = result.filter((v) => v !== undefined && v !== null);
+            // 若 compact 为空但 $R[1..] 有值，回退到 $R
+            if (compact.length === 0 && ($R as unknown[]).length > 1) {
+              const fromR = ($R as unknown[]).slice(1).filter((v) => v !== undefined && v !== null);
+              if (fromR.length > 0) return fromR.length === 1 ? fromR[0] : fromR;
+            }
+            return compact.length > 0 ? compact : result;
+          }
+          if (result !== undefined && result !== null) return result;
+          // 回退：若 result 为空但 $R 有值
+          if (($R as unknown[]).length > 1) {
+            const fromR = ($R as unknown[]).slice(1).filter((v) => v !== undefined);
+            if (fromR.length === 1) return fromR[0];
+            if (fromR.length > 1) return fromR;
+          }
+        }
+      }
+    } catch {
+      // 忽略，走后续 JSON 分支
+    }
+    // 兼容旧 HTML 嵌入的 usage.list 场景（非 _server，直接是 HTML 中的 $R 初始化），尝试提取 usage.list 的 JS 数组
+    // 此分支已在 _server 成功时覆盖，剩余情况走 JSON
+  }
+  if (trimmed === "") return null;
   // 按行拆分，逐块解码，取最后非空结果（与 SolidStart 串流最后更新为准）
   const lines = trimmed.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
   let last: unknown = null;
