@@ -32,18 +32,58 @@ export class OpenCodeClient {
     if (!this.auth) {
       throw new Error("认证失效: 缺少 OpenCode auth，请设置 OPENCODE_AUTH 或传入 --auth（凭证过期/缺失）");
     }
-    const body = encodePayload(args);
     const rawAuth = this.auth.trim();
     // .zshrc 中 OPENCODE_AUTH 可能是 "auth=Fe26..." 或纯 token，兼容两种；同时支持 "auth=...; oc_locale=zh" 的完整 cookie 串
     const cookieBase = rawAuth.startsWith("auth=") || rawAuth.includes("auth=") ? rawAuth : `auth=${rawAuth}`;
     // 若单独的 oc_locale 环境变量存在且 cookie 中未包含，则追加（SolidStart 需 oc_locale cookie）
     const ocLocale = (typeof process !== "undefined" ? (process.env as Record<string, string | undefined>).oc_locale ?? (process.env as Record<string, string | undefined>).OC_LOCALE : undefined);
     const cookieHeader = ocLocale && !cookieBase.includes("oc_locale") ? `${cookieBase}; oc_locale=${ocLocale}` : cookieBase;
+    // hermes 实证：usage/costs 用 GET ?id&args=[WRK,page] + X-Server-Id/Instance + Referer workspace/usage，才能翻页到 150+
+    const isUsageOrCosts = functionId === FN.usageHistory || functionId === FN.monthlyCosts;
+    if (isUsageOrCosts) {
+      const jsonArgs = JSON.stringify(args);
+      const getUrl = `${RPC_URL}?id=${encodeURIComponent(functionId)}&args=${encodeURIComponent(jsonArgs)}`;
+      const headers: Record<string, string> = {
+        "cookie": cookieHeader,
+        "X-Server-Id": functionId,
+        "X-Server-Instance": `server-fn:${functionId === FN.monthlyCosts ? 0 : 1}`,
+        "Referer": `https://opencode.ai/workspace/${String(args[0] ?? "")}/usage`,
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0",
+      };
+      const doFetch = async (method: string, url: string, bodyOrNull: string | null, h: Record<string, string>): Promise<Response> => {
+        const signal = typeof AbortSignal !== "undefined" && typeof (AbortSignal as any).timeout === "function" ? (AbortSignal as any).timeout(15_000) as AbortSignal : undefined;
+        const init: RequestInit = { method, headers: h, signal } as RequestInit;
+        if (bodyOrNull !== null) (init as Record<string, unknown>).body = bodyOrNull;
+        return (this.fetchImpl as unknown as (url: string, init: RequestInit) => Promise<Response>)(url, init);
+      };
+      let res: Response;
+      try {
+        res = await doFetch("GET", getUrl, null, headers);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (e instanceof DOMException && (e.name === "AbortError" || e.name === "TimeoutError")) throw new Error(`网络超时: 请求 OpenCode 超时（15s），请检查网络或稍后重试 — ${msg}`);
+        if (msg.toLowerCase().includes("abort") || msg.toLowerCase().includes("timeout")) throw new Error(`网络超时: 请求 OpenCode 超时，请检查网络 — ${msg}`);
+        throw new Error(`网络超时: 网络请求失败 — ${msg}`);
+      }
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) throw new Error(`认证失效: OpenCode 凭证已过期或无效（HTTP ${res.status}），请刷新 auth cookie（凭证过期）`);
+        if (res.status === 404) throw new Error(`请求失败: OpenCode 返回 HTTP 404（Function ID 可能已随前端发版更换，或工作区不存在）。请先确认 OPENCODE_AUTH/OPENCODE_WORKSPACE_ID 已配置；若已配置仍 404，需更新 src/opencode/client.ts 中 3 个 FN 哈希（见 spec Further Notes）`);
+        if (res.status >= 500) throw new Error(`服务器错误: OpenCode 服务异常（HTTP ${res.status}），请稍后重试`);
+        throw new Error(`请求失败: OpenCode 返回 HTTP ${res.status}`);
+      }
+      const text = await (res as unknown as { text: () => Promise<string> }).text();
+      return decodeResponseText(text);
+    }
+    const body = encodePayload(args);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "cookie": cookieHeader,
       "X-Server-Id": functionId,
       "X-Server-Instance": `server-fn:${rpcInstance++}`,
+      "Referer": "https://opencode.ai/",
+      "Origin": "https://opencode.ai",
+      "Accept": "*/*",
     };
     let res: Response;
     const doFetch = async (method: string, url: string, bodyOrNull: string | null, headers: Record<string, string>): Promise<Response> => {
@@ -239,26 +279,27 @@ export class OpenCodeClient {
     try {
       const data = await this.rpc(FN.usageHistory, [workspaceId, page]);
       if (data == null) return [];
-      if (Array.isArray(data)) return data as OpenCodeUsageRecord[];
-      if (typeof data === "object" && data !== null) {
+      let arr: unknown[] | null = null;
+      if (Array.isArray(data)) arr = data as unknown[];
+      else if (typeof data === "object" && data !== null) {
         const obj = data as Record<string, unknown>;
-        if (Array.isArray(obj.data)) return obj.data as OpenCodeUsageRecord[];
-        if (Array.isArray(obj.records)) return obj.records as OpenCodeUsageRecord[];
-        if (Array.isArray(obj.usage)) return obj.usage as OpenCodeUsageRecord[];
+        if (Array.isArray(obj.data)) arr = obj.data as unknown[];
+        else if (Array.isArray(obj.records)) arr = obj.records as unknown[];
+        else if (Array.isArray(obj.usage)) arr = obj.usage as unknown[];
+      }
+      if (arr) {
+        const filtered = (arr as Record<string, unknown>[]).filter((r) => typeof r.id === "string" && (r.id as string).startsWith("usg_"));
+        return filtered as unknown as OpenCodeUsageRecord[];
       }
       return [];
     } catch (e) {
-      // page 0 的 500 做 HTML 兜底；后续页的 500 视为已到末尾，返回空以结束分页（避免 sync 因单页 500 整体失败）
-      if (page === 0) {
-        try {
-          const html = await this.fetchHtml(`/workspace/${workspaceId}/usage`);
-          const records = this.parseUsageHtml(html);
-          if (records.length > 0) return records;
-        } catch {
-          // 忽略兜底失败，走原错误
-        }
-      } else {
-        return [];
+      if (page !== 0) return [];
+      try {
+        const html = await this.fetchHtml(`/workspace/${workspaceId}/usage`);
+        const records = this.parseUsageHtml(html);
+        if (records.length > 0) return records;
+      } catch {
+        // 忽略
       }
       throw e;
     }
