@@ -467,6 +467,10 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 .detail-child-row{background:#FFF6D6}
 .detail-child-row td{background:#FFF6D6 !important}
 @media(max-width:760px){.session-detail-drawer{width:100vw;max-width:100vw}}
+#drawer-title{cursor:pointer}
+#drawer-title:hover{color:var(--brass-deep);text-decoration:underline;text-decoration-color:var(--brass)}
+.drawer-head .rename-input{flex:1;min-width:0;background:#fff;border:1px solid var(--signal);color:var(--ink);border-radius:8px;padding:6px 9px;font:500 15px var(--font-display);box-shadow:0 0 0 2px rgba(226,69,46,.2);width:100%;max-width:340px}
+#drawer-rename-err{font:500 11px var(--font-mono);color:var(--signal);margin-top:6px;min-height:14px;word-break:break-all}
 
 </style>
 </head>
@@ -674,7 +678,8 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 <aside id="session-detail-drawer" class="session-detail-drawer" role="dialog" aria-modal="true" aria-label="会话详细抽屉" aria-hidden="true">
   <div class="drawer-head">
     <div style="flex:1;min-width:0">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h2 id="drawer-title" style="font-family:var(--font-display);font-size:18px;letter-spacing:-.02em">—</h2><span id="drawer-badge" class="drawer-badge" style="display:none"></span></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><h2 id="drawer-title" class="drawer-title" title="点击重命名" style="font-family:var(--font-display);font-size:18px;letter-spacing:-.02em;cursor:pointer">—</h2><span id="drawer-badge" class="drawer-badge" style="display:none"></span></div>
+      <div id="drawer-rename-err"></div>
       <div id="drawer-meta" class="drawer-meta"></div>
     </div>
     <button id="drawer-close" class="drawer-close" aria-label="关闭">×</button>
@@ -1542,9 +1547,15 @@ function renderDetailDrawer(){
   const metaEl = $("#drawer-meta");
   const badgeEl = $("#drawer-badge");
   if(titleEl){
-    titleEl.textContent = session.displayName;
-    titleEl.title = session.displayName;
+    if(titleEl.tagName.toLowerCase()==="input"){ /* editing, do not overwrite */ }
+    else {
+      titleEl.textContent = session.displayName;
+      titleEl.title = "点击重命名："+session.displayName;
+      titleEl.style.cursor = "pointer";
+    }
   }
+  const errEl = $("#drawer-rename-err");
+  if(errEl) errEl.textContent = "";
   if(metaEl){
     const time = fmtTimestamp(session.timestamp);
     const cwdNorm = escapeHtml(session.cwdNorm || session.cwd || "");
@@ -1638,7 +1649,92 @@ function renderDetailDrawer(){
     });
   }
 }
+function startDetailRename(titleEl){
+  const rowErr = document.getElementById("drawer-rename-err");
+  if(rowErr) rowErr.textContent = "";
+  if(document.querySelector("#drawer-title.rename-input") || titleEl.tagName.toLowerCase()==="input") return;
+  const prevText = titleEl.textContent || "";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.id = "drawer-title";
+  input.className = "rename-input";
+  input.value = prevText;
+  input.maxLength = 100;
+  input.title = "输入新显示名，回车保存，Esc 取消";
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let saveOnBlur = false;
+  let done = false;
+  const exit = (save)=>{
+    if(done) return;
+    done = true;
+    const name = input.value.trim();
+    if(!save || !name){
+      if(name==="" && save) { if(rowErr) rowErr.textContent="显示名不能为空"; }
+      restoreDetailTitle(input, prevText);
+      return;
+    }
+    if(name===prevText){ restoreDetailTitle(input, prevText); return; }
+    saveDetailRename(input, prevText, name);
+  };
+  input.addEventListener("keydown", e=>{
+    if(e.key==="Enter"){ e.preventDefault(); saveOnBlur = true; input.blur(); }
+    else if(e.key==="Escape"){ e.preventDefault(); saveOnBlur = false; input.blur(); }
+  });
+  input.addEventListener("blur", ()=> exit(saveOnBlur));
+}
+function restoreDetailTitle(input, text){
+  const h2 = document.createElement("h2");
+  h2.id = "drawer-title";
+  h2.className = "drawer-title";
+  h2.style.cssText = "font-family:var(--font-display);font-size:18px;letter-spacing:-.02em;cursor:pointer";
+  h2.title = "点击重命名："+text;
+  h2.textContent = text;
+  input.replaceWith(h2);
+}
+async function saveDetailRename(input, prevText, name){
+  const errEl = document.getElementById("drawer-rename-err");
+  const sid = detailDrawerState.sessionId;
+  try{
+    const res = await fetch("/api/sessions/rename",{method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({sessionId:sid, name})});
+    let body={}; try{ body = await res.json(); }catch{}
+    if(!res.ok){
+      if(errEl) errEl.textContent = body.detail || ("HTTP "+res.status);
+      // keep typed name visible but restore title with typed name so user sees what they typed
+      restoreDetailTitle(input, name);
+      return;
+    }
+    // success: re-fetch detail and refresh lists — fetchDetail renderDetailDrawer
+    const data = await fetchDetail(sid);
+    detailDrawerState.data = data;
+    // input is still in DOM, replace it before re-render to avoid leftover
+    const stillInput = document.getElementById("drawer-title");
+    if(stillInput && stillInput.tagName.toLowerCase()==="input"){
+      restoreDetailTitle(stillInput, data.session.displayName);
+    }
+    renderDetailDrawer();
+    if(errEl) errEl.textContent = "";
+    // refresh back lists (non-blocking, minimize flicker but ensure consistency)
+    try{ await refreshSessionTable(); }catch{}
+    try{ await refreshRequestTable(); }catch{}
+    try{ await refreshSessionGroups(); }catch{}
+  }catch(e){
+    if(errEl) errEl.textContent = "重命名失败";
+    restoreDetailTitle(input, prevText);
+  }
+}
 function bindDetailDrawerInteractions(){
+  // drawer title rename: click title to edit (delegated on drawer-head to survive re-render)
+  const drawerHead = document.querySelector(".drawer-head");
+  if(drawerHead) drawerHead.addEventListener("click", e=>{
+    const t = e.target.closest("#drawer-title");
+    if(!t) return;
+    if(t.tagName.toLowerCase()==="input") return;
+    if(document.querySelector("#drawer-title.rename-input")) return;
+    if(!detailDrawerState.open || !detailDrawerState.data) return;
+    startDetailRename(t);
+  });
   const mask = $("#drawer-mask");
   const closeBtn = $("#drawer-close");
   if(mask) mask.addEventListener("click", closeDrawer);
