@@ -83,13 +83,14 @@ npm version 2026.8.28 && git push && git push --tags
 - **四个 tab**：总览（8 张汇总卡片 + 按模型/cwd 分组表 + Token tape 构成条）/ 会话明细 / 请求明细 / 会话管理（按项目 cwd 分组 + 重命名会话）
 - **视觉**：仪器台（bakelite 台面 `#0F1312` + enamel 纸面 `#FFFEF8` + 黄铜 `#C5A254` + 仪表青 `#0FA08C` + 报警朱 `#E2452E`，鼓轮读数 + 黄铜铆钉 + 链孔纸带），`Fraunces`（标题/数值）/ `IBM Plex Sans`（正文）/ `JetBrains Mono`（数据）
 - **时间范围**：今天（默认） / 7天 / 30天 / 全部 / 自定义（date 日期 + 时分下拉 00:00-23:59，按本地时间解释，打开时自动预填当前筛选或数据范围），作用于总览与明细与导出；默认窗口 = 今天（本地今天 00:00-23:59:59.999）；头部「范围」胶囊随筛选即时显示，下方状态行范围提示已移除
-- **明细服务端分页排序**：会话/请求明细每页 20/50/100 行，点击列头排序——翻页/排序/改页大小重新 fetch（page/size/sortKey/sortDir），不再全量拉取（真实数据 /api/requests 26.7MB → 每页 ~20KB）；会话明细显示筛选合计（总 tokens/请求/会话数，含任务）且任务会话带“任务”角标
+- **明细服务端分页排序**：会话/请求明细每页 20/50/100 行，点击列头排序——翻页/排序/改页大小重新 fetch（page/size/sortKey/sortDir），不再全量拉取（真实数据 /api/requests 26.7MB → 每页 ~20KB）；会话明细显示筛选合计（总 tokens/请求/会话数，含子代理）且子代理会话带“子代理”徽标
 - **统计口径（webui）**：时间筛选按**消息 timestamp 消息级**归属（跨天会话的凌晨请求计入当天，与明细一致）；「输入」列显示**总输入**（非缓存 input + 缓存命中 cacheRead，与 pi-switch 网关 Input 对齐）；CLI 与导出保持原始字段
 - **自动刷新**：Off / 5s / 30s / 5min（后端每请求全量重算），数据变化时状态行显示「已更新 HH:MM:SS」
 - **导出**：JSON（`{ totals, sessions, requests }`）与 CSV（`# totals` / `# sessions` / `# requests` 三段式）下载当前筛选范围
 - **会话管理**：顶部最近会话 10 条 + 按规范化 cwd 分组展示全部会话（默认收起，组可折叠，点击标题展开），点击名称行内编辑重命名——改文件名前缀保留尾 UUID（`<显示名>_<UUID>.jsonl`），仅非活跃会话（mtime > 5min）可改，非法名 400 / 不存在 404 / 活跃与重名 409
+- **会话详情抽屉**：点击会话/请求明细的会话名称或会话 ID 滑出右侧抽屉（760px，移动端全屏，遮罩/×/Esc 关闭），展示头部（可点击标题行内重命名，同校验 400/409、成功后重刷抽屉与列表）、Token 构成条、汇总卡（总 token/请求数/花费/缓存率，合并时小字“其中主 X · 子代理 Y（N 个）”）与请求时间线（按时间升序、全量无分页、子代理行淡底 #FFF6D6 +“子代理 短 ID 8”徽标）；支持“合并子代理”开关（默认开、每次打开重置，无子代理隐藏）与时间线“暂无计入口径请求”空态；请求表容器 max-height:60vh 可滚动（极端 >200 行）；打开期间暂停自动刷新轮询
 
-HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` / `sessions` / `requests` / `groups?by=` / `period?period=` / `meta`（筛选参数 `model`/`cwd`/`since`/`until`；明细端点另支持 `page`/`size`/`sortKey`/`sortDir`，响应含 `total`，`sessions` 另含 `totals` 聚合计与行 `isTask` 任务标记）+ `POST /api/sessions/rename`；错误统一 `{ error, detail }`（400/404/409/500）。
+HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` / `sessions` / `requests` / `groups?by=` / `period?period=` / `meta`（筛选参数 `model`/`cwd`/`since`/`until`；明细端点另支持 `page`/`size`/`sortKey`/`sortDir`，响应含 `total`，`sessions` 另含 `totals` 聚合计与行 `isTask` 子代理标记）+ `POST /api/sessions/rename` + `GET /api/sessions/:id/detail`（或 `GET /api/sessions/detail?sessionId=`，返回 `{ session, children, totals{main,merged,childrenCount}, requests{source,sourceSessionId}, meta{hasChildren} }`，视图合并子代理消耗仅详情视图、列表保持独立，404 会话不存在）；错误统一 `{ error, detail }`（400/404/409/500）。
 
 ## 统计口径（口径 A）
 
@@ -122,7 +123,7 @@ src/
   cli.ts        CLI 入口（参数解析含 -h/--help/-v/--version、未知参数显式报错、窗口路由、watch/serve 集成）
   watch.ts      实时监控增量读取器
   server.ts     serve HTTP 服务器（路由分发、生命周期、EADDRINUSE 友好提示）
-  api.ts        HTTP API 层（薄路由，委托 session-data.query，统一错误体、会话重命名）
+  api.ts        HTTP API 层（薄路由，委托 session-data.query，统一错误体、会话重命名 + 详情聚合）
   webui.html    单 HTML 内联前端（仪器台 dark bench + 鼓轮读数 + 链孔纸带，4 tab、服务端分页、自动刷新、导出）
 test/           node:test 测试（132 用例；fixture JSONL → CLI 输出断言；serve → HTTP 端点断言）
 dist/           构建产物（npm 发布内容；不入库）
