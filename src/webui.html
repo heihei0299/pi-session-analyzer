@@ -942,7 +942,7 @@ function renderDetailTable(kind) {
       if (kind === "sessions" && c === "displayName" && r.isTask) {
         const v = valueOf(r, c);
         const base = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
-        return `<td>${base} <span style="background:var(--teal-soft);border:1px solid #C9A86A;border-radius:999px;padding:1px 6px;font:600 10px var(--font-mono);color:#2A3335">任务</span></td>`;
+        return `<td>${base} <span title="子代理会话" style="background:var(--teal-soft);border:1px solid #C9A86A;border-radius:999px;padding:1px 6px;font:600 10px var(--font-mono);color:#2A3335">子代理</span></td>`;
       }
       const v = valueOf(r, c);
       const out = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
@@ -963,9 +963,10 @@ function renderDetailTable(kind) {
   if (kind === "sessions" && st.totals) {
     const sumEl = $("#session-summary");
     if (sumEl) {
-      const hasTask = (st.totals && st.rows.some(r=>r.isTask)) || st.rows.some(r=>r.isTask);
-      sumEl.textContent = `筛选合计: ${fmtCompact(st.totals.totalTokens)} tokens · ${st.totals.requests} 请求 · ${st.total} 会话${hasTask ? " · 含任务" : ""} ｜ 当前页 ${st.rows.length} 行`;
-      sumEl.title = `总计 ${st.totals.totalTokens.toLocaleString()} tokens，${st.totals.requests} 请求，${st.total} 会话（已按时间与筛选条件聚合，含子代理任务）`;
+      const subCount = st.rows.filter(r=>r.isTask).length;
+      const hasTask = subCount > 0;
+      sumEl.textContent = `筛选合计: ${fmtCompact(st.totals.totalTokens)} tokens · ${st.totals.requests} 请求 · ${st.total} 会话${hasTask ? ` · 含子代理（${subCount}）` : ""} ｜ 当前页 ${st.rows.length} 行`;
+      sumEl.title = `总计 ${st.totals.totalTokens.toLocaleString()} tokens，${st.totals.requests} 请求，${st.total} 会话（已按时间与筛选条件聚合，含子代理）`;
     }
   }
 }

@@ -10,6 +10,7 @@
 - **项目归属（cwd）**：以 header `cwd` 为权威（完整绝对路径）；目录名是 cwd 的有损编码（`--` 包裹、`/`→`-`），不可反解，仅展示/辅助分组。聚合按规范化 cwd（resolve 去尾斜杠/符号链接）。
 - **计入口径消息（口径 A）**：`type == "message"` 且 `message.role == "assistant"` 且 `message.usage != null`。toolResult / compaction / branch_summary 等一律不计入。
 - **会话数据仓（SessionData）**：会话目录 → 派生窗口（totals/sessions/requests/groups/period/meta）的唯一深模块；单一 `query(filter, view)` interface 内聚 fork 去重（ADR-0001）、cwd 归一缓存、文件级快照缓存、派生、分页排序；CLI / API / watch 为其薄 adapter。
+- **子代理会话**：`isTask` 会话（路径含 `/tasks/`，header 含 `parentSession`，由 `parentSessionId` 指向主会话），其消耗在详情视图合并到主会话，主列表保持独立；API 字段 `isTask` 保持原名，仅 UI 文案为“子代理”。
 ## 统计窗口
 
 - **totals（总窗口）**：全量计入口径消息的汇总（requests / input / output / cacheRead / cacheWrite / reasoning / totalTokens / cost / cacheRate）。
