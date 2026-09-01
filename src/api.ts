@@ -40,6 +40,41 @@ class ApiError extends Error {
   }
 }
 
+function serializeDetail(detail: {
+  session: import("./session-data.ts").SessionRowEnriched;
+  children: import("./session-data.ts").SessionRowEnriched[];
+  totals: { main: import("./aggregate.ts").Totals; merged: import("./aggregate.ts").Totals; childrenCount: number };
+  requests: (import("./aggregate.ts").RequestRow & { displayName: string; source: string; sourceSessionId: string })[];
+  meta: { hasChildren: boolean };
+}): Record<string, unknown> {
+  const sessionObj = {
+    ...sessionToObject(detail.session as unknown as import("./aggregate.ts").SessionRow),
+    fileName: detail.session.fileName,
+    displayName: detail.session.displayName,
+    cwdNorm: detail.session.cwdNorm,
+    isTask: detail.session.isTask,
+  };
+  const childrenObjs = detail.children.map((c) => ({
+    ...sessionToObject(c as unknown as import("./aggregate.ts").SessionRow),
+    fileName: c.fileName,
+    displayName: c.displayName,
+    cwdNorm: c.cwdNorm,
+    isTask: c.isTask,
+  }));
+  const totals = {
+    main: totalsToObject(detail.totals.main),
+    merged: totalsToObject(detail.totals.merged),
+    childrenCount: detail.totals.childrenCount,
+  };
+  const reqRows = detail.requests.map((r) => ({
+    ...requestToObject(r as unknown as import("./aggregate.ts").RequestRow),
+    displayName: (r as unknown as Record<string, unknown>).displayName,
+    source: (r as unknown as Record<string, unknown>).source,
+    sourceSessionId: (r as unknown as Record<string, unknown>).sourceSessionId,
+  }));
+  return { session: sessionObj, children: childrenObjs, totals, requests: reqRows, meta: detail.meta };
+}
+
 export async function handleApi(
   method: string,
   pathname: string,
@@ -74,6 +109,31 @@ export async function handleApi(
       const out: Record<string, unknown> = { window: "sessions", rows, total: result.total, totals: totalsToObject(result.totals) };
       if (result.page !== undefined) { out.page = result.page; out.size = result.size; }
       return { status: 200, body: out };
+    }
+    if (method === "GET" && pathname === "/api/sessions/detail") {
+      const sessionId = params.get("sessionId") ?? params.get("sessionID") ?? params.get("id") ?? "";
+      if (!sessionId || sessionId.trim() === "") throw new ApiError(400, "Bad Request", "缺少 sessionId");
+      try {
+        const detail = await defaultSessionData.queryDetail(dir, sessionId);
+        return { status: 200, body: serializeDetail(detail as unknown as Parameters<typeof serializeDetail>[0]) };
+      } catch (e) {
+        if ((e as Error & { status?: number })?.status === 404) throw new ApiError(404, "Not Found", (e as Error).message);
+        throw e;
+      }
+    }
+    if (method === "GET" && pathname.startsWith("/api/sessions/") && pathname.endsWith("/detail")) {
+      const m = pathname.match(/^\/api\/sessions\/([^/]+)\/detail$/);
+      if (!m) throw new ApiError(400, "Bad Request", "缺少 sessionId");
+      let sessionId: string;
+      try { sessionId = decodeURIComponent(m[1]); } catch { sessionId = m[1]; }
+      if (!sessionId || sessionId.trim() === "") throw new ApiError(400, "Bad Request", "缺少 sessionId");
+      try {
+        const detail = await defaultSessionData.queryDetail(dir, sessionId);
+        return { status: 200, body: serializeDetail(detail as unknown as Parameters<typeof serializeDetail>[0]) };
+      } catch (e) {
+        if ((e as Error & { status?: number })?.status === 404) throw new ApiError(404, "Not Found", (e as Error).message);
+        throw e;
+      }
     }
     if (method === "POST" && pathname === "/api/sessions/rename") {
       return await renameSession(dir, body);

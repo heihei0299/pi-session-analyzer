@@ -36,8 +36,10 @@ export interface SessionFileData {
   timestamp: string;
   cwd: string;
   fileName?: string;
-  /** 是否为子代理任务会话（路径含 /tasks/） */
+  /** 是否为子代理会话（路径含 /tasks/，历史称 isTask） */
   isTask?: boolean;
+  /** 归属主会话 ID（header.parentSession 非空字符串，子代理会话） */
+  parentSessionId?: string;
   firstUserText?: string;
   items: { timestamp: string; model: string; usage: Usage }[];
 }
@@ -156,6 +158,7 @@ export class SessionData {
     const items: SessionFileData["items"] = [];
     let firstUserText: string | undefined;
     let forkTs: number | undefined;
+    let parentSessionId: string | undefined;
     try {
       let firstLine = true;
       for await (const line of rl) {
@@ -165,8 +168,12 @@ export class SessionData {
           if (entry === null || entry.type !== "session") return null;
           header = { id: entry.id, timestamp: entry.timestamp, cwd: entry.cwd };
           if (typeof entry.parentSession === "string" && entry.parentSession.length > 0) {
-            const t = this.parseUtcTimestamp(typeof entry.timestamp === "string" ? entry.timestamp : "");
-            if (!Number.isNaN(t)) forkTs = t;
+            parentSessionId = entry.parentSession;
+            // 仅当 parentSession 为文件路径形态（fork 会话，含 / 或 \）时才启用 fork 去重；子代理会话的 parentSession 为纯 sessionId（如 "p1"），不触发去重
+            if (entry.parentSession.includes("/") || entry.parentSession.includes("\\")) {
+              const t = this.parseUtcTimestamp(typeof entry.timestamp === "string" ? entry.timestamp : "");
+              if (!Number.isNaN(t)) forkTs = t;
+            }
           }
           continue;
         }
@@ -198,7 +205,7 @@ export class SessionData {
       }
     } finally { rl.close(); }
     if (header === null) return null;
-    return { sessionId: typeof header.id === "string" ? header.id : "", timestamp: typeof header.timestamp === "string" ? header.timestamp : "", cwd: typeof header.cwd === "string" ? header.cwd : "", fileName: basename(file), isTask: file.includes("/tasks/") || file.includes("\\tasks\\"), firstUserText, items };
+    return { sessionId: typeof header.id === "string" ? header.id : "", timestamp: typeof header.timestamp === "string" ? header.timestamp : "", cwd: typeof header.cwd === "string" ? header.cwd : "", fileName: basename(file), isTask: file.includes("/tasks/") || file.includes("\\tasks\\"), parentSessionId, firstUserText, items };
   }
 
   async readSessionFiles(dir: string): Promise<SessionFileData[]> {
@@ -303,6 +310,80 @@ export class SessionData {
     }
     return rows;
   }
+
+  // ---------- 详情聚合（#01） ----------
+  detailFromFiles(files: SessionFileData[], sessionId: string): {
+    session: SessionRowEnriched;
+    children: SessionRowEnriched[];
+    totals: { main: Totals; merged: Totals; childrenCount: number };
+    requests: (RequestRowEnriched & { source: "main" | "child"; sourceSessionId: string })[];
+    meta: { hasChildren: boolean };
+  } {
+    const parent = files.find((f) => f.sessionId === sessionId);
+    if (!parent) {
+      const err = new Error(`会话不存在: ${sessionId}`) as Error & { status?: number };
+      err.status = 404;
+      throw err;
+    }
+    const children = files.filter((f) => f.parentSessionId === sessionId);
+    const mainTotals = this.totalsFromFiles([parent]);
+    const mergedTotals = this.totalsFromFiles([parent, ...children]);
+    const parentRow = this.sessionRowsFromFiles([parent])[0];
+    const session: SessionRowEnriched = {
+      ...parentRow,
+      fileName: parent.fileName ?? "",
+      displayName: this.displayNameOf(parent.fileName ?? "", parent.firstUserText),
+      cwdNorm: this.normalizeCwd(parent.cwd),
+      isTask: parent.isTask ?? false,
+    };
+    const childrenEnriched: SessionRowEnriched[] = children.map((f) => {
+      const r = this.sessionRowsFromFiles([f])[0];
+      return {
+        ...r,
+        fileName: f.fileName ?? "",
+        displayName: this.displayNameOf(f.fileName ?? "", f.firstUserText),
+        cwdNorm: this.normalizeCwd(f.cwd),
+        isTask: f.isTask ?? false,
+      };
+    });
+    const nameBySession = new Map<string, string>();
+    nameBySession.set(parent.sessionId, session.displayName);
+    for (const c of children) {
+      nameBySession.set(c.sessionId, this.displayNameOf(c.fileName ?? "", c.firstUserText));
+    }
+    const mainReqs = this.requestRowsFromFiles([parent]).map((r) => ({
+      ...r,
+      displayName: nameBySession.get(r.sessionId) ?? "",
+      source: "main" as const,
+      sourceSessionId: r.sessionId,
+    }));
+    const childReqs = this.requestRowsFromFiles(children).map((r) => ({
+      ...r,
+      displayName: nameBySession.get(r.sessionId) ?? "",
+      source: "child" as const,
+      sourceSessionId: r.sessionId,
+    }));
+    const requests = [...mainReqs, ...childReqs].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    return {
+      session,
+      children: childrenEnriched,
+      totals: { main: mainTotals, merged: mergedTotals, childrenCount: children.length },
+      requests,
+      meta: { hasChildren: children.length > 0 },
+    };
+  }
+
+  async queryDetail(dir: string, sessionId: string): Promise<{
+    session: SessionRowEnriched;
+    children: SessionRowEnriched[];
+    totals: { main: Totals; merged: Totals; childrenCount: number };
+    requests: (RequestRowEnriched & { source: "main" | "child"; sourceSessionId: string })[];
+    meta: { hasChildren: boolean };
+  }> {
+    const allFiles = await this.readSessionFilesCached(dir);
+    return this.detailFromFiles(allFiles, sessionId);
+  }
+
   groupRowsFromFiles(files: SessionFileData[], by: GroupBy): GroupRow[] {
     const byModel = by === "model" || by === "model,cwd"; const byCwd = by === "cwd" || by === "model,cwd";
     const normCwdCache = new Map<string, string>();
