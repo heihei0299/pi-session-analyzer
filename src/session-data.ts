@@ -61,7 +61,7 @@ export type View =
   | { kind: "period"; period: Period }
   | { kind: "meta" };
 
-export type SessionRowEnriched = SessionRow & { fileName: string; displayName: string; cwdNorm: string; isTask: boolean };
+export type SessionRowEnriched = SessionRow & { fileName: string; displayName: string; cwdNorm: string; isTask: boolean; parentSessionId?: string };
 export type RequestRowEnriched = RequestRow & { displayName: string };
 
 export interface QueryResultTotals { window: "totals"; totals: Totals }
@@ -463,7 +463,7 @@ export class SessionData {
         const rowsRaw = this.sessionRowsFromFiles(filtered).map((r, i) => {
           const f = filtered[i];
           const fileName = f.fileName ?? "";
-          return { ...r, fileName, displayName: this.displayNameOf(fileName, f.firstUserText), cwdNorm: this.normalizeCwd(f.cwd), isTask: f.isTask ?? false } as SessionRowEnriched;
+          return { ...r, fileName, displayName: this.displayNameOf(fileName, f.firstUserText), cwdNorm: this.normalizeCwd(f.cwd), isTask: f.isTask ?? false, parentSessionId: f.parentSessionId } as SessionRowEnriched;
         });
         // 转为 Record 以复用 paginate 的排序（需将 enriched 视为 Record）
         const paged = this.paginate(rowsRaw as unknown as Record<string, unknown>[], view.page, view.size, view.sortKey, view.sortDir);

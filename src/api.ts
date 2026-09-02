@@ -105,6 +105,7 @@ export async function handleApi(
         displayName: r.displayName,
         cwdNorm: r.cwdNorm,
         isTask: r.isTask,
+        parentSessionId: r.parentSessionId,
       }));
       const out: Record<string, unknown> = { window: "sessions", rows, total: result.total, totals: totalsToObject(result.totals) };
       if (result.page !== undefined) { out.page = result.page; out.size = result.size; }

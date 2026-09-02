@@ -466,6 +466,12 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 .detail-trigger:hover{text-decoration:underline;text-decoration-color:var(--brass)}
 .detail-child-row{background:#FFF6D6}
 .detail-child-row td{background:#FFF6D6 !important}
+.session-parent-toggle{appearance:none;border:1px solid #D4CEBD;background:#fff;color:var(--ink);width:22px;height:22px;border-radius:6px;cursor:pointer;font:700 12px var(--font-mono);display:inline-grid;place-items:center;margin-right:6px;vertical-align:middle;flex:0 0 22px}
+.session-parent-toggle:hover{border-color:var(--brass);color:var(--brass-deep)}
+.session-child-row{display:none}
+.session-child-row.open{display:table-row}
+.session-child-row td:first-child{padding-left:28px !important;position:relative}
+.session-child-row td:first-child::before{content:"└";position:absolute;left:12px;color:var(--slate);font:600 12px var(--font-mono)}
 @media(max-width:760px){.session-detail-drawer{width:100vw;max-width:100vw}}
 #drawer-title{cursor:pointer}
 #drawer-title:hover{color:var(--brass-deep);text-decoration:underline;text-decoration-color:var(--brass)}
@@ -971,38 +977,157 @@ function renderDetailTable(kind) {
   const st = detailState[kind];
   const headEl = $("#" + DETAIL_ID[kind] + "-head");
   const bodyEl = $("#" + DETAIL_ID[kind] + "-body");
-  const pageRows = st.rows; // 服务端已按 sortKey/sortDir 排序并分页（当前页）
+  const pageRows = st.rows;
   const cols = kind === "sessions" ? SESSION_COLS : REQUEST_COLS;
-  // 请求明细「缓存」列 = cacheRead + cacheWrite（API 行字段为拆分的 cacheRead/cacheWrite）
-  // 缓存列 = cacheRead+cacheWrite；输入列 = 总输入（非缓存 input + 缓存命中 cacheRead，ticket 24 与网关 Input 对齐）
   const valueOf = (r, c) => c === "cache" ? (r.cacheRead ?? 0) + (r.cacheWrite ?? 0) : c === "input" ? (r.input ?? 0) + (r.cacheRead ?? 0) : r[c];
-  bodyEl.innerHTML = pageRows
-    .map((r) => "<tr>" + cols.map((c) => {
-      const v = valueOf(r, c);
-      const raw = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
-      if (c === "displayName") {
-        const isTaskBadge = r.isTask ? ` <span title="子代理会话" style="background:var(--teal-soft);border:1px solid #C9A86A;border-radius:999px;padding:1px 6px;font:600 10px var(--font-mono);color:#2A3335">子代理</span>` : "";
-        // displayName 可点击触发抽屉，使用 detail-trigger
-        const sid = escapeHtml(r.sessionId);
-        // raw already contains name-cell span; wrap with detail-trigger by replacing class
-        // Simpler: create trigger span directly
+  let byParent = new Map();
+  if (kind === "sessions") {
+    for (const r of pageRows) if (r.isTask && r.parentSessionId) {
+      const pid = r.parentSessionId;
+      if (!byParent.has(pid)) byParent.set(pid, []);
+      byParent.get(pid).push(r);
+    }
+  }
+  const cellHtml = (r, c, isChild) => {
+    const v = valueOf(r, c);
+    if (c === "displayName") {
+      const sid = escapeHtml(r.sessionId);
+      const badge = r.isTask ? ` <span title="子代理会话" style="background:var(--teal-soft);border:1px solid #C9A86A;border-radius:999px;padding:1px 6px;font:600 10px var(--font-mono);color:#2A3335">子代理</span>` : "";
+      if (kind === "sessions" && !isChild) {
+        const hasChildren = byParent.has(r.sessionId) && byParent.get(r.sessionId).length>0;
+        const toggle = hasChildren ? `<button class="session-parent-toggle" data-sid="${sid}" title="展开/收起子代理（${(byParent.get(r.sessionId)||[]).length}）" aria-expanded="false">▶</button>` : `<span style="display:inline-block;width:22px;margin-right:6px"></span>`;
         const nameSpan = `<span class="detail-trigger name-cell" data-sid="${sid}" title="点击查看详情">${escapeHtml(String(v ?? ""))}</span>`;
-        return `<td>${nameSpan}${isTaskBadge}</td>`;
+        return `<td>${toggle}${nameSpan}${badge}</td>`;
+      }
+      if (kind === "sessions" && isChild) {
+        const nameSpan = `<span class="detail-trigger name-cell" data-sid="${sid}" title="点击查看详情">${escapeHtml(String(v ?? ""))}</span>`;
+        return `<td>${nameSpan}${badge}</td>`;
+      }
+      const out = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
+      const sid2 = escapeHtml(r.sessionId);
+      return `<td><span class="detail-trigger name-cell" data-sid="${sid2}" title="点击查看详情">${out}</span>${r.isTask ? badge : ""}</td>`;
+    }
+    if (c === "sessionId") {
+      const sid = escapeHtml(r.sessionId);
+      const txt = escapeHtml(String(v ?? ""));
+      return `<td><span class="detail-trigger mono" data-sid="${sid}" title="点击查看详情">${txt}</span></td>`;
+    }
+    const out = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
+    return `<td>${out}</td>`;
+  };
+  const rowHtml = (r, isChild) => {
+    const cls = isChild ? "session-child-row" : (kind==="sessions" ? "session-parent-row" : "");
+    const extra = isChild ? ` data-parent="${escapeHtml(r.parentSessionId||"")}"` : ` data-sid="${escapeHtml(r.sessionId)}"`;
+    return `<tr class="${cls}"${extra}>` + cols.map(c=>cellHtml(r,c,isChild)).join("") + "</tr>";
+  };
+  if (kind === "sessions") {
+    const subCount = pageRows.filter(r=>r.isTask).length;
+    const parents = pageRows.filter(r=>!r.isTask);
+    if (parents.length === 0) {
+      bodyEl.innerHTML = pageRows.map(r=>rowHtml(r, !!r.isTask)).join("");
+    } else {
+      let html = "";
+      for (const p of parents) {
+        html += rowHtml(p, false);
+        const childs = byParent.get(p.sessionId) || [];
+        for (const ch of childs) html += rowHtml(ch, true);
+      }
+      const orphanChildren = pageRows.filter(r=> r.isTask && (!r.parentSessionId || !parents.some(pp=>pp.sessionId===r.parentSessionId)));
+      const alreadyRendered = new Set();
+      for (const childs of byParent.values()) for (const ch of childs) alreadyRendered.add(ch.sessionId);
+      for (const ch of orphanChildren) if (!alreadyRendered.has(ch.sessionId)) {
+        html += rowHtml(ch, true).replace('class="session-child-row"', 'class="session-child-row open"');
+      }
+      bodyEl.innerHTML = html;
+      bodyEl.querySelectorAll(".session-parent-toggle").forEach(btn=>{
+        btn.addEventListener("click", async (e)=>{
+          e.stopPropagation();
+          const sid = btn.getAttribute("data-sid");
+          const expanded = btn.getAttribute("aria-expanded")==="true";
+          const childRows = bodyEl.querySelectorAll(`.session-child-row[data-parent="${CSS.escape(sid)}"]`);
+          if (childRows.length>0) {
+            const next = !expanded;
+            childRows.forEach(r=> r.classList.toggle("open", next));
+            btn.textContent = next ? "▼" : "▶";
+            btn.setAttribute("aria-expanded", String(next));
+          } else {
+            btn.textContent = "…";
+            btn.disabled = true;
+            try {
+              const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/detail`);
+              const data = await res.json();
+              if (!res.ok) throw new Error(data.detail||res.status);
+              const children = data.children||[];
+              if (children.length===0) {
+                btn.textContent = "—";
+                btn.title = "无子代理";
+                return;
+              }
+              for (const ch of children) {
+                const fakeRow = {
+                  ...ch,
+                  isTask: ch.isTask ?? true,
+                  parentSessionId: sid,
+                  sessionId: ch.sessionId,
+                  displayName: ch.displayName,
+                  timestamp: ch.timestamp,
+                  cwd: ch.cwd,
+                  model: ch.model,
+                  requests: ch.requests,
+                  input: ch.input,
+                  output: ch.output,
+                  cacheRead: ch.cacheRead,
+                  cacheWrite: ch.cacheWrite,
+                  reasoning: ch.reasoning,
+                  cacheRate: ch.cacheRate,
+                  totalTokens: ch.totalTokens,
+                  cost: ch.cost,
+                };
+                const tmp = document.createElement("tbody");
+                tmp.innerHTML = rowHtml(fakeRow, true);
+                const tr = tmp.firstElementChild;
+                tr.classList.add("open");
+                const parentTr = bodyEl.querySelector(`.session-parent-row[data-sid="${CSS.escape(sid)}"]`);
+                if (parentTr) {
+                  let insertAfter = parentTr;
+                  let nxt = parentTr.nextElementSibling;
+                  while (nxt && nxt.classList.contains("session-child-row") && nxt.getAttribute("data-parent")===sid) {
+                    insertAfter = nxt;
+                    nxt = nxt.nextElementSibling;
+                  }
+                  insertAfter.insertAdjacentElement("afterend", tr);
+                } else {
+                  bodyEl.appendChild(tr);
+                }
+              }
+              btn.textContent = "▼";
+              btn.setAttribute("aria-expanded","true");
+              btn.disabled = false;
+            } catch(err){
+              btn.textContent = "!";
+              btn.title = String(err);
+              btn.disabled = false;
+            }
+          }
+        });
+      });
+    }
+  } else {
+    bodyEl.innerHTML = pageRows.map((r) => "<tr>" + cols.map((c) => {
+      const v = valueOf(r, c);
+      if (c === "displayName") {
+        const sid = escapeHtml(r.sessionId);
+        const out = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
+        return `<td><span class="detail-trigger name-cell" data-sid="${sid}" title="点击查看详情">${out}</span></td>`;
       }
       if (c === "sessionId") {
         const sid = escapeHtml(r.sessionId);
-        const out = `<span class="detail-trigger mono" data-sid="${sid}" title="点击查看详情">${escapeHtml(String(v ?? ""))}</span>`;
-        return `<td>${out}</td>`;
+        return `<td><span class="detail-trigger mono" data-sid="${sid}" title="点击查看详情">${escapeHtml(String(v ?? ""))}</span></td>`;
       }
-      if (kind === "sessions" && c === "displayName" && r.isTask) {
-        // unreachable due to earlier return, kept for reference
-        const base = raw;
-        return `<td>${base} <span title="子代理会话" style="background:var(--teal-soft);border:1px solid #C9A86A;border-radius:999px;padding:1px 6px;font:600 10px var(--font-mono);color:#2A3335">子代理</span></td>`;
-      }
-      const out = raw;
+      const out = METRIC_FMTS[c] ? METRIC_FMTS[c](v, r) : escapeHtml(String(v ?? ""));
       return `<td>${out}</td>`;
-    }).join("") + "</tr>")
-    .join("");
+    }).join("") + "</tr>").join("");
+  }
   headEl.querySelectorAll("th").forEach((th) => {
     const arrow = th.querySelector(".arrow");
     if (arrow) arrow.textContent = th.dataset.key === st.sortKey ? (st.sortDir === "asc" ? "▲" : "▼") : "";
@@ -1010,16 +1135,21 @@ function renderDetailTable(kind) {
   const infoEl = $("#" + DETAIL_ID[kind] + "-page-info");
   const total = st.total;
   const pages = Math.max(1, Math.ceil(total / st.size));
-  infoEl.textContent = `${total} 行 · 第 ${st.page}/${pages} 页`;
-  // 翻页键状态：首页禁上一页、末页禁下一页
+  if (kind === "sessions") {
+    const subCount = pageRows.filter(r=>r.isTask).length;
+    const parentCount = pageRows.filter(r=>!r.isTask).length;
+    infoEl.textContent = `${total} 行 · 第 ${st.page}/${pages} 页${subCount>0 ? `（主 ${parentCount} / 子代理 ${subCount} 已折叠）` : ""}`;
+  } else {
+    infoEl.textContent = `${total} 行 · 第 ${st.page}/${pages} 页`;
+  }
   $("#" + DETAIL_ID[kind] + "-prev").disabled = st.page <= 1;
   $("#" + DETAIL_ID[kind] + "-next").disabled = st.page >= pages;
   if (kind === "sessions" && st.totals) {
     const sumEl = $("#session-summary");
     if (sumEl) {
-      const subCount = st.rows.filter(r=>r.isTask).length;
+      const subCount = pageRows.filter(r=>r.isTask).length;
       const hasTask = subCount > 0;
-      sumEl.textContent = `筛选合计: ${fmtCompact(st.totals.totalTokens)} tokens · ${st.totals.requests} 请求 · ${st.total} 会话${hasTask ? ` · 含子代理（${subCount}）` : ""} ｜ 当前页 ${st.rows.length} 行`;
+      sumEl.textContent = `筛选合计: ${fmtCompact(st.totals.totalTokens)} tokens · ${st.totals.requests} 请求 · ${st.total} 会话${hasTask ? ` · 含子代理（${subCount}）` : ""} ｜ 当前页 ${pageRows.length} 行${subCount>0 ? `（折叠后主 ${pageRows.filter(r=>!r.isTask).length} 行可见）` : ""}`;
       sumEl.title = `总计 ${st.totals.totalTokens.toLocaleString()} tokens，${st.totals.requests} 请求，${st.total} 会话（已按时间与筛选条件聚合，含子代理）`;
     }
   }
