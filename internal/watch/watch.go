@@ -2,15 +2,13 @@ package watch
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
+	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
 	"github.com/heihei0299/pi-session-anylize/internal/timerange"
 )
 
@@ -28,63 +26,29 @@ type Increment struct {
 
 type IncrementalReader struct {
 	dir     string
+	sd      *sessiondata.SessionData
 	states  map[string]FileState
 	contrib map[string]domain.Totals
 }
 
-func NewIncrementalReader(dir string) *IncrementalReader {
+func NewIncrementalReader(dir string, sd ...*sessiondata.SessionData) *IncrementalReader {
+	var s *sessiondata.SessionData
+	if len(sd) > 0 && sd[0] != nil {
+		s = sd[0]
+	} else {
+		s = sessiondata.DefaultSessionData
+	}
 	return &IncrementalReader{
 		dir:     dir,
+		sd:      s,
 		states:  make(map[string]FileState),
 		contrib: make(map[string]domain.Totals),
 	}
 }
 
-func getInode(fi os.FileInfo) uint64 {
-	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
-		return stat.Ino
-	}
-	return 0
-}
-
-func isSessionFile(file string) bool {
-	f, err := os.Open(file)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-
-	reader := bufio.NewReader(f)
-	lineBytes, err := reader.ReadBytes('\n')
-	if len(lineBytes) == 0 {
-		return false
-	}
-	var entry struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(bytes.TrimSpace(lineBytes), &entry); err != nil {
-		return false
-	}
-	return entry.Type == "session"
-}
-
-func (r *IncrementalReader) collectJsonlFiles() []string {
-	var out []string
-	_ = filepath.WalkDir(r.dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !d.IsDir() && strings.HasSuffix(d.Name(), ".jsonl") {
-			out = append(out, path)
-		}
-		return nil
-	})
-	return out
-}
-
 func (r *IncrementalReader) ReadIncrements() ([]Increment, error) {
 	var increments []Increment
-	allFiles := r.collectJsonlFiles()
+	allFiles := r.sd.CollectJsonlFiles(r.dir)
 
 	// 1. 合法会话文件收集：已跟踪且 inode 未变的文件跳过首行重验（大幅降低高频轮询开销）
 	var validFiles []string
@@ -96,13 +60,13 @@ func (r *IncrementalReader) ReadIncrements() ([]Increment, error) {
 		}
 		ino := getInode(fi)
 		if !exists {
-			if isSessionFile(f) {
+			if sessiondata.IsSessionFile(f) {
 				validFiles = append(validFiles, f)
 			}
 		} else {
 			if ino == known.Inode {
 				validFiles = append(validFiles, f)
-			} else if isSessionFile(f) {
+			} else if sessiondata.IsSessionFile(f) {
 				validFiles = append(validFiles, f)
 			}
 		}
@@ -174,8 +138,8 @@ func (r *IncrementalReader) ReadIncrements() ([]Increment, error) {
 		ino := getInode(fi)
 		mtime := fi.ModTime().UnixMilli()
 
-		// 解析首行获取 forkTs
-		forkTs := parseForkTs(file)
+		// 解析首行获取 forkTs（复用 sessiondata 统一权威口径）
+		forkTs := sessiondata.ParseForkTs(file)
 		added, bytesRead, err := readEntriesFrom(file, 0, &increments, forkTs)
 		if err == nil {
 			r.states[file] = FileState{
@@ -189,33 +153,6 @@ func (r *IncrementalReader) ReadIncrements() ([]Increment, error) {
 	}
 
 	return increments, nil
-}
-
-func parseForkTs(file string) *int64 {
-	f, err := os.Open(file)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	reader := bufio.NewReader(f)
-	line, err := reader.ReadBytes('\n')
-	if len(line) == 0 {
-		return nil
-	}
-	var header struct {
-		Type          string `json:"type"`
-		Timestamp     string `json:"timestamp"`
-		ParentSession string `json:"parentSession"`
-	}
-	if json.Unmarshal(bytes.TrimSpace(line), &header) == nil && header.Type == "session" {
-		if header.ParentSession != "" && (strings.Contains(header.ParentSession, "/") || strings.Contains(header.ParentSession, "\\")) {
-			ts, err := timerange.ParseUtcTimestamp(header.Timestamp)
-			if err == nil {
-				return &ts
-			}
-		}
-	}
-	return nil
 }
 
 func readEntriesFrom(file string, offset int64, increments *[]Increment, forkTs *int64) (domain.Totals, int64, error) {

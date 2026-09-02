@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -51,27 +50,12 @@ func (s *Storage) lockPath() string {
 	return filepath.Join(s.dataDir, ".lock")
 }
 
-// Lock 获取跨进程 POSIX flock 独占锁，返回 unlock 回调函数
+// Lock 获取跨进程独占锁，返回 unlock 回调函数（跨平台适配 Unix 与 Windows）
 func (s *Storage) Lock() (func(), error) {
 	if err := s.EnsureDataDir(); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(s.lockPath(), os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return nil, err
-	}
-
-	// 非阻塞排他锁：如果有另一个进程在执行同步，立即返回冲突
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("同步进行中，请稍后再试 (lock busy)")
-	}
-
-	unlock := func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		_ = f.Close()
-	}
-	return unlock, nil
+	return lockFile(s.lockPath())
 }
 
 func (s *Storage) GetCosts(year, month int) (*CostsResult, error) {

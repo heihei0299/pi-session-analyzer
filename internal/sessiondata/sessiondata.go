@@ -29,6 +29,7 @@ type SessionFileData struct {
 	SessionId       string        `json:"sessionId"`
 	Timestamp       string        `json:"timestamp"`
 	Cwd             string        `json:"cwd"`
+	FilePath        string        `json:"filePath,omitempty"`
 	FileName        string        `json:"fileName"`
 	IsTask          bool          `json:"isTask"`
 	ParentSessionId string        `json:"parentSessionId,omitempty"`
@@ -74,18 +75,46 @@ type DirCache struct {
 	Data   []*SessionFileData
 }
 
+type flightCall struct {
+	wg  sync.WaitGroup
+	val []*SessionFileData
+	err error
+}
+
 type SessionData struct {
 	mu       sync.RWMutex
 	dirCache map[string]*DirCache
+	flightMu sync.Mutex
+	flights  map[string]*flightCall
 }
 
 func NewSessionData() *SessionData {
 	return &SessionData{
 		dirCache: make(map[string]*DirCache),
+		flights:  make(map[string]*flightCall),
 	}
 }
 
 var DefaultSessionData = NewSessionData()
+
+func (s *SessionData) InvalidateCache(dir string) {
+	s.mu.Lock()
+	delete(s.dirCache, dir)
+	s.mu.Unlock()
+}
+
+func (s *SessionData) FindSessionFile(dir, sessionId string) (string, error) {
+	files, err := s.ReadSessionFilesCached(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, f := range files {
+		if f.SessionId == sessionId {
+			return f.FilePath, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %s", ErrSessionNotFound, sessionId)
+}
 
 func (s *SessionData) CollectJsonlFiles(dir string) []string {
 	var out []string
@@ -140,6 +169,49 @@ type jsonHeaderEntry struct {
 	Timestamp     string `json:"timestamp"`
 	Cwd           string `json:"cwd"`
 	ParentSession string `json:"parentSession"`
+}
+
+func IsSessionFile(file string) bool {
+	f, err := os.Open(file)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	reader := bufio.NewReader(f)
+	lineBytes, err := reader.ReadBytes('\n')
+	if len(lineBytes) == 0 {
+		return false
+	}
+	var h jsonHeaderEntry
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(lineBytes))), &h); err != nil {
+		return false
+	}
+	return h.Type == "session"
+}
+
+func ParseForkTs(file string) *int64 {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	reader := bufio.NewReader(f)
+	lineBytes, err := reader.ReadBytes('\n')
+	if len(lineBytes) == 0 {
+		return nil
+	}
+	var h jsonHeaderEntry
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(lineBytes))), &h); err != nil || h.Type != "session" {
+		return nil
+	}
+	if h.ParentSession == "" || (!strings.Contains(h.ParentSession, "/") && !strings.Contains(h.ParentSession, "\\")) {
+		return nil
+	}
+	ts, err := timerange.ParseUtcTimestamp(h.Timestamp)
+	if err != nil {
+		return nil
+	}
+	return &ts
 }
 
 type jsonMessageEntry struct {
@@ -261,6 +333,7 @@ func (s *SessionData) AnalyzeFile(file string) (*SessionFileData, error) {
 		SessionId:       header.ID,
 		Timestamp:       header.Timestamp,
 		Cwd:             header.Cwd,
+		FilePath:        file,
 		FileName:        filepath.Base(file),
 		IsTask:          isTask,
 		ParentSessionId: parentSessionId,
@@ -269,8 +342,33 @@ func (s *SessionData) AnalyzeFile(file string) (*SessionFileData, error) {
 	}, nil
 }
 
-// ReadSessionFilesCached 读取目录，带 mtime/size 快照缓存与并发解析
+// ReadSessionFilesCached 读取目录，带 singleflight 并发保护、mtime/size 快照缓存与并发解析
 func (s *SessionData) ReadSessionFilesCached(dir string) ([]*SessionFileData, error) {
+	s.flightMu.Lock()
+	if c, ok := s.flights[dir]; ok {
+		s.flightMu.Unlock()
+		c.wg.Wait()
+		return c.val, c.err
+	}
+	c := new(flightCall)
+	c.wg.Add(1)
+	s.flights[dir] = c
+	s.flightMu.Unlock()
+
+	defer func() {
+		s.flightMu.Lock()
+		delete(s.flights, dir)
+		s.flightMu.Unlock()
+		c.wg.Done()
+	}()
+
+	res, err := s.readSessionFilesCachedInternal(dir)
+	c.val = res
+	c.err = err
+	return res, err
+}
+
+func (s *SessionData) readSessionFilesCachedInternal(dir string) ([]*SessionFileData, error) {
 	files := s.CollectJsonlFiles(dir)
 
 	s.mu.RLock()
@@ -810,42 +908,55 @@ func (s *SessionData) Query(dir string, f Filter, v View) (*QueryResult, error) 
 	return nil, fmt.Errorf("unknown view kind: %s", v.Kind)
 }
 
+func compareTotalsMetric(a, b domain.Totals, key string) (bool, bool) {
+	switch key {
+	case "requests":
+		return a.Requests < b.Requests, true
+	case "input":
+		return a.Input < b.Input, true
+	case "output":
+		return a.Output < b.Output, true
+	case "cache":
+		return (a.CacheRead + a.CacheWrite) < (b.CacheRead + b.CacheWrite), true
+	case "cacheRead":
+		return a.CacheRead < b.CacheRead, true
+	case "cacheWrite":
+		return a.CacheWrite < b.CacheWrite, true
+	case "reasoning":
+		return a.Reasoning < b.Reasoning, true
+	case "totalTokens":
+		return a.TotalTokens < b.TotalTokens, true
+	case "cost":
+		return a.Cost < b.Cost, true
+	case "cacheRate":
+		return a.CacheRate < b.CacheRate, true
+	default:
+		return false, false
+	}
+}
+
 func sortSessions(rows []domain.SessionRow, key string, desc bool) {
 	sort.Slice(rows, func(i, j int) bool {
 		a := rows[i]
 		b := rows[j]
+		if less, ok := compareTotalsMetric(a.Totals, b.Totals, key); ok {
+			if desc {
+				return !less
+			}
+			return less
+		}
 		var less bool
 		switch key {
 		case "sessionId":
 			less = a.SessionId < b.SessionId
-		case "timestamp":
-			less = a.Timestamp < b.Timestamp
 		case "displayName":
 			less = a.DisplayName < b.DisplayName
 		case "cwd":
 			less = a.Cwd < b.Cwd
 		case "model":
 			less = a.Model < b.Model
-		case "requests":
-			less = a.Requests < b.Requests
-		case "input":
-			less = a.Input < b.Input
-		case "output":
-			less = a.Output < b.Output
-		case "cache":
-			less = (a.CacheRead + a.CacheWrite) < (b.CacheRead + b.CacheWrite)
-		case "cacheRead":
-			less = a.CacheRead < b.CacheRead
-		case "cacheWrite":
-			less = a.CacheWrite < b.CacheWrite
-		case "reasoning":
-			less = a.Reasoning < b.Reasoning
-		case "totalTokens":
-			less = a.TotalTokens < b.TotalTokens
-		case "cost":
-			less = a.Cost < b.Cost
-		case "cacheRate":
-			less = a.CacheRate < b.CacheRate
+		case "timestamp":
+			less = a.Timestamp < b.Timestamp
 		default:
 			less = a.Timestamp < b.Timestamp
 		}
@@ -860,36 +971,22 @@ func sortRequests(rows []domain.RequestRow, key string, desc bool) {
 	sort.Slice(rows, func(i, j int) bool {
 		a := rows[i]
 		b := rows[j]
+		if less, ok := compareTotalsMetric(a.Totals, b.Totals, key); ok {
+			if desc {
+				return !less
+			}
+			return less
+		}
 		var less bool
 		switch key {
 		case "sessionId":
 			less = a.SessionId < b.SessionId
-		case "timestamp":
-			less = a.Timestamp < b.Timestamp
 		case "displayName":
 			less = a.DisplayName < b.DisplayName
 		case "model":
 			less = a.Model < b.Model
-		case "requests":
-			less = a.Requests < b.Requests
-		case "input":
-			less = a.Input < b.Input
-		case "output":
-			less = a.Output < b.Output
-		case "cache":
-			less = (a.CacheRead + a.CacheWrite) < (b.CacheRead + b.CacheWrite)
-		case "cacheRead":
-			less = a.CacheRead < b.CacheRead
-		case "cacheWrite":
-			less = a.CacheWrite < b.CacheWrite
-		case "reasoning":
-			less = a.Reasoning < b.Reasoning
-		case "totalTokens":
-			less = a.TotalTokens < b.TotalTokens
-		case "cost":
-			less = a.Cost < b.Cost
-		case "cacheRate":
-			less = a.CacheRate < b.CacheRate
+		case "timestamp":
+			less = a.Timestamp < b.Timestamp
 		default:
 			less = a.Timestamp < b.Timestamp
 		}

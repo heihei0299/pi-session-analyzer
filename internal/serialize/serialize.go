@@ -14,6 +14,24 @@ func SerializeJSON(v any) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ")
 }
 
+func totalsToCSVFields(tot domain.Totals) []string {
+	return []string{
+		strconv.Itoa(tot.Requests),
+		fmt.Sprintf("%.0f", tot.Input),
+		fmt.Sprintf("%.0f", tot.Output),
+		fmt.Sprintf("%.0f", tot.CacheRead),
+		fmt.Sprintf("%.0f", tot.CacheWrite),
+		fmt.Sprintf("%.0f", tot.Reasoning),
+		fmt.Sprintf("%.0f", tot.TotalTokens),
+		fmt.Sprintf("%.4f", tot.Cost),
+		fmt.Sprintf("%.4f", tot.CacheRate),
+	}
+}
+
+var metricCSVHeaders = []string{
+	"requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate",
+}
+
 func SerializeCSV(window string, data any) ([]byte, error) {
 	buf := &bytes.Buffer{}
 	w := csv.NewWriter(buf)
@@ -26,92 +44,35 @@ func SerializeCSV(window string, data any) ([]byte, error) {
 				tot = *totPtr
 			}
 		}
-		_ = w.Write([]string{"window", "requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"})
-		_ = w.Write([]string{
-			"totals",
-			strconv.Itoa(tot.Requests),
-			fmt.Sprintf("%.0f", tot.Input),
-			fmt.Sprintf("%.0f", tot.Output),
-			fmt.Sprintf("%.0f", tot.CacheRead),
-			fmt.Sprintf("%.0f", tot.CacheWrite),
-			fmt.Sprintf("%.0f", tot.Reasoning),
-			fmt.Sprintf("%.0f", tot.TotalTokens),
-			fmt.Sprintf("%.4f", tot.Cost),
-			fmt.Sprintf("%.4f", tot.CacheRate),
-		})
+		_ = w.Write(append([]string{"window"}, metricCSVHeaders...))
+		_ = w.Write(append([]string{"totals"}, totalsToCSVFields(tot)...))
+
 	case "sessions":
 		rows, _ := data.([]domain.SessionRow)
-		_ = w.Write([]string{"sessionId", "timestamp", "cwd", "model", "requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"})
+		_ = w.Write(append([]string{"sessionId", "timestamp", "cwd", "model"}, metricCSVHeaders...))
 		for _, r := range rows {
-			_ = w.Write([]string{
-				r.SessionId,
-				r.Timestamp,
-				r.Cwd,
-				r.Model,
-				strconv.Itoa(r.Requests),
-				fmt.Sprintf("%.0f", r.Input),
-				fmt.Sprintf("%.0f", r.Output),
-				fmt.Sprintf("%.0f", r.CacheRead),
-				fmt.Sprintf("%.0f", r.CacheWrite),
-				fmt.Sprintf("%.0f", r.Reasoning),
-				fmt.Sprintf("%.0f", r.TotalTokens),
-				fmt.Sprintf("%.4f", r.Cost),
-				fmt.Sprintf("%.4f", r.CacheRate),
-			})
+			_ = w.Write(append([]string{r.SessionId, r.Timestamp, r.Cwd, r.Model}, totalsToCSVFields(r.Totals)...))
 		}
+
 	case "requests":
 		rows, _ := data.([]domain.RequestRow)
-		_ = w.Write([]string{"sessionId", "timestamp", "model", "requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"})
+		_ = w.Write(append([]string{"sessionId", "timestamp", "model"}, metricCSVHeaders...))
 		for _, r := range rows {
-			_ = w.Write([]string{
-				r.SessionId,
-				r.Timestamp,
-				r.Model,
-				strconv.Itoa(r.Requests),
-				fmt.Sprintf("%.0f", r.Input),
-				fmt.Sprintf("%.0f", r.Output),
-				fmt.Sprintf("%.0f", r.CacheRead),
-				fmt.Sprintf("%.0f", r.CacheWrite),
-				fmt.Sprintf("%.0f", r.Reasoning),
-				fmt.Sprintf("%.0f", r.TotalTokens),
-				fmt.Sprintf("%.4f", r.Cost),
-				fmt.Sprintf("%.4f", r.CacheRate),
-			})
+			_ = w.Write(append([]string{r.SessionId, r.Timestamp, r.Model}, totalsToCSVFields(r.Totals)...))
 		}
+
 	case "groups":
 		rows, _ := data.([]domain.GroupRow)
-		_ = w.Write([]string{"model", "cwd", "requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"})
+		_ = w.Write(append([]string{"model", "cwd"}, metricCSVHeaders...))
 		for _, r := range rows {
-			_ = w.Write([]string{
-				r.Model,
-				r.Cwd,
-				strconv.Itoa(r.Requests),
-				fmt.Sprintf("%.0f", r.Input),
-				fmt.Sprintf("%.0f", r.Output),
-				fmt.Sprintf("%.0f", r.CacheRead),
-				fmt.Sprintf("%.0f", r.CacheWrite),
-				fmt.Sprintf("%.0f", r.Reasoning),
-				fmt.Sprintf("%.0f", r.TotalTokens),
-				fmt.Sprintf("%.4f", r.Cost),
-				fmt.Sprintf("%.4f", r.CacheRate),
-			})
+			_ = w.Write(append([]string{r.Model, r.Cwd}, totalsToCSVFields(r.Totals)...))
 		}
+
 	case "period":
 		rows, _ := data.([]domain.PeriodRow)
-		_ = w.Write([]string{"period", "requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"})
+		_ = w.Write(append([]string{"period"}, metricCSVHeaders...))
 		for _, r := range rows {
-			_ = w.Write([]string{
-				r.Period,
-				strconv.Itoa(r.Requests),
-				fmt.Sprintf("%.0f", r.Input),
-				fmt.Sprintf("%.0f", r.Output),
-				fmt.Sprintf("%.0f", r.CacheRead),
-				fmt.Sprintf("%.0f", r.CacheWrite),
-				fmt.Sprintf("%.0f", r.Reasoning),
-				fmt.Sprintf("%.0f", r.TotalTokens),
-				fmt.Sprintf("%.4f", r.Cost),
-				fmt.Sprintf("%.4f", r.CacheRate),
-			})
+			_ = w.Write(append([]string{r.Period}, totalsToCSVFields(r.Totals)...))
 		}
 	}
 

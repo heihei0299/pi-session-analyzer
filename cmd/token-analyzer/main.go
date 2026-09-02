@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -177,7 +176,7 @@ func main() {
 	switch *format {
 	case "json":
 		var outData any
-		if res.Totals != nil {
+		if res.Window == "totals" && res.Rows == nil && res.Totals != nil {
 			outData = map[string]any{
 				"window":      "totals",
 				"requests":    res.Totals.Requests,
@@ -189,6 +188,18 @@ func main() {
 				"totalTokens": res.Totals.TotalTokens,
 				"cost":        res.Totals.Cost,
 				"cacheRate":   res.Totals.CacheRate,
+			}
+		} else if res.Window == "totals" && res.By != "" {
+			outData = map[string]any{
+				"window": "totals",
+				"by":     string(res.By),
+				"rows":   res.Rows,
+			}
+		} else if res.Window == "totals" && res.Period != "" {
+			outData = map[string]any{
+				"window": "totals",
+				"period": string(res.Period),
+				"rows":   res.Rows,
 			}
 		} else {
 			outData = map[string]any{
@@ -225,15 +236,6 @@ func main() {
 			fmt.Print(render.RenderPeriodTable(rows, view.Period))
 		}
 	}
-}
-
-// 供测试或其它模块引用的辅助函数
-func ParseIntSafe(s string, def int) int {
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return v
 }
 
 func handleOpencodeCommand(args []string) {

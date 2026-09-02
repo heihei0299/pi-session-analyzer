@@ -305,18 +305,9 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 查找会话文件
-	files := s.sessionData.CollectJsonlFiles(s.dir)
-	var matchedFile string
-	for _, f := range files {
-		data, _ := s.sessionData.AnalyzeFile(f)
-		if data != nil && data.SessionId == req.SessionId {
-			matchedFile = f
-			break
-		}
-	}
-
-	if matchedFile == "" {
+	// 查找会话文件（走 SessionData 快照缓存）
+	matchedFile, err := s.sessionData.FindSessionFile(s.dir, req.SessionId)
+	if err != nil {
 		sendError(w, http.StatusNotFound, "Not Found", fmt.Sprintf("会话不存在: %s", req.SessionId))
 		return
 	}
@@ -353,6 +344,7 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 			sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
 			return
 		}
+		s.sessionData.InvalidateCache(s.dir)
 	}
 
 	sendJSON(w, http.StatusOK, map[string]any{
