@@ -1,3 +1,3 @@
 module github.com/heihei0299/pi-session-anylize
 
-go 1.27.0
+go 1.22.0

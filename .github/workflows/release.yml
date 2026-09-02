@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: false
+
+      - name: Setup Node 24 (for dual-track parity test)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Run Tests
+        run: |
+          go test -v ./...
+
+      - name: Build Multi-Platform Binaries
+        run: |
+          make release
+
+      - name: Package Archives and Checksums
+        run: |
+          cd dist
+          tar -czf token-analyzer-linux-amd64.tar.gz token-analyzer-linux-amd64
+          tar -czf token-analyzer-linux-arm64.tar.gz token-analyzer-linux-arm64
+          tar -czf token-analyzer-darwin-amd64.tar.gz token-analyzer-darwin-amd64
+          tar -czf token-analyzer-darwin-arm64.tar.gz token-analyzer-darwin-arm64
+          python3 -m zipfile -c token-analyzer-windows-amd64.zip token-analyzer-windows-amd64.exe
+          sha256sum *.tar.gz *.zip > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/token-analyzer-linux-amd64.tar.gz
+            dist/token-analyzer-linux-arm64.tar.gz
+            dist/token-analyzer-darwin-amd64.tar.gz
+            dist/token-analyzer-darwin-arm64.tar.gz
+            dist/token-analyzer-windows-amd64.zip
+            dist/checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
