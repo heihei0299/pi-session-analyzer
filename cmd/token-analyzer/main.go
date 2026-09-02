@@ -19,7 +19,7 @@ import (
 	"github.com/heihei0299/pi-session-anylize/internal/watch"
 )
 
-const Version = "2026.9.1"
+const Version = "2026.9.3"
 
 func defaultDir() string {
 	home, err := os.UserHomeDir()

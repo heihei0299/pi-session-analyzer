@@ -1,4 +1,4 @@
-VERSION ?= 2026.9.1
+VERSION ?= 2026.9.3
 BIN_DIR = dist
 BINARY_NAME = token-analyzer-go
 
