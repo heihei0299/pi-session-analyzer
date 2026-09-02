@@ -6,25 +6,46 @@
 领域术语见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)（当前：`0001-fork-session-dedup.md`、`0002-total-tokens-gateway-alignment.md`）。
 ## 安装
 
+### 方式 A：Go 原生二进制（推荐，毫秒级响应、零外部依赖）
+
 ```bash
-npm i -g token-analyzer    # 从 npm 安装（Node ≥ 18）
+# 1. 直接编译并安装到 $GOPATH/bin
+go install ./cmd/token-analyzer
+
+# 2. 或使用 Makefile 构建当前平台单二进制 (产物 dist/token-analyzer-go，约 7.5MB)
+make build
+
+# 3. 多平台交叉编译发布 (生成 Linux / macOS / Windows 产物)
+make release
 ```
 
-开发环境（本仓库）：TypeScript + Node 24，零运行时依赖。
+### 方式 B：npm 安装（Node ≥ 18）
 
 ```bash
+npm i -g token-analyzer
+```
+
+开发环境（本仓库）：支持 Go 1.22+ 或 TypeScript + Node 24 双开发环境，均为零运行时依赖。
+
+```bash
+# Go 环境验证
+go test -v ./...
+
+# Node.js 环境验证
 npm install      # 安装 typescript + @types/node（devDependencies）
-npm test         # 运行全部测试（132 用例；固定 TZ=Asia/Shanghai 保证时区确定性）
-npm run build    # tsc 编译到 dist/ + 复制 webui.html（发布产物）
+npm test         # 运行测试
+npm run build    # tsc 编译
 ```
 
 ## 用法
 
 ```
 token-analyzer [totals|sessions|requests] --dir <path> [选项]
+token-analyzer opencode sync [--auth <a>] [--workspace <w>] [--data-dir <d>]
+token-analyzer opencode export [--format json|csv] [--output <path>] [--data-dir <d>]
 ```
 
-开发时可用 `node src/cli.ts` 替代 `token-analyzer`（Node 24 type-stripping 直接运行）。
+开发时可用 `node src/cli.ts` 或 `./dist/token-analyzer-go` 直接运行。
 
 - **窗口**（位置参数，默认 `totals`）：`totals` 总消耗量 / `sessions` 会话级（每会话一行）/ `requests` 单请求级（逐 assistant 消息）
 - **数据目录**：`--dir <path>`（默认 `~/.pi/agent/sessions/`）
@@ -111,22 +132,24 @@ HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` 
 ## 结构
 
 ```
-CONTEXT.md      领域术语表（统计口径、fork 会话、字段语义）
-docs/adr/       架构决策记录（0001-fork-session-dedup、0002-total-tokens-gateway-alignment）
-src/
-  session-data.ts 深模块：会话数据仓（目录→窗口派生唯一 seam，单一 query(filter,view)，内聚 fork 去重/缓存/派生/分页，branded TimeRange）
-  time-range.ts   时间范围单引擎：makeSessionRange/makeMessageRange/applyTimeRange（本地时区严格校验）
-  analyze.ts    薄 shim（re-export session-data，保留 1 版本兼容旧 import）
-  aggregate.ts  聚合模型（Totals 类型、指标计算）
-  render.ts     终端表格渲染
-  serialize.ts  JSON / CSV 序列化
-  cli.ts        CLI 入口（参数解析含 -h/--help/-v/--version、未知参数显式报错、窗口路由、watch/serve 集成）
-  watch.ts      实时监控增量读取器
-  server.ts     serve HTTP 服务器（路由分发、生命周期、EADDRINUSE 友好提示）
-  api.ts        HTTP API 层（薄路由，委托 session-data.query，统一错误体、会话重命名 + 详情聚合）
-  webui.html    单 HTML 内联前端（仪器台 dark bench + 鼓轮读数 + 链孔纸带，4 tab、服务端分页、自动刷新、导出）
-test/           node:test 测试（132 用例；fixture JSONL → CLI 输出断言；serve → HTTP 端点断言）
-dist/           构建产物（npm 发布内容；不入库）
-.scratch/       功能规格与 issue（token-analyzer / token-analyzer-webui / webui-fixes / npm-publish）
-.github/workflows/publish.yml  tag 触发自动发布
+CONTEXT.md              领域术语表（统计口径、fork 会话、字段语义）
+docs/adr/               架构决策记录（0001-fork-session-dedup、0002-total-tokens-gateway-alignment）
+Makefile                多平台交叉编译与自动化测试脚本
+go.mod                  Go 模块配置（零外部第三方依赖，保持纯标准库）
+cmd/token-analyzer/     Go CLI 与 Serve 统一主程序入口
+internal/
+  domain/               核心聚合模型与指标定义（ADR-0002 口径、Totals）
+  sessiondata/          SessionData 会话数据仓核心深模块（ADR-0001 fork 去重、快照缓存、singleflight）
+  timerange/            CST 本地时区双语义时间引擎（严格公历校验）
+  watch/                增量实时监控引擎（跨平台 Inode 隔离、负补偿重读）
+  server/               原生 net/http 服务（内嵌 webui.html、会话重命名防护）
+  opencode/             OpenCode RPC 逆向客户端、POSIX/Windows 文件锁、云端对账
+  render/               终端 ASCII 格式化表格渲染
+  serialize/            JSON / CSV 序列化器
+src/                    TypeScript 原型与历史 Node.js 实现
+  webui.html            单 HTML 内联前端（仪器台 dark bench + Canvas 2D 绘图，4 tab、服务端分页、导出）
+test/                   集成与双轨金样对账测试（Node vs Go 5大窗口 0 误差验证）
+dist/                   构建产物（包含多平台交叉编译二进制）
+.scratch/               功能规格与 issue（token-analyzer / webui / opencode-sync 等）
+.github/workflows/      自动化 CI / 发布流程
 ```

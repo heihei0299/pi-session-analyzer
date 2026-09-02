@@ -7,3 +7,4 @@ dist/
 .opencode/
 .pi/CONTEXT.md
 data/
+src/prototype-session-detail.html
