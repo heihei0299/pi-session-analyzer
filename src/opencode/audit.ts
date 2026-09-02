@@ -50,8 +50,8 @@ export function computeOpencodeTotals(records: OpenCodeUsageRecord[]): OpencodeT
     const cw5 = typeof r.cacheWrite5mTokens === "number" && Number.isFinite(r.cacheWrite5mTokens) ? r.cacheWrite5mTokens : 0;
     const cw1 = typeof r.cacheWrite1hTokens === "number" && Number.isFinite(r.cacheWrite1hTokens) ? r.cacheWrite1hTokens : 0;
     cacheWrite += cw5 + cw1;
-    reasoning += typeof r.reasoningTokens === "number" && Number.isFinite(r.reasoningTokens) ? r.reasoningTokens : 0;
-    cost += typeof r.cost === "number" && Number.isFinite(r.cost) ? r.cost : 0;
+    const rawCost = typeof r.cost === "number" && Number.isFinite(r.cost) ? r.cost : 0;
+    cost += rawCost > 100 ? rawCost / 1e8 : rawCost;
   }
   const totalTokens = input + cacheRead + output;
   return { requests: records.length, input, output, cacheRead, cacheWrite, reasoning, totalTokens, cost };
