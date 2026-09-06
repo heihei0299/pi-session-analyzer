@@ -10,19 +10,16 @@ import { Database } from "../src/db.ts";
 import { withDirDb, queryTotals } from "../src/db-aggregation.ts";
 import { makeFixture, removeFixture, sessionHeader, messageEntry, assistantUsage } from "./helpers.ts";
 
-test("38-1 resolveDbPath 共库优先级：无 env/db 时若 ~/.cc-switch/cc-switch.db 存在则返回该路径", () => {
+test("38-1 resolveDbPath 默认不共库：无参时返回 cache，显式 env/--db 才共库", () => {
   const ccPath = join(homedir(), ".cc-switch", "cc-switch.db");
-  if (!existsSync(ccPath)) {
-    // 环境无 cc-switch 库时跳过（CI）
-    return;
-  }
   const got = resolveDbPath({});
-  assert.equal(got, ccPath, "无覆盖时应返回 cc-switch 共库路径");
-  // env 优先
+  assert.ok(got.endsWith("token-analyzer.db"), `默认应返回 token-analyzer.db, 实际 ${got}`);
+  assert.notEqual(got, ccPath, "默认不应返回 cc-switch 路径");
+  // 显式才共库
+  assert.equal(resolveDbPath({ envDb: ccPath }), ccPath);
+  assert.equal(resolveDbPath({ dbPath: ccPath }), ccPath);
   assert.equal(resolveDbPath({ envDb: "/tmp/custom.db" }), "/tmp/custom.db");
-  // --db 次之
   assert.equal(resolveDbPath({ dbPath: "/tmp/a.db" }), "/tmp/a.db");
-  // env > db
   assert.equal(resolveDbPath({ dbPath: "/tmp/a.db", envDb: "/tmp/b.db" }), "/tmp/b.db");
 });
 

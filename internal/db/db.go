@@ -17,7 +17,7 @@ type Database struct {
 	Path string
 }
 
-// ResolveDbPath 按优先级解析：envDb > dbPath > ~/.cc-switch/cc-switch.db（若存在） > ~/.cache > data
+// ResolveDbPath 按优先级解析：envDb > dbPath > ~/.cache > data（默认不共库，显式 env/--db 才共库）
 func ResolveDbPath(dbPath, envDb string) string {
 	if envDb != "" {
 		return envDb
@@ -27,10 +27,6 @@ func ResolveDbPath(dbPath, envDb string) string {
 	}
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" && home != "/" {
-		cc := filepath.Join(home, ".cc-switch", "cc-switch.db")
-		if _, err := os.Stat(cc); err == nil {
-			return cc
-		}
 		return filepath.Join(home, ".cache", "token-analyzer", "token-analyzer.db")
 	}
 	return filepath.Join("data", "token-analyzer.db")

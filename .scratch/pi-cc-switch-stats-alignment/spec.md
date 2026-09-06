@@ -12,8 +12,7 @@
 
 ## Solution
 
-使 `token-analyzer` 的 `totals` 统计（`requests/input/cacheRead/output/totalTokens/cacheRate`）在同 DB 文件、同时间窗口（`localtime` 的 `今天`/`7天`/`全部`）下与 `cc-switch` 的 `SELECT SUM(...) FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session'` 逐项一致；`fmtCompact` 仅展示舍入，不参与对账口径。存储路径默认共库 `~/.cc-switch/cc-switch.db`（若存在），否则回退 `~/.cache/token-analyzer/token-analyzer.db`。
-
+使 `token-analyzer` 的 `totals` 统计（`requests/input/cacheRead/output/totalTokens/cacheRate`）在**显式共库**（`TOKEN_ANALYZER_DB=~/.cc-switch/cc-switch.db` 或 `--db` 指向 `cc-switch.db`）且同时间窗口（`localtime` 的 `今天`/`7天`/`全部`）下与 `cc-switch` 的 `SELECT SUM(...) FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session'` 逐项一致；`fmtCompact` 仅展示舍入，不参与对账口径。默认不共库（`TOKEN_ANALYZER_DB`/`--db` 未设时走 `~/.cache/token-analyzer/token-analyzer.db`），两项目文件级隔离。
 ## User Stories
 
 1. As a pi 用户, I want `token-analyzer totals` 的今日 `totalTokens` 与 `cc-switch` 今日 `totalTokens` 一致（±0.1%），so that 我信任任一工具均可作为唯一真相源
@@ -27,20 +26,20 @@
 9. As a pi 用户, I want 双账本去重 `request_id/semantic_id`（`hash_field/hash_json` 规范化）与 `fork ts<forkTs` 在两工具一致，so that 同尺寸重写不双算
 10. As a pi 用户, I want 指纹增量 `tailFingerprint(末4096B, pi-session-tail-v1)+complete` 的 `seek` 与半行 `committed_offset` 在两工具一致，so that 今日增量不丢不重且性能可比
 11. As a pi 用户, I want `withDirDb` 读路径走 `proxy_request_logs ∪ usage_daily_rollups` 的 SQL 聚合且 `rollup_and_prune(30)` 语义一致，so that 剪枝后总量仍对齐
-12. As a 开发者, I want `TOKEN_ANALYZER_DB` > `--db` > `~/.cc-switch/cc-switch.db` > `~/.cache/token-analyzer/token-analyzer.db` 的路径优先级，so that 默认共库无需配置
+12. As a 开发者, I want `TOKEN_ANALYZER_DB` > `--db` > `~/.cache/token-analyzer/token-analyzer.db` 的路径优先级（默认不共库，显式 `TOKEN_ANALYZER_DB=~/.cc-switch/cc-switch.db` 或 `--db` 指向 `cc-switch.db` 才共库），so that 两项目默认隔离、需对账时显式共库
 13. As a 开发者, I want `GET /api/totals?since=&until=` 与 `cc-switch` 的 `created_at BETWEEN` 语义一致（`localtime`，`since 00:00 / until 23:59:59`），so that WebUI 与 DB 可直接对账
 14. As a QA, I want `npm test` 中新增 `38-cc-switch-alignment` 对比用例在 `withDirDb` 同库下与 `cc-switch.db` 的 `SUM` 逐项 `deepEqual`，so that 回归可锁定
 
 ## Implementation Decisions
 
-- **存储共库**：`resolveDbPath` 新增 `~/.cc-switch/cc-switch.db` 探测分支（`existsSync`），路径优先级 `TOKEN_ANALYZER_DB > --db > ~/.cc-switch/cc-switch.db > ~/.cache/token-analyzer/token-analyzer.db`；`SCHEMA_VERSION=3`（在 `ADR-0003` 的 `1` 基础上补 `kind/reasoning_tokens/cwd/timestamp_text` 四列，已通过 `ensureColumns` 兼容 `cc-switch` 旧库，无则 `ALTER TABLE ADD COLUMN`，查询时 `COALESCE`）。
-- **引擎**：Node `node:sqlite:DatabaseSync`（`>=24`）与 Go `modernc.org/sqlite` 保持 `WAL/busy_timeout=5000/foreign_keys=ON/synchronous=NORMAL` 一致，`CGO_ENABLED=0` 交叉编译不受影响。
-- **解析口径**：`parsePiUsageRecord` 严格四载体分支（`type=message:role=assistant|toolResult` + `type=compaction|branch_summary` 顶层 `usage`），门控 `has_billable||has_cost||failed`（`failed=stopReason∈{error,aborted}`），`provider/bounded_label` 与 `512B Buffer` 截断保 UTF-8。
-- **去重/增量**：`piRequestIdentity` 的 `hash_field`（8字节长度前缀）与 `hash_json`（类型标签+键排序+规范化）与 `cc-switch` 实现逐字节一致；`PiFileRevision` 的 `tailFingerprint` 域标签 `pi-session-tail-v1` 末 4096B SHA256，`complete=末字节=='\n'`，`last_byte_offset/last_tail_fingerprint` 存已提交位点（非全文件），`tailAt(oldByte)==expected ? seek : full`，半行 `complete=false` 时 `committed_offset = lastNL+1` 不推进。
-- **费用**：`cost.reported().is_some()` 则用 `cost.total`，否则 `CostCalculator` 回算，`total_cost_usd TEXT` 存 Decimal 字符串，缺失为 `0`。
-- **聚合**：`queryTotals/Groups/Period/Sessions/Requests` 全部 `SELECT SUM(...) FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session' UNION ALL usage_daily_rollups`，`since/until` 转 `created_at BETWEEN`（`localtime`），`model/cwd` 下推，`page/size/sortKey/sortDir` 下推；`totalTokens` 与 `cacheRate` 在 `finalizeTotals` 单点计算。
-- **API/CLI**：`runCli` 与 `handleApi` 已切 `withDirDb`，`GET /api/db/meta {dbPath,schemaVersion,lastSyncAt,rollupWatermark}` 返回实值（`MAX(last_synced_at)`/`MIN(date)`），WebUI `scope-note` 标四载体与 `总输入=input+cacheRead`。
-- **兼容**：不保留旧文件聚合回退，首启空库即空结果；`TOKEN_ANALYZER_DB` 指向 `cc-switch.db` 时复用其 `session_log_sync/session_usage_dedup` 账本，避免双写双算。
+- **存储隔离（默认不共库）**：`resolveDbPath` 默认 `TOKEN_ANALYZER_DB > --db > ~/.cache/token-analyzer/token-analyzer.db`（不探测 `~/.cc-switch/cc-switch.db`），显式 `TOKEN_ANALYZER_DB=~/.cc-switch/cc-switch.db` 或 `--db ~/.cc-switch/cc-switch.db` 时才共库；`SCHEMA_VERSION=2` 兼容 `cc-switch` 旧库（`kind/reasoning_tokens/cwd/timestamp_text` 缺失时 `ALTER TABLE ADD COLUMN`），`ensureUserVersion` 仅在 `v < SCHEMA_VERSION` 时升级，避免覆盖 `cc-switch` 的 `user_version=18`
+- **引擎**：Node `node:sqlite:DatabaseSync`（`>=24`）与 Go `modernc.org/sqlite` 保持 `WAL/busy_timeout=5000/foreign_keys=ON/synchronous=NORMAL` 一致，`CGO_ENABLED=0` 交叉编译不受影响
+- **解析口径**：`parsePiUsageRecord` 严格四载体分支（`type=message:role=assistant|toolResult` + `type=compaction|branch_summary` 顶层 `usage`），门控 `has_billable||has_cost||failed`（`failed=stopReason∈{error,aborted}`），`provider/bounded_label` 与 `512B Buffer` 截断保 UTF-8
+- **去重/增量**：`piRequestIdentity` 的 `hash_field`（8字节长度前缀）与 `hash_json`（类型标签+键排序+规范化）与 `cc-switch` 实现逐字节一致；`PiFileRevision` 的 `tailFingerprint` 域标签 `pi-session-tail-v1` 末 4096B SHA256，`complete=末字节=='\n'`，`last_byte_offset/last_tail_fingerprint` 存已提交位点（非全文件），`tailAt(oldByte)==expected ? seek : full`，半行 `complete=false` 时 `committed_offset = lastNL+1` 不推进
+- **费用**：`cost.reported().is_some()` 则用 `cost.total`，否则 `CostCalculator` 回算，`total_cost_usd TEXT` 存 Decimal 字符串，缺失为 `0`
+- **聚合**：`queryTotals/Groups/Period/Sessions/Requests` 全部 `SELECT SUM(...) FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session' UNION ALL usage_daily_rollups`，`since/until` 转 `created_at BETWEEN`（`localtime`），`model/cwd` 下推，`page/size/sortKey/sortDir` 下推；`totalTokens` 与 `cacheRate` 在 `finalizeTotals` 单点计算
+- **API/CLI**：`runCli` 与 `handleApi` 已切 `withDirDb`，`GET /api/db/meta {dbPath,schemaVersion,lastSyncAt,rollupWatermark}` 返回实值（`MAX(last_synced_at)`/`MIN(date)`），WebUI `scope-note` 标四载体与 `总输入=input+cacheRead`
+- **兼容**：不保留旧文件聚合回退，首启空库即空结果；显式共库时复用 `cc-switch` 的 `session_log_sync/session_usage_dedup` 账本，此时两工具写入同一文件需避免并发 `VACUUM`
 
 ## Testing Decisions
 
