@@ -6,7 +6,7 @@
 import type { Database } from "./db.ts";
 import { defaultSessionData } from "./session-data.ts";
 import { collectJsonlFiles } from "./session-data.ts";
-import { collectPiJsonlFiles, resolvePiSessionRoot } from "./pi-discovery.ts";
+import { collectPiJsonlFiles, resolvePiSessionRoot, getPiNativeSessionDir } from "./pi-discovery.ts";
 import { syncPiUsage } from "./pi-sync.ts";
 import { Database as DbClass } from "./db.ts";
 import { emptyTotals, finalizeTotals, type Totals, type GroupRow, type GroupBy, type Period, type PeriodRow } from "./aggregate.ts";
@@ -51,14 +51,17 @@ function matchingRawCwds(db: Database, cwdFilter: string): string[] {
 
 /** 读路径统一入口：持久库（全量同步后聚合）+ 内存隔离（测试 fixture） */
 export async function withDirDb<T>(dir: string, fn: (db: Database) => Promise<T> | T): Promise<T> {
-  const isTest = dir.includes("token-analyzer") || dir.includes("ta-") || dir.startsWith("/tmp/token-analyzer");
+  const isTest = dir.includes("token-analyzer") || dir.includes("ta-") || dir.startsWith("/tmp/") || dir.startsWith("/private/tmp/");
   const db = isTest ? await DbClass.memory() : await DbClass.getInstance();
   try {
-    const { root, layout } = resolvePiSessionRoot({ envDb: process.env.PI_CODING_AGENT_SESSION_DIR, defaultRoot: dir, piConfig: undefined });
-    const files = collectPiJsonlFiles(root, layout);
-    const fallback = files.length === 0 ? collectJsonlFiles(dir) : [];
-    const allFiles = files.length > 0 ? files : fallback;
-    await syncPiUsage(db, allFiles);
+    const piNative = getPiNativeSessionDir();
+    const { root, layout } = resolvePiSessionRoot({ envDb: process.env.PI_CODING_AGENT_SESSION_DIR, defaultRoot: dir, piConfig: piNative });
+    let files = collectPiJsonlFiles(root, layout);
+    // 测试 fixture 扁平文件：projectDirectories 下无文件时回退到递归收集（仅 isTest）
+    if (isTest && files.length === 0) {
+      files = collectJsonlFiles(dir);
+    }
+    await syncPiUsage(db, files);
     if (!isTest) rollupAndPrune(db, 30);
     return await fn(db);
   } finally {

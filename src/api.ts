@@ -306,7 +306,12 @@ export async function handleApi(
     return { status: 404, body: { error: "Not Found", detail: `未知 API 路径: ${pathname}` } };
   } catch (e) {
     if (e instanceof ApiError) return { status: e.status, body: { error: e.name, detail: e.detail } };
-    return { status: 500, body: { error: "Internal Server Error", detail: String(e instanceof Error ? e.message : e) } };
+    const msg = String(e instanceof Error ? e.message : e);
+    if (msg.includes("PI_SESSION_DIR_REQUIRES_PROJECT_CONTEXT")) {
+      const detail = msg.replace(/^400\s+/, "");
+      return { status: 400, body: { error: "Bad Request", detail } };
+    }
+    return { status: 500, body: { error: "Internal Server Error", detail: msg } };
   }
 }
 

@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 )
@@ -54,6 +55,32 @@ func CollectPiJsonlFiles(root string, layout Layout) []string {
 	return out
 }
 
+// GetPiNativeSessionDir 读取 pi native defaults 的 session_dir
+func GetPiNativeSessionDir() string {
+	candidates := []string{
+		filepath.Join(os.Getenv("HOME"), ".pi", "agent", "settings.json"),
+		filepath.Join(os.Getenv("HOME"), ".config", "pi", "config.json"),
+	}
+	for _, p := range candidates {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var j map[string]interface{}
+		if err := json.Unmarshal(b, &j); err != nil {
+			continue
+		}
+		for _, k := range []string{"session_dir", "sessionDir", "session-dir"} {
+			if v, ok := j[k]; ok {
+				if s, ok := v.(string); ok && s != "" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // ResolvePiSessionRoot 按优先级解析
 func ResolvePiSessionRoot(envDb, defaultRoot, piConfig string) (ResolveResult, error) {
 	if envDb != "" {
@@ -70,8 +97,7 @@ func ResolvePiSessionRoot(envDb, defaultRoot, piConfig string) (ResolveResult, e
 	}
 	return ResolveResult{Root: defaultRoot, Layout: LayoutProjectDirectories}, nil
 }
-
-var ErrRequiresProjectContext = &resolveError{"PI_SESSION_DIR_REQUIRES_PROJECT_CONTEXT"}
+var ErrRequiresProjectContext = &resolveError{"400 PI_SESSION_DIR_REQUIRES_PROJECT_CONTEXT"}
 
 type resolveError struct{ msg string }
 
