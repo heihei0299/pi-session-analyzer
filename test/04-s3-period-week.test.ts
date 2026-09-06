@@ -17,17 +17,17 @@ test("S3 --period week 汇总：ISO 周归属（周一起始），跨周会话�
     // 周六（2026-07-27 周）：input 100
     "2026-08-01T10-00-00-000Z_a.jsonl": [
       sessionHeader({ id: "s-a", timestamp: "2026-08-01T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }, { timestamp: "2026-08-01T10:00:00.000Z" }),
     ],
     // 周日（2026-07-27 周）：input 200
     "2026-08-02T10-00-00-000Z_b.jsonl": [
       sessionHeader({ id: "s-b", timestamp: "2026-08-02T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }, { timestamp: "2026-08-02T10:00:00.000Z" }),
     ],
     // 周一（2026-08-03 周）：input 400
     "2026-08-03T10-00-00-000Z_c.jsonl": [
       sessionHeader({ id: "s-c", timestamp: "2026-08-03T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 400 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 400 }) }, { timestamp: "2026-08-03T10:00:00.000Z" }),
     ],
   });
   try {

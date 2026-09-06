@@ -25,6 +25,8 @@ import { OpenCodeClient } from "./opencode/client.ts";
 import { buildAudit } from "./opencode/audit.ts";
 import { loadCredentials } from "./opencode/credentials.ts";
 import { resolveDbPathFromEnv, SCHEMA_VERSION } from "./db.ts";
+import { withDirDb, queryTotals, queryGroups, queryPeriod, querySessions, queryRequests, queryMeta, queryDetail } from "./db-aggregation.ts";
+import type { DbFilter } from "./db-aggregation.ts";
 
 /** 会话活跃阈值：文件 mtime 距今 ≤ 5min 视为活跃（pi 正在写入） */
 const ACTIVE_MS = 5 * 60 * 1000;
@@ -85,28 +87,21 @@ export async function handleApi(
 ): Promise<ApiResponse> {
   try {
     if (method === "GET" && pathname === "/api/totals") {
-      const filter = filterFromParams(params, "message");
-      const result = await defaultSessionData.query(dir, filter, { kind: "totals" }) as { totals: import("./aggregate.ts").Totals };
-      return { status: 200, body: { window: "totals", ...totalsToObject(result.totals) } };
+      const filter = dbFilterFromParams(params);
+      const totals = await withDirDb(dir, (db) => queryTotals(db, filter));
+      return { status: 200, body: { window: "totals", ...totalsToObject(totals) } };
     }
     if (method === "GET" && pathname === "/api/sessions") {
-      const filter = filterFromParams(params, "message");
+      const filter = dbFilterFromParams(params);
       const paging = parsePagingAndSort(params);
-      const result = await defaultSessionData.query(dir, filter, {
-        kind: "sessions",
-        page: paging.paging?.page,
-        size: paging.paging?.size,
-        sortKey: paging.sort?.sortKey,
-        sortDir: paging.sort?.sortDir,
-      }) as { rows: unknown[]; total: number; page?: number; size?: number; totals: import("./aggregate.ts").Totals };
-      // 将 SessionData 的 enriched 行转为 API 响应（已含 fileName/displayName/cwdNorm，补充 serialize）
-      const rows = (result.rows as Array<Record<string, unknown>>).map((r) => ({
+      const result = await withDirDb(dir, (db) => querySessions(db, filter, paging.paging ? { page: paging.paging.page, size: paging.paging.size, sortKey: paging.sort?.sortKey, sortDir: paging.sort?.sortDir } : { sortKey: paging.sort?.sortKey, sortDir: paging.sort?.sortDir }));
+      const rows = (result.rows as unknown as Array<Record<string, unknown>>).map((r) => ({
         ...sessionToObject(r as unknown as import("./aggregate.ts").SessionRow),
-        fileName: r.fileName,
-        displayName: r.displayName,
-        cwdNorm: r.cwdNorm,
-        isTask: r.isTask,
-        parentSessionId: r.parentSessionId,
+        fileName: (r as Record<string, unknown>).fileName,
+        displayName: (r as Record<string, unknown>).displayName,
+        cwdNorm: (r as Record<string, unknown>).cwdNorm,
+        isTask: (r as Record<string, unknown>).isTask,
+        parentSessionId: (r as Record<string, unknown>).parentSessionId,
       }));
       const out: Record<string, unknown> = { window: "sessions", rows, total: result.total, totals: totalsToObject(result.totals) };
       if (result.page !== undefined) { out.page = result.page; out.size = result.size; }
@@ -116,7 +111,7 @@ export async function handleApi(
       const sessionId = params.get("sessionId") ?? params.get("sessionID") ?? params.get("id") ?? "";
       if (!sessionId || sessionId.trim() === "") throw new ApiError(400, "Bad Request", "缺少 sessionId");
       try {
-        const detail = await defaultSessionData.queryDetail(dir, sessionId);
+        const detail = await withDirDb(dir, (db) => queryDetail(db, sessionId));
         return { status: 200, body: serializeDetail(detail as unknown as Parameters<typeof serializeDetail>[0]) };
       } catch (e) {
         if ((e as Error & { status?: number })?.status === 404) throw new ApiError(404, "Not Found", (e as Error).message);
@@ -130,7 +125,7 @@ export async function handleApi(
       try { sessionId = decodeURIComponent(m[1]); } catch { sessionId = m[1]; }
       if (!sessionId || sessionId.trim() === "") throw new ApiError(400, "Bad Request", "缺少 sessionId");
       try {
-        const detail = await defaultSessionData.queryDetail(dir, sessionId);
+        const detail = await withDirDb(dir, (db) => queryDetail(db, sessionId));
         return { status: 200, body: serializeDetail(detail as unknown as Parameters<typeof serializeDetail>[0]) };
       } catch (e) {
         if ((e as Error & { status?: number })?.status === 404) throw new ApiError(404, "Not Found", (e as Error).message);
@@ -141,18 +136,12 @@ export async function handleApi(
       return await renameSession(dir, body);
     }
     if (method === "GET" && pathname === "/api/requests") {
-      const filter = filterFromParams(params, "message");
+      const filter = dbFilterFromParams(params);
       const paging = parsePagingAndSort(params);
-      const result = await defaultSessionData.query(dir, filter, {
-        kind: "requests",
-        page: paging.paging?.page,
-        size: paging.paging?.size,
-        sortKey: paging.sort?.sortKey,
-        sortDir: paging.sort?.sortDir,
-      }) as { rows: unknown[]; total: number; page?: number; size?: number };
-      const rows = (result.rows as Array<Record<string, unknown>>).map((r) => ({
+      const result = await withDirDb(dir, (db) => queryRequests(db, filter, paging.paging ? { page: paging.paging.page, size: paging.paging.size, sortKey: paging.sort?.sortKey, sortDir: paging.sort?.sortDir } : { sortKey: paging.sort?.sortKey, sortDir: paging.sort?.sortDir }));
+      const rows = (result.rows as unknown as Array<Record<string, unknown>>).map((r) => ({
         ...requestToObject(r as unknown as import("./aggregate.ts").RequestRow),
-        displayName: r.displayName,
+        displayName: (r as Record<string, unknown>).displayName,
       }));
       const out: Record<string, unknown> = { window: "requests", rows, total: result.total };
       if (result.page !== undefined) { out.page = result.page; out.size = result.size; }
@@ -160,23 +149,36 @@ export async function handleApi(
     }
     if (method === "GET" && pathname === "/api/groups") {
       const by = parseGroupBy(params);
-      const filter = filterFromParams(params, "message");
-      const result = await defaultSessionData.query(dir, filter, { kind: "groups", by }) as { rows: import("./aggregate.ts").GroupRow[]; by: GroupBy };
-      return { status: 200, body: { window: "totals", by, rows: result.rows.map(groupToObject) } };
+      const filter = dbFilterFromParams(params);
+      const rows = await withDirDb(dir, (db) => queryGroups(db, by, filter));
+      return { status: 200, body: { window: "totals", by, rows: rows.map(groupToObject) } };
     }
     if (method === "GET" && pathname === "/api/period") {
       const period = parsePeriod(params);
-      const filter = filterFromParams(params, "message");
-      const result = await defaultSessionData.query(dir, filter, { kind: "period", period }) as { rows: import("./aggregate.ts").PeriodRow[]; period: Period };
-      return { status: 200, body: { window: "totals", period, rows: result.rows.map(periodToObject) } };
+      const filter = dbFilterFromParams(params);
+      const res = await withDirDb(dir, (db) => queryPeriod(db, period, filter));
+      return { status: 200, body: { window: "totals", period, rows: res.rows.map(periodToObject) } };
     }
     if (method === "GET" && pathname === "/api/meta") {
-      const result = await defaultSessionData.query(dir, { } as Filter, { kind: "meta" }) as { dir: string; sessionCount: number; dataRange: { since: string | null; until: string | null } };
+      const result = await withDirDb(dir, (db) => queryMeta(db, dir));
       return { status: 200, body: result };
     }
     if (method === "GET" && pathname === "/api/db/meta") {
       const dbPath = resolveDbPathFromEnv(params.get("db") ?? undefined);
-      return { status: 200, body: { dbPath, schemaVersion: SCHEMA_VERSION, lastSyncAt: null, rollupWatermark: null } };
+      const meta = await withDirDb(dir, async (db) => {
+        let lastSyncAt: number | null = null;
+        let rollupWatermark: string | null = null;
+        try {
+          const row = db.prepare(`SELECT MAX(last_synced_at) as v FROM session_log_sync`).get() as { v: number | null } | undefined;
+          lastSyncAt = row?.v ?? null;
+        } catch {}
+        try {
+          const row = db.prepare(`SELECT MIN(date) as v FROM usage_daily_rollups`).get() as { v: string | null } | undefined;
+          rollupWatermark = row?.v ?? null;
+        } catch {}
+        return { lastSyncAt, rollupWatermark };
+      });
+      return { status: 200, body: { dbPath, schemaVersion: SCHEMA_VERSION, lastSyncAt: meta.lastSyncAt, rollupWatermark: meta.rollupWatermark } };
     }
     // ---------- OpenCode 扩展端点 ----------
     if (method === "GET" && pathname === "/api/opencode/costs") {
@@ -214,9 +216,8 @@ export async function handleApi(
       const lastDay = new Date(year, month, 0).getDate();
       const sinceStr = `${year}-${pad2(month)}-01`;
       const untilStr = `${year}-${pad2(month)}-${pad2(lastDay)}`;
-      const filter: Filter = { timeRange: { kind: "message", since: sinceStr, until: untilStr } as TimeRange };
-      const localRes = await defaultSessionData.query(dir, filter, { kind: "totals" }) as { totals: import("./aggregate.ts").Totals };
-      const localTotals = localRes.totals;
+      const filter: DbFilter = { since: sinceStr, until: untilStr };
+      const localTotals = await withDirDb(dir, (db) => queryTotals(db, filter));
       const storage = getOpencodeStorage();
       await storage.ensureDataDir();
       const loaded = await storage.loadHistory();
@@ -324,6 +325,23 @@ function filterFromParams(params: URLSearchParams, kind: "session" | "message"):
     model: params.get("model") ?? undefined,
     cwd: params.get("cwd") ?? undefined,
     timeRange,
+  };
+}
+
+function dbFilterFromParams(params: URLSearchParams): DbFilter {
+  const since = params.get("since") ?? undefined;
+  const until = params.get("until") ?? undefined;
+  if (since !== undefined) {
+    try { defaultSessionData.parseTimestamp(since, false); } catch { throw new ApiError(400, "Bad Request", `无效 since: ${since}（支持 ISO 日期或时间戳）`); }
+  }
+  if (until !== undefined) {
+    try { defaultSessionData.parseTimestamp(until, true); } catch { throw new ApiError(400, "Bad Request", `无效 until: ${until}（支持 ISO 日期或时间戳）`); }
+  }
+  return {
+    since,
+    until,
+    model: params.get("model") ?? undefined,
+    cwd: params.get("cwd") ?? undefined,
   };
 }
 

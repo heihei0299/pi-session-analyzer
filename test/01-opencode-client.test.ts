@@ -158,9 +158,17 @@ test("T4 getCosts 成功返回月度成本聚合", async () => {
     ],
     keys: [{ id: "key_1", name: "默认" }],
   };
-  let capturedBody = "";
-  const mockFetch = makeMockFetch(async (_url, init) => {
-    capturedBody = String((init as any)?.body ?? "");
+  let capturedArgs: unknown[] | null = null;
+  const mockFetch = makeMockFetch(async (url, init) => {
+    const body = String((init as any)?.body ?? "");
+    if (body) {
+      const parsed = JSON.parse(body) as any;
+      capturedArgs = parsed.t.a as unknown[];
+    } else {
+      const u = new URL(String(url));
+      const argsParam = u.searchParams.get("args");
+      if (argsParam) capturedArgs = JSON.parse(argsParam) as unknown[];
+    }
     return mockResponse(costsResult) as any;
   });
   const client = new OpenCodeClient({ auth: "cost_cookie", fetchImpl: mockFetch });
@@ -171,30 +179,38 @@ test("T4 getCosts 成功返回月度成本聚合", async () => {
   assert.equal(result.usage[0].model, "x-preview-f-free");
   assert.equal(result.usage[0].totalCost, 891912946);
   assert.equal(result.keys[0].id, "key_1");
-  // 验证 body 携带 workspaceId, year, month
-  const parsed = JSON.parse(capturedBody) as any;
-  assert.equal(parsed.t.l, 3); // 未传 tzOffset 时为 3 参
-  assert.equal(parsed.t.a[0], "wrk_cost_test");
-  assert.equal(parsed.t.a[1], 2026);
-  assert.equal(parsed.t.a[2], 8);
+  // 验证携带 workspaceId, year, month（GET args 或 POST body）
+  assert.ok(capturedArgs !== null);
+  assert.equal((capturedArgs as unknown[]).length, 3); // 未传 tzOffset 时为 3 参
+  assert.equal((capturedArgs as unknown[])[0], "wrk_cost_test");
+  assert.equal((capturedArgs as unknown[])[1], 2026);
+  assert.equal((capturedArgs as unknown[])[2], 8);
 });
 
 test("T4 getCosts 支持 tzOffset 可选参数", async () => {
   const costsResult = { usage: [], keys: [] };
-  let capturedBody = "";
-  const mockFetch = makeMockFetch(async (_url, init) => {
-    capturedBody = String((init as any)?.body ?? "");
+  let capturedArgs: unknown[] | null = null;
+  const mockFetch = makeMockFetch(async (url, init) => {
+    const body = String((init as any)?.body ?? "");
+    if (body) {
+      const parsed = JSON.parse(body) as any;
+      capturedArgs = parsed.t.a as unknown[];
+    } else {
+      const u = new URL(String(url));
+      const argsParam = u.searchParams.get("args");
+      if (argsParam) capturedArgs = JSON.parse(argsParam) as unknown[];
+    }
     return mockResponse(costsResult) as any;
   });
   const client = new OpenCodeClient({ auth: "c", fetchImpl: mockFetch });
   const result = await client.getCosts("wrk_123", 2026, 7, -480);
   assert.deepEqual(result.usage, []);
-  const parsed = JSON.parse(capturedBody) as any;
-  assert.equal(parsed.t.l, 4);
-  assert.equal(parsed.t.a[0], "wrk_123");
-  assert.equal(parsed.t.a[1], 2026);
-  assert.equal(parsed.t.a[2], 7);
-  assert.equal(parsed.t.a[3], -480);
+  assert.ok(capturedArgs !== null);
+  assert.equal((capturedArgs as unknown[]).length, 4);
+  assert.equal((capturedArgs as unknown[])[0], "wrk_123");
+  assert.equal((capturedArgs as unknown[])[1], 2026);
+  assert.equal((capturedArgs as unknown[])[2], 7);
+  assert.equal((capturedArgs as unknown[])[3], -480);
 });
 
 test("T4 getCosts 空数据返回空 usage", async () => {
@@ -247,9 +263,17 @@ test("T5 getUsageInfo 成功返回分页使用历史", async () => {
       enrichment: null,
     },
   ];
-  let capturedBody = "";
-  const mockFetch = makeMockFetch(async (_url, init) => {
-    capturedBody = String((init as any)?.body ?? "");
+  let capturedArgs: unknown[] | null = null;
+  const mockFetch = makeMockFetch(async (url, init) => {
+    const body = String((init as any)?.body ?? "");
+    if (body) {
+      const parsed = JSON.parse(body) as any;
+      capturedArgs = parsed.t.a as unknown[];
+    } else {
+      const u = new URL(String(url));
+      const argsParam = u.searchParams.get("args");
+      if (argsParam) capturedArgs = JSON.parse(argsParam) as unknown[];
+    }
     return mockResponse(records) as any;
   });
   const client = new OpenCodeClient({ auth: "usage_cookie", fetchImpl: mockFetch });
@@ -261,24 +285,32 @@ test("T5 getUsageInfo 成功返回分页使用历史", async () => {
   assert.equal(result[0].sessionID, "sess_001");
   assert.equal(result[1].id, "usg_def456");
   assert.equal(result[1].model, "deepseek-v4-flash");
-  // 验证请求体包含 workspaceId 与 page
-  const parsed = JSON.parse(capturedBody) as any;
-  assert.equal(parsed.t.l, 2);
-  assert.equal(parsed.t.a[0], "wrk_test");
-  assert.equal(parsed.t.a[1], 0);
+  // 验证请求包含 workspaceId 与 page
+  assert.ok(capturedArgs !== null);
+  assert.equal((capturedArgs as unknown[]).length, 2);
+  assert.equal((capturedArgs as unknown[])[0], "wrk_test");
+  assert.equal((capturedArgs as unknown[])[1], 0);
 });
 
 test("T5 getUsageInfo 分页 page=1 正确传递", async () => {
-  let capturedBody = "";
-  const mockFetch = makeMockFetch(async (_url, init) => {
-    capturedBody = String((init as any)?.body ?? "");
+  let capturedArgs: unknown[] | null = null;
+  const mockFetch = makeMockFetch(async (url, init) => {
+    const body = String((init as any)?.body ?? "");
+    if (body) {
+      const parsed = JSON.parse(body) as any;
+      capturedArgs = parsed.t.a as unknown[];
+    } else {
+      const u = new URL(String(url));
+      const argsParam = u.searchParams.get("args");
+      if (argsParam) capturedArgs = JSON.parse(argsParam) as unknown[];
+    }
     return mockResponse([]) as any;
   });
   const client = new OpenCodeClient({ auth: "c", fetchImpl: mockFetch });
   const result = await client.getUsageInfo("wrk_test", 1);
   assert.deepEqual(result, []);
-  const parsed = JSON.parse(capturedBody) as any;
-  assert.equal(parsed.t.a[1], 1);
+  assert.ok(capturedArgs !== null);
+  assert.equal((capturedArgs as unknown[])[1], 1);
 });
 
 test("T5 getUsageInfo 空页返回空数组", async () => {

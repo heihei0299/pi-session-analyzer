@@ -32,13 +32,15 @@ export function sessionHeader(overrides: Record<string, unknown> = {}): JsonEntr
 }
 
 /** 一条 message entry（message 对象可整体覆盖） */
+let _msgSeq = 0;
 export function messageEntry(
   message: Record<string, unknown>,
   overrides: Record<string, unknown> = {},
 ): JsonEntry {
+  _msgSeq += 1;
   return {
     type: "message",
-    id: "m1",
+    id: `m_${_msgSeq}`,
     parentId: null,
     timestamp: "2026-07-31T01:58:29.810Z",
     message,

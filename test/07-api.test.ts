@@ -203,11 +203,11 @@ test("S11 model/cwd/since/until 筛选与 CLI 一致；非法 since / 未知 by 
   }
 });
 
-test("S12 空目录 500 + detail；未知 API 路径 404；非 GET 方法 404", async () => {
+test("S12 空目录 200 空结果；未知 API 路径 404；非 GET 方法 404", async () => {
   const dir = makeFixture({});
   const server = await startWebServer({ dir, host: "127.0.0.1", port: 0 });
   try {
-    // 空目录（无合法会话）→ 各数据端点 500（含 meta）
+    // 空目录（无合法会话）→ 各数据端点 200 空结果（DB 唯一真相源，空库即空结果）
     for (const url of [
       "/api/totals",
       "/api/sessions",
@@ -217,14 +217,19 @@ test("S12 空目录 500 + detail；未知 API 路径 404；非 GET 方法 404", 
       "/api/meta",
     ]) {
       const res = await fetch(new URL(url, server.url));
-      assert.equal(res.status, 500, `${url} 应返回 500`);
-      const body = (await res.json()) as { error: string; detail: string };
-      assert.equal(typeof body.error, "string");
-      assert.ok(body.error.length > 0);
-      assert.equal(typeof body.detail, "string");
-      assert.ok(body.detail.length > 0, "500 响应应附 detail 原因");
+      assert.equal(res.status, 200, `${url} 空目录应返回 200`);
+      const body = await res.json() as Record<string, unknown>;
+      assert.ok(body !== null && typeof body === "object");
     }
-
+    // 空库 totals 应为 0
+    const totalsRes = await fetch(new URL("/api/totals", server.url));
+    const totalsBody = await totalsRes.json() as { requests: number };
+    assert.equal(totalsBody.requests, 0, "空库 totals 请求数 0");
+    const metaRes = await fetch(new URL("/api/meta", server.url));
+    const metaBody = await metaRes.json() as { sessionCount: number; dataRange: { since: string | null; until: string | null } };
+    assert.equal(metaBody.sessionCount, 0, "空库 sessionCount 0");
+    assert.equal(metaBody.dataRange.since, null);
+    assert.equal(metaBody.dataRange.until, null);
     // 未知 API 路径 → 404 统一错误体
     const res404 = await fetch(new URL("/api/unknown", server.url));
     assert.equal(res404.status, 404);

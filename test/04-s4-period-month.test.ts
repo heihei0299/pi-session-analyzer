@@ -15,22 +15,22 @@ test("S4 --period month 汇总：跨月会话归属各自月份，月末/月初�
     // 7/31：input 100
     "2026-07-31T10-00-00-000Z_a.jsonl": [
       sessionHeader({ id: "s-a", timestamp: "2026-07-31T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }, { timestamp: "2026-07-31T10:00:00.000Z" }),
     ],
     // 8/1：input 200
     "2026-08-01T10-00-00-000Z_b.jsonl": [
       sessionHeader({ id: "s-b", timestamp: "2026-08-01T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }, { timestamp: "2026-08-01T10:00:00.000Z" }),
     ],
     // 8/15：input 400
     "2026-08-15T10-00-00-000Z_c.jsonl": [
       sessionHeader({ id: "s-c", timestamp: "2026-08-15T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 400 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 400 }) }, { timestamp: "2026-08-15T10:00:00.000Z" }),
     ],
     // 9/1：input 800
     "2026-09-01T10-00-00-000Z_d.jsonl": [
       sessionHeader({ id: "s-d", timestamp: "2026-09-01T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 800 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 800 }) }, { timestamp: "2026-09-01T10:00:00.000Z" }),
     ],
   });
   try {

@@ -598,35 +598,45 @@ export async function runCli(argv: string[]): Promise<string> {
     // 实时监控模式：长驻循环（测试通过 runWatch 单步驱动，此处仅打印初始状态并进入循环）
     return runWatchCli({ dir, format, model, cwd, since, until, window, interval });
   }
-  const files = await readSessionFiles(dir);
-  const filtered = filterFiles(files, { model, cwd, since, until });
-  if (period !== undefined) {
-    const rows = periodRowsFromFiles(filtered, period);
-    if (format === "json") return serializePeriodJson(period, rows);
-    if (format === "csv") return serializePeriodCsv(period, rows);
-    return renderPeriodTable(rows, period);
-  }
-  if (by !== undefined) {
-    const rows = groupRowsFromFiles(filtered, by);
-    if (format === "json") return serializeGroupJson(by, rows);
-    if (format === "csv") return serializeGroupCsv(by, rows);
-    return renderGroupTable(rows, by);
-  }
-  const totals = totalsFromFiles(filtered);
-  if (format === "json") {
-    return serializeJson(window, totals, sessionRowsFromFiles(filtered), requestRowsFromFiles(filtered));
-  }
-  if (format === "csv") {
-    return serializeCsv(window, totals, sessionRowsFromFiles(filtered), requestRowsFromFiles(filtered));
-  }
-  switch (window) {
-    case "totals":
-      return renderTotalsTable(totals);
-    case "sessions":
-      return renderSessionTable(sessionRowsFromFiles(filtered));
-    case "requests":
-      return renderRequestTable(requestRowsFromFiles(filtered));
-  }
+  // DB 读路径：withDirDb 内存库 + SQL 聚合（四载体，消息级）
+  return await withDirDb(dir, async (db) => {
+    const filter = { model, cwd, since, until } as import("./db-aggregation.ts").DbFilter;
+    if (period !== undefined) {
+      const res = queryPeriod(db, period, filter);
+      if (format === "json") return serializePeriodJson(res.period, res.rows);
+      if (format === "csv") return serializePeriodCsv(res.period, res.rows);
+      return renderPeriodTable(res.rows, res.period);
+    }
+    if (by !== undefined) {
+      const rows = queryGroups(db, by, filter);
+      if (format === "json") return serializeGroupJson(by, rows);
+      if (format === "csv") return serializeGroupCsv(by, rows);
+      return renderGroupTable(rows, by);
+    }
+    const totals = queryTotals(db, filter);
+    if (format === "json") {
+      const sess = querySessions(db, filter);
+      const req = queryRequests(db, filter);
+      return serializeJson(window, totals, sess.rows as unknown as import("./aggregate.ts").SessionRow[], req.rows as unknown as import("./aggregate.ts").RequestRow[]);
+    }
+    if (format === "csv") {
+      const sess = querySessions(db, filter);
+      const req = queryRequests(db, filter);
+      return serializeCsv(window, totals, sess.rows as unknown as import("./aggregate.ts").SessionRow[], req.rows as unknown as import("./aggregate.ts").RequestRow[]);
+    }
+    switch (window) {
+      case "totals":
+        return renderTotalsTable(totals);
+      case "sessions": {
+        const sess = querySessions(db, filter);
+        return renderSessionTable(sess.rows as unknown as import("./aggregate.ts").SessionRow[]);
+      }
+      case "requests": {
+        const req = queryRequests(db, filter);
+        return renderRequestTable(req.rows as unknown as import("./aggregate.ts").RequestRow[]);
+      }
+    }
+  });
 }
 
 /** 参数合法性校验（IO 之前） */

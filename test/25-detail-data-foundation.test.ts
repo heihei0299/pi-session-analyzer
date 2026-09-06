@@ -204,10 +204,11 @@ test("Seam-5 404：detailFromFiles/sessionId 不存在时抛 404，queryDetail �
 test("Seam-6 GET /api/sessions/:id/detail 返回 {session,children,totals,requests,meta}，复用 serialize，404/400 分支", async () => {
   const dir = makeFixture({
     // 主会话 p1：2 条请求（timestamp 顺序 10:00/10:10）
+    // 主会话 p1：2 条请求（timestamp 顺序 10:00/10:10，第二条为失败重试，门控保留）
     "2026-08-01T10-00-00-000Z_p1.jsonl": [
       sessionHeader({ id: "p1", timestamp: "2026-08-01T10:00:00.000Z", cwd: "/home/shial/Project/alpha" }),
       messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100, output: 50, cacheRead: 200, cacheWrite: 5, cost: { total: 0.1 } }) }, { timestamp: "2026-08-01T10:00:00.000Z" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } }) }, { timestamp: "2026-08-01T10:10:00.000Z" }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } }), stopReason: "error" }, { timestamp: "2026-08-01T10:10:00.000Z" }),
     ],
     // 子会话 c1 归属 p1
     "2026-08-02T10-00-00-000Z_c1.jsonl": [

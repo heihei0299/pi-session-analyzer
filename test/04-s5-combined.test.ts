@@ -16,18 +16,18 @@ test("S5 时间×维度组合：--period + --since/--until + --model/--cwd 共�
     // 8/1 cwd=/proj/a：m1 (input 100)、m2 (input 300)
     "2026-08-01T10-00-00-000Z_a.jsonl": [
       sessionHeader({ id: "s-a", timestamp: "2026-08-01T10:00:00.000Z", cwd: "/proj/a" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }),
-      messageEntry({ role: "assistant", model: "m2", usage: assistantUsage({ input: 300 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }, { timestamp: "2026-08-01T10:00:00.000Z" }),
+      messageEntry({ role: "assistant", model: "m2", usage: assistantUsage({ input: 300 }) }, { timestamp: "2026-08-01T11:00:00.000Z" }),
     ],
     // 8/2 cwd=/proj/a：m1 (input 200)
     "2026-08-02T10-00-00-000Z_b.jsonl": [
       sessionHeader({ id: "s-b", timestamp: "2026-08-02T10:00:00.000Z", cwd: "/proj/a" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }, { timestamp: "2026-08-02T10:00:00.000Z" }),
     ],
     // 8/3 cwd=/proj/b：m1 (input 500)
     "2026-08-03T10-00-00-000Z_c.jsonl": [
       sessionHeader({ id: "s-c", timestamp: "2026-08-03T10:00:00.000Z", cwd: "/proj/b" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 500 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 500 }) }, { timestamp: "2026-08-03T10:00:00.000Z" }),
     ],
   });
   try {

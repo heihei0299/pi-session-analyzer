@@ -18,19 +18,19 @@ function buildDir(): string {
   return makeFixture({
     "2026-08-01T10-00-00-000Z_a.jsonl": [
       sessionHeader({ id: "s-a", timestamp: "2026-08-01T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }, { timestamp: "2026-08-01T10:00:00.000Z" }),
     ],
     "2026-08-10T10-00-00-000Z_b.jsonl": [
       sessionHeader({ id: "s-b", timestamp: "2026-08-10T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }, { timestamp: "2026-08-10T10:00:00.000Z" }),
     ],
     "2026-08-15T23-59-59-000Z_c.jsonl": [
       sessionHeader({ id: "s-c", timestamp: "2026-08-15T23:59:59.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 300 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 300 }) }, { timestamp: "2026-08-15T23:59:59.000Z" }),
     ],
     "2026-08-16T00-00-00-000Z_d.jsonl": [
       sessionHeader({ id: "s-d", timestamp: "2026-08-16T00:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 400 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 400 }) }, { timestamp: "2026-08-16T00:00:00.000Z" }),
     ],
   });
 }
@@ -96,7 +96,7 @@ test("S1f 无时区后缀时间戳按 UTC 解析（统一基准）", async () =>
     // 无 Z 后缀（模拟本地时间写入），应仍按 UTC 解释
     "2026-08-10T10-00-00_noz.jsonl": [
       sessionHeader({ id: "s-noz", timestamp: "2026-08-10T10:00:00", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 700 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 700 }) }, { timestamp: "2026-08-10T10:00:00" }),
     ],
   });
   try {

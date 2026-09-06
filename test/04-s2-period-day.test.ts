@@ -16,17 +16,17 @@ test("S2 --period day 汇总：每天一行，数字=期内会话之和，与总
     // 8/1：input 100
     "2026-08-01T10-00-00-000Z_a.jsonl": [
       sessionHeader({ id: "s-a", timestamp: "2026-08-01T10:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 100 }) }, { timestamp: "2026-08-01T10:00:00.000Z" }),
     ],
     // 8/1：input 200（同一天两个会话）
     "2026-08-01T18-00-00-000Z_b.jsonl": [
       sessionHeader({ id: "s-b", timestamp: "2026-08-01T18:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 200 }) }, { timestamp: "2026-08-01T18:00:00.000Z" }),
     ],
     // 8/2：input 400
     "2026-08-02T09-00-00-000Z_c.jsonl": [
       sessionHeader({ id: "s-c", timestamp: "2026-08-02T09:00:00.000Z", cwd: "/proj" }),
-      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 400 }) }),
+      messageEntry({ role: "assistant", model: "m1", usage: assistantUsage({ input: 400 }) }, { timestamp: "2026-08-02T09:00:00.000Z" }),
     ],
   });
   try {
