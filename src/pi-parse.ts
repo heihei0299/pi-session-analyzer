@@ -38,11 +38,11 @@ function parseTimestamp(v: unknown): number | null {
 }
 
 function truncateLabel(s: string): string {
-  const MAX = 512;
-  if (s.length <= MAX) return s;
-  let end = MAX;
-  while (end > 0 && (s.charCodeAt(end) & 0xfc00) === 0xdc00) end--;
-  return s.slice(0, end);
+  const buf = Buffer.from(s);
+  if (buf.length <= 512) return s;
+  let end = 512;
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+  return buf.subarray(0, end).toString();
 }
 
 export function parsePiUsageRecord(
