@@ -17,7 +17,7 @@ type Database struct {
 	Path string
 }
 
-// ResolveDbPath 按优先级解析：envDb > dbPath > ~/.cache > data
+// ResolveDbPath 按优先级解析：envDb > dbPath > ~/.cc-switch/cc-switch.db（若存在） > ~/.cache > data
 func ResolveDbPath(dbPath, envDb string) string {
 	if envDb != "" {
 		return envDb
@@ -27,6 +27,10 @@ func ResolveDbPath(dbPath, envDb string) string {
 	}
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" && home != "/" {
+		cc := filepath.Join(home, ".cc-switch", "cc-switch.db")
+		if _, err := os.Stat(cc); err == nil {
+			return cc
+		}
 		return filepath.Join(home, ".cache", "token-analyzer", "token-analyzer.db")
 	}
 	return filepath.Join("data", "token-analyzer.db")
@@ -234,7 +238,7 @@ func (d *Database) ensureUserVersion() error {
 	if err := d.DB.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
 		return err
 	}
-	if v != SchemaVersion {
+	if v < SchemaVersion {
 		if _, err := d.DB.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, SchemaVersion)); err != nil {
 			return err
 		}

@@ -11,10 +11,14 @@ import { join, dirname } from "node:path";
 
 export const SCHEMA_VERSION = 2;
 
-/** 路径解析：envDb（TOKEN_ANALYZER_DB）优先，其次 dbPath（--db），最后 XDG 回退 */
+/** 路径解析：envDb（TOKEN_ANALYZER_DB）优先，其次 dbPath（--db），其次共库 ~/.cc-switch/cc-switch.db（若存在），最后 XDG 回退 */
 export function resolveDbPath(opts: { dbPath?: string; envDb?: string }): string {
   if (opts.envDb && opts.envDb.trim() !== "") return opts.envDb;
   if (opts.dbPath && opts.dbPath.trim() !== "") return opts.dbPath;
+  try {
+    const cc = join(homedir(), ".cc-switch", "cc-switch.db");
+    if (existsSync(cc)) return cc;
+  } catch {}
   // XDG 回退
   try {
     const cache = join(homedir(), ".cache", "token-analyzer", "token-analyzer.db");
@@ -225,7 +229,7 @@ export class Database {
   private ensureUserVersion(): void {
     const row = this.raw.prepare(`PRAGMA user_version`).get() as { user_version: number } | undefined;
     const v = row?.user_version ?? 0;
-    if (v !== SCHEMA_VERSION) {
+    if (v < SCHEMA_VERSION) {
       this.raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     }
   }

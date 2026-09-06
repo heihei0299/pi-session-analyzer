@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -72,16 +72,21 @@ test("S1-3 WAL / foreign_keys / auto_vacuum 生效", async () => {
   }
 });
 
-test("S1-4 路径解析优先级：TOKEN_ANALYZER_DB > --db > ~/.cache > data", () => {
+test("S1-4 路径解析优先级：TOKEN_ANALYZER_DB > --db > ~/.cc-switch（共库） > ~/.cache > data", () => {
   const envPath = "/tmp/env.db";
   const argPath = "/tmp/arg.db";
   // env 优先
   assert.equal(resolveDbPath({ dbPath: argPath, envDb: envPath }), envPath);
   // 无 env 时用 --db
   assert.equal(resolveDbPath({ dbPath: argPath, envDb: undefined }), argPath);
-  // 均无时回退到 XDG 或 data（仅断言非空且以 token-analyzer.db 结尾）
+  // 均无时回退到共库或 XDG 或 data（仅断言非空且以 .db 结尾）
   const fallback = resolveDbPath({ dbPath: undefined, envDb: undefined });
-  assert.ok(fallback.endsWith("token-analyzer.db"), `fallback 应以 token-analyzer.db 结尾, 实际 ${fallback}`);
+  const ccPath = join(homedir(), ".cc-switch", "cc-switch.db");
+  if (existsSync(ccPath)) {
+    assert.equal(fallback, ccPath, `共库存在时应返回 cc-switch 路径, 实际 ${fallback}`);
+  } else {
+    assert.ok(fallback.endsWith("token-analyzer.db"), `fallback 应以 token-analyzer.db 结尾, 实际 ${fallback}`);
+  }
 });
 
 test("S1-5 列定义与 cc-switch 一致：proxy_request_logs 含 pricing_model/input_token_semantics", async () => {
