@@ -8,9 +8,12 @@
 - **会话文件**：`~/.pi/agent/sessions/` 下递归收集的 `*.jsonl`；首行 `type == "session"` 才是合法会话（`type: message`/`custom` 单条导出视为残留，跳过）。
 - **header**：会话文件首行 JSON entry，权威字段 = `id`（会话 ID）、`timestamp`（会话创建时间）、`cwd`（项目归属）、`parentSession`（fork 标记，见下）。
 - **项目归属（cwd）**：以 header `cwd` 为权威（完整绝对路径）；目录名是 cwd 的有损编码（`--` 包裹、`/`→`-`），不可反解，仅展示/辅助分组。聚合按规范化 cwd（resolve 去尾斜杠/符号链接）。
-- **计入口径消息（口径 A）**：`type == "message"` 且 `message.role == "assistant"` 且 `message.usage != null`。toolResult / compaction / branch_summary 等一律不计入。
+- **计入口径（四载体，直切 cc-switch）**：`assistant`（`type=message, role=assistant`）、`toolResult`（`role=toolResult`）、`compaction`（`type=compaction`）、`branch_summary`（`type=branch_summary`）四者，门控 `has_billable||has_cost||failed`（`has_billable=input||output||cacheRead||cacheWrite>0`，`has_cost=cost.total>0`，`failed=stopReason∈{error,aborted}`），任一成立即计入；其余 `user` 等一律不计入。
 - **会话数据仓（SessionData）**：会话目录 → 派生窗口（totals/sessions/requests/groups/period/meta）的唯一深模块；单一 `query(filter, view)` interface 内聚 fork 去重（ADR-0001）、cwd 归一缓存、文件级快照缓存、派生、分页排序；CLI / API / watch 为其薄 adapter。
 - **子代理会话**：`isTask` 会话（路径含 `/tasks/`，header 含 `parentSession`，由 `parentSessionId` 指向主会话），其消耗在详情视图合并到主会话，主列表保持独立；API 字段 `isTask` 保持原名，仅 UI 文案为“子代理”。
+- **存储（SQLite 直切）**：`token-analyzer.db`（`proxy_request_logs/session_log_sync/session_usage_dedup/usage_daily_rollups/model_pricing` 5表，与 `cc-switch/schema.rs` 1:1），`SCHEMA_VERSION=1`，`WAL/foreign_keys/auto_vacuum INCREMENTAL`，路径 `TOKEN_ANALYZER_DB > --db > ~/.cache/token-analyzer/token-analyzer.db`，`sync_pi_usage` 为唯一写入路径，读路径 `proxy_request_logs ∪ rollups` 的 SQL 聚合。
+- **双账本去重**：`session_usage_dedup(data_source, request_id, semantic_id, has_entry_id)`，`request_id = hash(pi-session-request-v3+kind+entry.id+timestamp)`，`semantic_id = hash(pi-session-semantic-v1+kind+entry_ts+msg_ts+provider/model/responseModel/... + canonical usage)`，同文件 `requestId` 去重（`stopReason` 优先/`output` 最大），跨文件持久账本，叠加 fork `ts<forkTs`。
+- **指纹增量**：`PiFileRevision{modifiedMs, fileSize, tailFingerprint(末4096B SHA256, pi-session-tail-v1), complete}` 编码于 `session_log_sync.last_synced_at`，`tail(oldEOF)==expected` 则 `seek`，否则全量重扫（账本防双算），`last_line_offset` 行游标保证半行不推进。
 ## 统计窗口
 
 - **totals（总窗口）**：全量计入口径消息的汇总（requests / input / output / cacheRead / cacheWrite / reasoning / totalTokens / cost / cacheRate）。
