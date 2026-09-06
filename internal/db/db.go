@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -19,10 +20,10 @@ type Database struct {
 
 // ResolveDbPath 按优先级解析：envDb > dbPath > ~/.cache > data（默认不共库，显式 env/--db 才共库）
 func ResolveDbPath(dbPath, envDb string) string {
-	if envDb != "" {
+	if strings.TrimSpace(envDb) != "" {
 		return envDb
 	}
-	if dbPath != "" {
+	if strings.TrimSpace(dbPath) != "" {
 		return dbPath
 	}
 	home, err := os.UserHomeDir()

@@ -65,3 +65,45 @@ test("38-3 全量窗口 totalTokens 公式与 cc-switch 一致（不含 cacheWri
     removeFixture(dir);
   }
 });
+
+test("38-4 四窗口直连对比：同库 cc-switch.db 的 today/7d/30d/全部与 queryTotals（含 rollup）一致", async () => {
+  const ccPath = join(homedir(), ".cc-switch", "cc-switch.db");
+  if (!existsSync(ccPath)) return;
+  const db = await Database.getInstance(ccPath);
+  try {
+    const directProxy = (where: string) => {
+      const row = db.prepare(`SELECT COUNT(*) as c, COALESCE(SUM(input_tokens),0) as i, COALESCE(SUM(cache_read_tokens),0) as cr, COALESCE(SUM(output_tokens),0) as o FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session'${where}`).get() as { c: number; i: number; cr: number; o: number } | undefined;
+      return { c: row?.c ?? 0, i: row?.i ?? 0, cr: row?.cr ?? 0, o: row?.o ?? 0 };
+    };
+    const directRollup = (where: string) => {
+      const row = db.prepare(`SELECT COALESCE(SUM(request_count),0) as c, COALESCE(SUM(input_tokens),0) as i, COALESCE(SUM(cache_read_tokens),0) as cr, COALESCE(SUM(output_tokens),0) as o FROM usage_daily_rollups WHERE app_type='pi'${where}`).get() as { c: number; i: number; cr: number; o: number } | undefined;
+      return { c: row?.c ?? 0, i: row?.i ?? 0, cr: row?.cr ?? 0, o: row?.o ?? 0 };
+    };
+    const today = new Date();
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const todayStr = fmt(today);
+    const d7 = new Date(today); d7.setDate(today.getDate() - 6);
+    const d7Str = fmt(d7);
+    const d30 = new Date(today); d30.setDate(today.getDate() - 29);
+    const d30Str = fmt(d30);
+    const cases: Array<{ label: string; since?: string; until?: string; whereProxy: string; whereRollup: string }> = [
+      { label: "today", since: todayStr, until: todayStr, whereProxy: " AND date(created_at,'unixepoch','localtime') = date('now','localtime')", whereRollup: " AND date = date('now','localtime')" },
+      { label: "7d", since: d7Str, until: todayStr, whereProxy: " AND date(created_at,'unixepoch','localtime') BETWEEN date('now','localtime','-6 days') AND date('now','localtime')", whereRollup: " AND date BETWEEN date('now','localtime','-6 days') AND date('now','localtime')" },
+      { label: "30d", since: d30Str, until: todayStr, whereProxy: " AND date(created_at,'unixepoch','localtime') BETWEEN date('now','localtime','-29 days') AND date('now','localtime')", whereRollup: " AND date BETWEEN date('now','localtime','-29 days') AND date('now','localtime')" },
+      { label: "all", since: undefined, until: undefined, whereProxy: "", whereRollup: "" },
+    ];
+    for (const c of cases) {
+      const totals = queryTotals(db, { since: c.since, until: c.until } as never);
+      const p = directProxy(c.whereProxy);
+      const r = directRollup(c.whereRollup);
+      const expC = p.c + r.c, expI = p.i + r.i, expCr = p.cr + r.cr, expO = p.o + r.o;
+      assert.equal(totals.requests, expC, `${c.label} requests 一致`);
+      assert.equal(totals.input, expI, `${c.label} input 一致`);
+      assert.equal(totals.cacheRead, expCr, `${c.label} cacheRead 一致`);
+      assert.equal(totals.output, expO, `${c.label} output 一致`);
+      assert.equal(totals.totalTokens, totals.input + totals.cacheRead + totals.output, `${c.label} totalTokens 公式`);
+    }
+  } finally {
+    await db.close();
+  }
+});
