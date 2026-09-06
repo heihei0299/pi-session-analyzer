@@ -91,4 +91,19 @@ func TestServerEndpoints(t *testing.T) {
 	if wAudit.Code != http.StatusOK {
 		t.Fatalf("expected 200 for opencode audit, got %d: %s", wAudit.Code, wAudit.Body.String())
 	}
+
+	// 6. 验证 GET /api/db/meta
+	reqDbMeta := httptest.NewRequest("GET", "/api/db/meta", nil)
+	wDbMeta := httptest.NewRecorder()
+	handler.ServeHTTP(wDbMeta, reqDbMeta)
+	if wDbMeta.Code != http.StatusOK {
+		t.Fatalf("expected 200 for db meta, got %d: %s", wDbMeta.Code, wDbMeta.Body.String())
+	}
+	var resDbMeta map[string]any
+	if err := json.Unmarshal(wDbMeta.Body.Bytes(), &resDbMeta); err != nil {
+		t.Fatalf("failed to parse db meta json: %v", err)
+	}
+	if resDbMeta["schemaVersion"] != float64(2) {
+		t.Errorf("expected schemaVersion 2, got %v", resDbMeta["schemaVersion"])
+	}
 }

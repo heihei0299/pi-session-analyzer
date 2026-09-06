@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heihei0299/pi-session-anylize/internal/db"
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
 	"github.com/heihei0299/pi-session-anylize/internal/opencode"
 	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
@@ -66,6 +68,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/groups", s.handleApiGroups)
 	s.mux.HandleFunc("GET /api/period", s.handleApiPeriod)
 	s.mux.HandleFunc("GET /api/meta", s.handleApiMeta)
+	s.mux.HandleFunc("GET /api/db/meta", s.handleApiDbMeta)
 
 	// OpenCode 对账与同步端点
 	s.mux.HandleFunc("GET /api/opencode/costs", s.handleApiOpencodeCosts)
@@ -230,6 +233,39 @@ func (s *Server) handleApiMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendJSON(w, http.StatusOK, res.Meta)
+}
+
+func (s *Server) handleApiDbMeta(w http.ResponseWriter, r *http.Request) {
+	dbPath := db.ResolveDbPathFromEnv(r.URL.Query().Get("db"))
+	database, err := db.Open(dbPath)
+	if err != nil {
+		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		return
+	}
+	defer database.DB.Close()
+
+	var lastSyncAt *int64
+	var lastSyncVal sql.NullInt64
+	row := database.DB.QueryRow(`SELECT MAX(last_synced_at) FROM session_log_sync`)
+	if err := row.Scan(&lastSyncVal); err == nil && lastSyncVal.Valid {
+		v := lastSyncVal.Int64
+		lastSyncAt = &v
+	}
+
+	var rollupWatermark *string
+	var rollupVal sql.NullString
+	row2 := database.DB.QueryRow(`SELECT MIN(date) FROM usage_daily_rollups`)
+	if err := row2.Scan(&rollupVal); err == nil && rollupVal.Valid {
+		v := rollupVal.String
+		rollupWatermark = &v
+	}
+
+	sendJSON(w, http.StatusOK, map[string]any{
+		"dbPath":          dbPath,
+		"schemaVersion":   db.SchemaVersion,
+		"lastSyncAt":      lastSyncAt,
+		"rollupWatermark": rollupWatermark,
+	})
 }
 
 func (s *Server) handleApiSessionDetailPath(w http.ResponseWriter, r *http.Request) {

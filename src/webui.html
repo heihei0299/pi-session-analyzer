@@ -41,6 +41,12 @@
   --radius-sm:10px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
+/* Custom Precision Dark Scrollbars */
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:#0B0F10}
+::-webkit-scrollbar-thumb{background:rgba(197,162,84,.28);border-radius:999px;border:1px solid rgba(255,255,255,.05)}
+::-webkit-scrollbar-thumb:hover{background:rgba(197,162,84,.55)}
+*{scrollbar-width:thin;scrollbar-color:rgba(197,162,84,.28) #0B0F10}
 html{scroll-behavior:smooth}
 body{
   background:
@@ -446,10 +452,13 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 #opencode-toast{position:fixed;bottom:20px;right:20px;max-width:360px;background:#151D20;color:var(--enamel);border:1px solid var(--brass);border-radius:10px;padding:10px 16px;font:500 13px var(--font-ui);box-shadow:0 8px 24px rgba(0,0,0,.6);display:none;z-index:100}
 #opencode-toast.show{display:block;animation:panelIn .2s}
 #opencode-toast.error{background:var(--signal-soft);color:#FFCDD3;border-color:#FF8B9E}
-.chart-wrap{background:#12181A;border:1px solid rgba(197,162,84,.2);border-radius:var(--radius);padding:16px;box-shadow:0 12px 28px rgba(0,0,0,.45);margin-top:14px}
+.chart-wrap{background:#12181A;border:1px solid rgba(197,162,84,.2);border-radius:var(--radius);padding:16px;box-shadow:0 12px 28px rgba(0,0,0,.45);margin-top:14px;position:relative}
 .chart-wrap h3{font:700 14px var(--font-ui);color:var(--enamel);margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .chart-wrap h3 i{font-style:italic;color:var(--brass-glint);font-weight:400;font-family:var(--font-display)}
 #opencode-cost-chart{width:100%;height:320px;display:block;background:#0E1315;border:1px solid rgba(255,255,255,.08);border-radius:10px}
+.chart-tooltip{position:absolute;pointer-events:none;z-index:60;background:#151D20;border:1px solid var(--brass);border-radius:8px;padding:8px 12px;box-shadow:0 8px 24px rgba(0,0,0,.7);font:12px var(--font-ui);color:var(--enamel);display:none;backdrop-filter:blur(8px)}
+.chart-tooltip h4{font:600 12px var(--font-mono);color:var(--brass-glint);margin-bottom:4px}
+.chart-tooltip .item{display:flex;justify-content:space-between;gap:12px;font:11px var(--font-mono);margin-top:2px}
 .opencode-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
 #opencode-month,.opencode-controls input[type="month"],.opencode-controls select{border:1px solid rgba(255,255,255,.15);background:#0E1416;border-radius:10px;padding:4px 8px;color:var(--enamel);font:500 12px var(--font-ui);color-scheme:dark}
 .opencode-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font:500 11px var(--font-ui);color:var(--slate-2)}
@@ -498,6 +507,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
     </div>
     <div class="meta-strip">
       <span class="meta-pill">dir <code id="meta-dir">—</code></span>
+      <span class="meta-pill" id="meta-db-pill" style="display:none">db <code id="meta-db">—</code></span>
       <span class="meta-pill"><strong id="meta-count">—</strong> sessions</span>
       <span class="meta-pill" id="meta-range">—</span>
     </div>
@@ -572,6 +582,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
     <div class="group-controls">
       <button data-group="model" class="active">按模型</button>
       <button data-group="cwd">按项目</button>
+      <button data-group="date">按日期</button>
     </div>
     <div class="export-row">
       <button id="export-json">导出 JSON</button>
@@ -586,6 +597,10 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
   </section>
 
   <section id="tab-sessions" class="tab-panel">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <input type="text" id="session-filter-input" placeholder="🔍 过滤当前页会话名称 / ID / cwd…" style="border:1px solid rgba(255,255,255,.15);background:#0E1416;border-radius:999px;padding:6px 14px;color:var(--enamel);font:500 12px var(--font-ui);width:280px;max-width:100%;outline:none">
+      <span id="session-filter-count" style="font:500 11px var(--font-mono);color:var(--slate-2)"></span>
+    </div>
     <div class="detail-table-wrap">
       <table id="session-table">
         <thead><tr id="session-head">
@@ -641,6 +656,12 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
   </section>
 
   <section id="tab-manage" class="tab-panel">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <input type="text" id="manage-filter-input" placeholder="🔍 搜索会话名称或项目路径…" style="border:1px solid rgba(255,255,255,.15);background:#0E1416;border-radius:999px;padding:6px 14px;color:var(--enamel);font:500 12px var(--font-ui);width:280px;max-width:100%;outline:none">
+      <span style="flex:1"></span>
+      <button id="manage-expand-all" style="border:1px solid rgba(255,255,255,.14);background:#151D20;color:var(--slate-2);padding:5px 12px;border-radius:999px;font:500 11px var(--font-ui);cursor:pointer">全部展开</button>
+      <button id="manage-collapse-all" style="border:1px solid rgba(255,255,255,.14);background:#151D20;color:var(--slate-2);padding:5px 12px;border-radius:999px;font:500 11px var(--font-ui);cursor:pointer">全部收起</button>
+    </div>
     <div id="recent-sessions-wrap" class="session-group">
       <h3>最近会话 <span class="count" id="recent-count"></span></h3>
       <div class="group-body" id="recent-sessions"></div>
@@ -664,6 +685,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
     <div class="chart-wrap">
       <h3>月度成本 <i>stacked</i> — 按模型 <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center"><input type="month" id="opencode-month"><span id="opencode-chart-hint" style="font:500 11px var(--font-mono);color:#85857D"></span></span></h3>
       <canvas id="opencode-cost-chart" width="960" height="320"></canvas>
+      <div id="opencode-chart-tooltip" class="chart-tooltip"></div>
       <div id="opencode-legend" class="opencode-legend"></div>
       <div id="opencode-chart-empty" style="font:500 12px var(--font-mono);color:#85857D;margin-top:8px;display:none">暂无成本数据</div>
     </div>
@@ -738,6 +760,22 @@ function filterRangeText() {
   };
   return { since: fmt(state.since, false), until: fmt(state.until, true) };
 }
+async function refreshDbMeta() {
+  try {
+    const data = await api("db/meta", new URLSearchParams());
+    const pill = $("#meta-db-pill");
+    const dbEl = $("#meta-db");
+    if (pill && dbEl && data && data.dbPath) {
+      const parts = data.dbPath.split("/");
+      const filename = parts[parts.length - 1] || data.dbPath;
+      dbEl.textContent = filename;
+      const syncStr = data.lastSyncAt ? fmtTimestamp(new Date(data.lastSyncAt).toISOString()) : "无记录";
+      const rollStr = data.rollupWatermark || "无";
+      pill.title = `数据库: ${data.dbPath}\nSchema: v${data.schemaVersion}\n最后同步: ${syncStr}\nRollup水位: ${rollStr}`;
+      pill.style.display = "inline-flex";
+    }
+  } catch {}
+}
 function renderStatus(meta) {
   lastMeta = meta;
   updateStatusRange();
@@ -745,6 +783,7 @@ function renderStatus(meta) {
   const dirEl = $("#meta-dir"), cntEl = $("#meta-count");
   if (dirEl) dirEl.textContent = meta.dir;
   if (cntEl) cntEl.textContent = String(meta.sessionCount);
+  refreshDbMeta();
 }
 function updateStatusRange() {
   if (!lastMeta) return;
@@ -767,37 +806,63 @@ function updateStatusRange() {
 let lastTotals=null;
 function renderCards(totals){
   lastTotals=totals;
-  const set=(id,text,isCost)=>{
+  const set=(id,text,exactNum,isCost)=>{
     const el=document.getElementById(id);
     if(!el) return;
     const v=el.querySelector?.(".value") || el;
     if(isCost && totals.cost===0){ v.textContent=UNPRICED; v.classList.add("unpriced"); }
     else { v.textContent=text; v.classList.remove("unpriced"); }
+    if(exactNum !== undefined && exactNum !== null) {
+      el.title = typeof exactNum === "number" ? exactNum.toLocaleString("en-US") : String(exactNum);
+    }
   };
-  set("v-total", fmtCompact(totals.totalTokens));
-  set("v-req", fmtCompact(totals.requests));
-  set("v-input", fmtCompact(totals.input + totals.cacheRead));
-  set("v-output", fmtCompact(totals.output));
-  set("v-cache", fmtCompact(totals.cacheRead + totals.cacheWrite));
-  set("v-reason", fmtCompact(totals.reasoning));
-  document.getElementById("v-rate").textContent=fmtRate(totals.cacheRate);
+  set("v-total", fmtCompact(totals.totalTokens), (totals.totalTokens||0).toLocaleString("en-US") + " tokens");
+  set("v-req", fmtCompact(totals.requests), (totals.requests||0).toLocaleString("en-US") + " 请求");
+  set("v-input", fmtCompact(totals.input + totals.cacheRead), ((totals.input||0) + (totals.cacheRead||0)).toLocaleString("en-US") + " tokens (总输入 = input " + (totals.input||0).toLocaleString("en-US") + " + cacheRead " + (totals.cacheRead||0).toLocaleString("en-US") + ")");
+  set("v-output", fmtCompact(totals.output), (totals.output||0).toLocaleString("en-US") + " tokens (含推理 " + (totals.reasoning||0).toLocaleString("en-US") + ")");
+  set("v-cache", fmtCompact(totals.cacheRead + totals.cacheWrite), "cacheRead " + (totals.cacheRead||0).toLocaleString("en-US") + " + cacheWrite " + (totals.cacheWrite||0).toLocaleString("en-US"));
+  set("v-reason", fmtCompact(totals.reasoning), (totals.reasoning||0).toLocaleString("en-US") + " reasoning tokens");
+  const rateEl = document.getElementById("v-rate");
+  if(rateEl) {
+    rateEl.textContent=fmtRate(totals.cacheRate);
+    const cardRate = document.getElementById("card-cache-rate");
+    if(cardRate) cardRate.title = `缓存命中率: ${fmtRate(totals.cacheRate)} (${(totals.cacheRead||0).toLocaleString()} / ${((totals.input||0)+(totals.cacheRead||0)).toLocaleString()})`;
+  }
   const costEl=document.getElementById("v-cost");
   if(totals.cost===0){ costEl.textContent=UNPRICED; costEl.classList.add("unpriced"); } else { costEl.textContent=fmtCost(totals.cost); costEl.classList.remove("unpriced"); }
+  const cardCost = document.getElementById("card-cost");
+  if(cardCost) cardCost.title = totals.cost===0 ? UNPRICED : "$" + totals.cost.toFixed(6);
   // tape
   const total = (totals.input||0) + (totals.cacheRead||0) + (totals.output||0);
   const a=totals.input||0, b=totals.cacheRead||0, c=totals.output||0;
   const pct = v => total? (v/total*100):0;
   const pa=pct(a), pb=pct(b), pc=pct(c);
   const segI=$("#seg-input"), segC=$("#seg-cache"), segO=$("#seg-output");
-  if(segI&&segC&&segO){
-    segI.style.width = Math.max(6, pa)+"%"; segC.style.width = Math.max(6, pb)+"%"; segO.style.width = Math.max(6, pc)+"%";
-    segI.textContent = pa>10? "输入":""; segC.textContent = pb>10? "缓存":""; segO.textContent = pc>10? "输出":"";
-    segI.title=`input ${a.toLocaleString()} (${pa.toFixed(1)}%)`;
-    segC.title=`cacheRead ${b.toLocaleString()} (${pb.toFixed(1)}%)`;
-    segO.title=`output ${c.toLocaleString()} (${pc.toFixed(1)}%)`;
+  const track=$("#tape-track");
+  if(segI&&segC&&segO&&track){
+    let emptyEl = track.querySelector(".tape-empty");
+    if(total === 0){
+      segI.style.display="none"; segC.style.display="none"; segO.style.display="none";
+      if(!emptyEl){
+        emptyEl=document.createElement("div");
+        emptyEl.className="tape-empty";
+        emptyEl.style.cssText="width:100%;display:flex;align-items:center;justify-content:center;font:500 11px var(--font-mono);color:var(--slate-2);letter-spacing:.04em;z-index:1";
+        emptyEl.textContent="当前筛选范围内暂无 Token 消耗数据";
+        track.appendChild(emptyEl);
+      }
+      emptyEl.style.display="flex";
+    }else{
+      if(emptyEl) emptyEl.style.display="none";
+      segI.style.display=""; segC.style.display=""; segO.style.display="";
+      segI.style.width = Math.max(6, pa)+"%"; segC.style.width = Math.max(6, pb)+"%"; segO.style.width = Math.max(6, pc)+"%";
+      segI.textContent = pa>10? "输入":""; segC.textContent = pb>10? "缓存":""; segO.textContent = pc>10? "输出":"";
+      segI.title=`input ${a.toLocaleString()} (${pa.toFixed(1)}%)`;
+      segC.title=`cacheRead ${b.toLocaleString()} (${pb.toFixed(1)}%)`;
+      segO.title=`output ${c.toLocaleString()} (${pc.toFixed(1)}%)`;
+    }
   }
   const tapeNum=$("#tape-numbers");
-  if(tapeNum) tapeNum.textContent = `${fmtCompact(a)} · ${fmtCompact(b)} · ${fmtCompact(c)}`;
+  if(tapeNum) tapeNum.textContent = total===0 ? "无数据" : `${fmtCompact(a)} · ${fmtCompact(b)} · ${fmtCompact(c)}`;
 }
 function bindTapeInteractions(){
   const segI=$("#seg-input"), segC=$("#seg-cache"), segO=$("#seg-output"), tapeNum=$("#tape-numbers");
@@ -807,6 +872,8 @@ function bindTapeInteractions(){
   };
   const resetDetail=()=>{
     if(!lastTotals) return;
+    const total = (lastTotals.input||0) + (lastTotals.cacheRead||0) + (lastTotals.output||0);
+    if(total===0){ tapeNum.textContent="无数据"; return; }
     const a=lastTotals.input||0, b=lastTotals.cacheRead||0, c=lastTotals.output||0;
     tapeNum.textContent = `${fmtCompact(a)} · ${fmtCompact(b)} · ${fmtCompact(c)}`;
   };
@@ -822,13 +889,24 @@ function bindTapeInteractions(){
   segO.addEventListener("mouseenter",()=>{ const {total, c}=getTotals(); if(total) showDetail("输出 (output)", c, c/total*100); });
   segO.addEventListener("mouseleave",resetDetail);
 }
-const GROUP_COLS=[{key:"key",label:"分组键"},{key:"requests",label:"请求数"},{key:"input",label:"输入"},{key:"output",label:"输出"},{key:"cacheRate",label:"缓存率"},{key:"totalTokens",label:"总token"},{key:"cost",label:"花费"}];
+const GROUP_COLS=[{key:"key",label:"分组键"},{key:"requests",label:"请求数"},{key:"input",label:"总输入"},{key:"output",label:"输出"},{key:"cacheRate",label:"缓存率"},{key:"totalTokens",label:"总token"},{key:"cost",label:"花费"}];
 const GROUP_FMTS={cacheRate:fmtRate,input:(v,r)=>fmtCompact((r.input??0)+(r.cacheRead??0)),output:fmtCompact,totalTokens:fmtCompact,cost:(v)=>(v===0?UNPRICED:fmtCost(v))};
 async function refreshGroups(){
-  const params=filterParams(); params.set("by",state.groupBy);
+  const params=filterParams();
+  if(state.groupBy==="date"){
+    params.set("period","day");
+    const data=await api("period",params);
+    const rows=(data.rows||[]).map(r=>({key:r.date||"-",...r}));
+    rows.sort((a,b)=>String(b.key).localeCompare(String(a.key)));
+    const cols=GROUP_COLS.map(c=>c.key==="key"?{key:"key",label:"日期"}:c);
+    renderTable($("#group-head"),$("#group-body"),cols,rows,GROUP_FMTS);
+    return;
+  }
+  params.set("by",state.groupBy);
   const data=await api("groups",params);
   const rows=data.rows.map(r=>({key:state.groupBy==="model"?(r.model??"-"):(r.cwd??"-"),...r}));
-  renderTable($("#group-head"),$("#group-body"),GROUP_COLS,rows,GROUP_FMTS);
+  const cols=GROUP_COLS.map(c=>c.key==="key"?{key:"key",label:state.groupBy==="model"?"模型":"项目"}:c);
+  renderTable($("#group-head"),$("#group-body"),cols,rows,GROUP_FMTS);
 }
 function renderTable(headEl,bodyEl,cols,rows,fmts={}){
   headEl.innerHTML=cols.map(c=>`<th data-key="${c.key}">${c.label}</th>`).join("");
@@ -986,7 +1064,24 @@ function renderDetailTable(kind) {
   const st = detailState[kind];
   const headEl = $("#" + DETAIL_ID[kind] + "-head");
   const bodyEl = $("#" + DETAIL_ID[kind] + "-body");
-  const pageRows = st.rows;
+  let pageRows = st.rows;
+  if (kind === "sessions") {
+    const filterInput = $("#session-filter-input");
+    const filterVal = (filterInput?.value || "").trim().toLowerCase();
+    if (filterVal) {
+      pageRows = pageRows.filter(r =>
+        String(r.displayName || "").toLowerCase().includes(filterVal) ||
+        String(r.sessionId || "").toLowerCase().includes(filterVal) ||
+        String(r.cwdNorm || r.cwd || "").toLowerCase().includes(filterVal) ||
+        String(r.model || "").toLowerCase().includes(filterVal)
+      );
+      const cnt = $("#session-filter-count");
+      if (cnt) cnt.textContent = `匹配: ${pageRows.length} / ${st.rows.length}`;
+    } else {
+      const cnt = $("#session-filter-count");
+      if (cnt) cnt.textContent = "";
+    }
+  }
   const cols = kind === "sessions" ? SESSION_COLS : REQUEST_COLS;
   const valueOf = (r, c) => c === "cache" ? (r.cacheRead ?? 0) + (r.cacheWrite ?? 0) : c === "input" ? (r.input ?? 0) + (r.cacheRead ?? 0) : r[c];
   let byParent = new Map();
@@ -1200,6 +1295,7 @@ function bindDetailInteractions() {
       if (st.page < pages) { st.page++; reload(() => {}); }
     });
   }
+  $("#session-filter-input")?.addEventListener("input", () => renderDetailTable("sessions"));
 }
 function pad2(n){return String(n).padStart(2,"0")}
 let lastSnapshot="";
@@ -1253,7 +1349,15 @@ async function refreshSessionGroups(){
   try{
     clearError();
     const data=await api("sessions", new URLSearchParams());
-    const recent = [...data.rows].sort((a,b)=> String(b.timestamp).localeCompare(String(a.timestamp))).slice(0, 10);
+    const filterInput = $("#manage-filter-input");
+    const filterVal = (filterInput?.value || "").trim().toLowerCase();
+    const allRows = filterVal ? data.rows.filter(r =>
+      String(r.displayName || "").toLowerCase().includes(filterVal) ||
+      String(r.sessionId || "").toLowerCase().includes(filterVal) ||
+      String(r.cwdNorm || r.cwd || "").toLowerCase().includes(filterVal) ||
+      String(r.model || "").toLowerCase().includes(filterVal)
+    ) : data.rows;
+    const recent = [...allRows].sort((a,b)=> String(b.timestamp).localeCompare(String(a.timestamp))).slice(0, 10);
     const recentEl = $("#recent-sessions");
     const recentCnt = $("#recent-count");
     if (recentEl) {
@@ -1261,10 +1365,10 @@ async function refreshSessionGroups(){
       if (recentCnt) recentCnt.textContent = `(${recent.length})`;
     }
     const groups=new Map();
-    for(const r of data.rows){const key=r.cwdNorm||r.cwd||"(未知)"; if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(r)}
+    for(const r of allRows){const key=r.cwdNorm||r.cwd||"(未知)"; if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(r)}
     const wrap=$("#session-groups"); wrap.innerHTML="";
     for(const [cwd,rows] of groups){
-      const g=document.createElement("div"); g.className="session-group collapsed";
+      const g=document.createElement("div"); g.className=filterVal ? "session-group" : "session-group collapsed";
       const h3=document.createElement("h3"); h3.innerHTML=`项目 ${escapeHtml(cwd)} <span class="count">(${rows.length})</span>`;
       const body=document.createElement("div"); body.className="group-body"; body.innerHTML=rows.map(sessionRowHtml).join("");
       h3.addEventListener("click",()=>g.classList.toggle("collapsed"));
@@ -1273,10 +1377,19 @@ async function refreshSessionGroups(){
   }catch(e){showError("会话管理加载失败: "+e.message)}
 }
 function bindSessionManage(){
-  $("#session-groups").addEventListener("click",e=>{
+  const handleRenameClick = e=>{
     const nameEl=e.target.closest(".session-row .name");
     if(!nameEl||document.querySelector(".session-row.editing")) return;
     startSessionRename(nameEl);
+  };
+  $("#session-groups")?.addEventListener("click", handleRenameClick);
+  $("#recent-sessions")?.addEventListener("click", handleRenameClick);
+  $("#manage-filter-input")?.addEventListener("input", refreshSessionGroups);
+  $("#manage-expand-all")?.addEventListener("click", ()=>{
+    document.querySelectorAll("#session-groups .session-group").forEach(g=>g.classList.remove("collapsed"));
+  });
+  $("#manage-collapse-all")?.addEventListener("click", ()=>{
+    document.querySelectorAll("#session-groups .session-group").forEach(g=>g.classList.add("collapsed"));
   });
 }
 function startSessionRename(nameEl){
@@ -1378,16 +1491,26 @@ function renderOpencodeLegend(models,idxMap){
 function drawOpencodeCostChart(wrapper){
   const canvas=$("#opencode-cost-chart");
   if(!canvas) return;
+  canvas._lastWrapper = wrapper;
   const ctx=canvas.getContext("2d");
   const hint=$("#opencode-chart-hint");
   const emptyEl=$("#opencode-chart-empty");
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = rect.width > 0 ? rect.width : (canvas.width || 960);
+  const cssH = 320;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.scale(dpr, dpr);
+  const W = cssW, H = cssH;
+  ctx.clearRect(0,0,W,H);
   if(!wrapper || !wrapper.costs || !wrapper.costs.usage || wrapper.costs.usage.length===0){
     if(emptyEl) emptyEl.style.display="";
     if(hint) hint.textContent="无数据";
-    ctx.fillStyle="#0E1315"; ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.fillStyle="#8B9E9B"; ctx.font="12px JetBrains Mono"; ctx.textAlign="center"; ctx.fillText("暂无成本数据", canvas.width/2, canvas.height/2);
+    ctx.fillStyle="#0E1315"; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle="#8B9E9B"; ctx.font="12px JetBrains Mono"; ctx.textAlign="center"; ctx.fillText("暂无成本数据", W/2, H/2);
     renderOpencodeLegend([]);
+    canvas._chartData = null;
     return;
   }
   if(emptyEl) emptyEl.style.display="none";
@@ -1411,8 +1534,7 @@ function drawOpencodeCostChart(wrapper){
     if(s>max) max=s;
   }
   if(max===0) max=1;
-  const pad={l:48,t:18,r:14,b:28};
-  const W=canvas.width, H=canvas.height;
+  const pad={l:52,t:20,r:16,b:30};
   const plotW=W-pad.l-pad.r, plotH=H-pad.t-pad.b;
   ctx.fillStyle="#0E1315"; ctx.fillRect(0,0,W,H);
   ctx.strokeStyle="rgba(255,255,255,.07)"; ctx.lineWidth=1;
@@ -1424,17 +1546,24 @@ function drawOpencodeCostChart(wrapper){
   const step=dates.length? plotW/dates.length : plotW;
   const barW=Math.max(10, Math.min(42, step*0.62));
   dates.forEach((d,di)=>{
+    const isHovered = canvas._hoveredDate === d;
+    const x=pad.l + di*step + (step-barW)/2;
+    if(isHovered){
+      ctx.fillStyle="rgba(197,162,84,.08)";
+      ctx.fillRect(pad.l + di*step, pad.t, step, plotH);
+    }
     const mMap=map.get(d);
     let y0=pad.t+plotH;
     for(const m of models){
       const v=mMap.get(m)||0;
       if(v<=0) continue;
       const h=(v/max)*plotH;
-      const x=pad.l + di*step + (step-barW)/2;
       const y=y0 - h;
       ctx.fillStyle=modelColor(m,idxMap);
       ctx.fillRect(x,y,barW,h);
-      ctx.strokeStyle="rgba(0,0,0,.15)"; ctx.strokeRect(x,y,barW,h);
+      ctx.strokeStyle=isHovered?"var(--brass-glint)":"rgba(0,0,0,.25)";
+      ctx.lineWidth=isHovered?1.5:1;
+      ctx.strokeRect(x,y,barW,h);
       y0=y;
     }
   });
@@ -1448,6 +1577,7 @@ function drawOpencodeCostChart(wrapper){
   });
   if(hint) hint.textContent=dates.length+" 天 · "+models.length+" 模型 · 峰值 $"+max.toFixed(4);
   renderOpencodeLegend(models,idxMap);
+  canvas._chartData = { pad, plotW, plotH, step, barW, dates, map, models, idxMap, max, cssW, cssH };
 }
 function renderOpencodeHistoryTable(rows){
   const body=$("#opencode-history-body");
@@ -1613,6 +1743,60 @@ function bindOpencodeInteractions(){
     opencodeState.historyPage=1;
     refreshOpencodeHistory();
   });
+  const chartCanvas = $("#opencode-cost-chart");
+  const chartTooltip = $("#opencode-chart-tooltip");
+  if(chartCanvas){
+    chartCanvas.addEventListener("mousemove", e=>{
+      const cd = chartCanvas._chartData;
+      if(!cd || !cd.dates || cd.dates.length===0) return;
+      const rect = chartCanvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const relX = mx - cd.pad.l;
+      if(relX >= 0 && relX <= cd.plotW && my >= cd.pad.t && my <= cd.pad.t + cd.plotH){
+        const idx = Math.floor(relX / cd.step);
+        if(idx >= 0 && idx < cd.dates.length){
+          const d = cd.dates[idx];
+          if(chartCanvas._hoveredDate !== d){
+            chartCanvas._hoveredDate = d;
+            drawOpencodeCostChart(chartCanvas._lastWrapper);
+          }
+          if(chartTooltip){
+            const mMap = cd.map.get(d);
+            let tot = 0;
+            if(mMap) for(const v of mMap.values()) tot += v;
+            let list = "";
+            for(const m of cd.models){
+              const val = mMap ? (mMap.get(m) || 0) : 0;
+              if(val > 0){
+                list += `<div class="item"><span><i style="width:8px;height:8px;display:inline-block;border-radius:2px;background:${escapeHtml(modelColor(m,cd.idxMap))};margin-right:6px"></i>${escapeHtml(m)}</span><strong style="color:var(--brass-glint)">$${val.toFixed(4)}</strong></div>`;
+              }
+            }
+            chartTooltip.innerHTML = `<h4>${escapeHtml(d)} · 总计 $${tot.toFixed(4)}</h4>${list}`;
+            chartTooltip.style.display = "block";
+            const tipW = 220;
+            const left = Math.min(rect.width - tipW - 10, Math.max(10, mx + 16));
+            const top = Math.max(10, my - 40);
+            chartTooltip.style.left = left + "px";
+            chartTooltip.style.top = top + "px";
+          }
+          return;
+        }
+      }
+      if(chartCanvas._hoveredDate){
+        chartCanvas._hoveredDate = null;
+        drawOpencodeCostChart(chartCanvas._lastWrapper);
+      }
+      if(chartTooltip) chartTooltip.style.display = "none";
+    });
+    chartCanvas.addEventListener("mouseleave", ()=>{
+      if(chartCanvas._hoveredDate){
+        chartCanvas._hoveredDate = null;
+        drawOpencodeCostChart(chartCanvas._lastWrapper);
+      }
+      if(chartTooltip) chartTooltip.style.display = "none";
+    });
+  }
 }
 function initOpencodeMonth(){
   const el=$("#opencode-month");
@@ -1710,6 +1894,7 @@ function renderDetailDrawer(){
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px">
         <span class="mono" style="background:#151D20;border:1px solid rgba(255,255,255,.1);padding:2px 8px;border-radius:6px;font-size:11px;color:var(--brass-glint)">${sid}</span>
         <button onclick="navigator.clipboard.writeText('${session.sessionId}').then(()=>{const b=this;b.textContent='已复制';setTimeout(()=>b.textContent='复制',1500)}).catch(()=>{})" title="复制 sessionId" style="border:1px solid rgba(197,162,84,.3);background:#182225;color:var(--enamel);padding:2px 10px;border-radius:999px;font:600 11px var(--font-ui);cursor:pointer">复制</button>
+        <button onclick="navigator.clipboard.writeText('token-analyzer totals --session ${session.sessionId}').then(()=>{const b=this;b.textContent='已复制 CLI';setTimeout(()=>b.textContent='复制 CLI',1500)}).catch(()=>{})" title="复制 CLI 命令：token-analyzer totals --session ${session.sessionId}" style="border:1px solid rgba(197,162,84,.3);background:#182225;color:var(--enamel);padding:2px 10px;border-radius:999px;font:600 11px var(--font-ui);cursor:pointer">复制 CLI</button>
       </div>
       <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <span>${escapeHtml(time)}</span>
@@ -1775,7 +1960,8 @@ function renderDetailDrawer(){
             const isChild = r.source==="child";
             const cls = isChild ? ' class="detail-child-row"' : '';
             const badge = isChild ? `<span title="子代理会话" style="background:rgba(197,162,84,.14);border:1px solid rgba(197,162,84,.35);border-radius:999px;padding:1px 8px;font:600 10px var(--font-mono);color:var(--brass-glint)">子代理 ${escapeHtml(String(r.sourceSessionId||"").slice(0,8))}</span>` : `<span class="drawer-badge main" style="font-size:10px;padding:1px 8px">主会话</span>`;
-            return `<tr${cls}><td style="text-align:left" class="mono">${escapeHtml(fmtTimestamp(r.timestamp))}</td><td>${escapeHtml(r.model||"-")}</td><td>${fmtCompact(totalIn)}</td><td>${fmtCompact(r.output||0)}</td><td>${fmtCompact(cache)}</td><td>${fmtCompact(tot)}</td><td>${r.cost===0?UNPRICED:fmtCost(r.cost)}</td><td style="text-align:left">${badge}</td></tr>`;
+            const reasTag = r.reasoning ? ` <span title="包含推理 ${fmtCompact(r.reasoning)}" style="color:var(--brass-glint);font-size:10px">(${fmtCompact(r.reasoning)}r)</span>` : "";
+            return `<tr${cls}><td style="text-align:left" class="mono">${escapeHtml(fmtTimestamp(r.timestamp))}</td><td>${escapeHtml(r.model||"-")}</td><td>${fmtCompact(totalIn)}</td><td>${fmtCompact(r.output||0)}${reasTag}</td><td>${fmtCompact(cache)}</td><td>${fmtCompact(tot)}</td><td>${r.cost===0?UNPRICED:fmtCost(r.cost)}</td><td style="text-align:left">${badge}</td></tr>`;
           }).join("")}
         </tbody>
       </table>

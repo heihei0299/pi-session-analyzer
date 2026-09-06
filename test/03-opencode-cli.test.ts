@@ -40,6 +40,9 @@ function rec(overrides: Partial<OpenCodeUsageRecord> & { id: string; timeCreated
 let savedEnv: Record<string, string | undefined> = {};
 function saveEnv() {
   savedEnv = { ...process.env };
+  for (const k of Object.keys(process.env)) {
+    if (k.startsWith("OPENCODE_")) delete process.env[k];
+  }
 }
 function restoreEnv() {
   // delete added keys
