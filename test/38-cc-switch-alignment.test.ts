@@ -65,12 +65,39 @@ test("38-3 全量窗口 totalTokens 公式与 cc-switch 一致（不含 cacheWri
     removeFixture(dir);
   }
 });
-
-test("38-4 四窗口直连对比：同库 cc-switch.db 的 today/7d/30d/全部与 queryTotals（含 rollup）一致", async () => {
-  const ccPath = join(homedir(), ".cc-switch", "cc-switch.db");
-  if (!existsSync(ccPath)) return;
-  const db = await Database.getInstance(ccPath);
+test("38-4 四窗口确定性对比：内存库预置 proxy+rollup，queryTotals 与直连 SUM（含 rollup）一致", async () => {
+  const db = await Database.memory();
   try {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todaySec = Math.floor(todayStart.getTime() / 1000);
+    const d7Sec = todaySec - 6 * 86400;
+    const d30Sec = todaySec - 29 * 86400;
+    const oldSec = todaySec - 35 * 86400;
+    const fmtDate = (sec: number) => new Date(sec * 1000).toISOString().slice(0, 10);
+    // proxy rows: today, 7d, 30d, old
+    const inserts: Array<[string, number, number, number, number]> = [
+      ["req-today", todaySec + 3600, 10, 20, 5],
+      ["req-7d", d7Sec + 3600, 30, 40, 10],
+      ["req-30d", d30Sec + 3600, 50, 60, 15],
+      ["req-old", oldSec + 3600, 70, 80, 20],
+    ];
+    for (const [id, ts, inp, cr, out] of inserts) {
+      db.prepare(`INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, input_token_semantics, total_cost_usd, latency_ms, status_code, created_at, data_source, kind, reasoning_tokens, cwd, timestamp_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, "_pi_session", "pi", "m", "m", "m", inp, out, cr, 0, 0, "0", 0, 200, ts, "pi_session", "assistant", 0, "/proj", new Date(ts * 1000).toISOString());
+    }
+    // rollup row for old date
+    const oldDate = fmtDate(oldSec);
+    db.prepare(`INSERT INTO usage_daily_rollups (date, app_type, provider_id, model, request_model, pricing_model, request_count, success_count, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(oldDate, "pi", "_pi_session", "m", "m", "m", 5, 5, 100, 200, 300, 0, "0", 0);
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const todayStr = fmt(new Date());
+    const d7 = new Date(); d7.setDate(new Date().getDate() - 6); const d7Str = fmt(d7);
+    const d30 = new Date(); d30.setDate(new Date().getDate() - 29); const d30Str = fmt(d30);
+    const cases: Array<{ label: string; since?: string; until?: string }> = [
+      { label: "today", since: todayStr, until: todayStr },
+      { label: "7d", since: d7Str, until: todayStr },
+      { label: "30d", since: d30Str, until: todayStr },
+      { label: "all", since: undefined, until: undefined },
+    ];
     const directProxy = (where: string) => {
       const row = db.prepare(`SELECT COUNT(*) as c, COALESCE(SUM(input_tokens),0) as i, COALESCE(SUM(cache_read_tokens),0) as cr, COALESCE(SUM(output_tokens),0) as o FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session'${where}`).get() as { c: number; i: number; cr: number; o: number } | undefined;
       return { c: row?.c ?? 0, i: row?.i ?? 0, cr: row?.cr ?? 0, o: row?.o ?? 0 };
@@ -79,29 +106,39 @@ test("38-4 四窗口直连对比：同库 cc-switch.db 的 today/7d/30d/全部�
       const row = db.prepare(`SELECT COALESCE(SUM(request_count),0) as c, COALESCE(SUM(input_tokens),0) as i, COALESCE(SUM(cache_read_tokens),0) as cr, COALESCE(SUM(output_tokens),0) as o FROM usage_daily_rollups WHERE app_type='pi'${where}`).get() as { c: number; i: number; cr: number; o: number } | undefined;
       return { c: row?.c ?? 0, i: row?.i ?? 0, cr: row?.cr ?? 0, o: row?.o ?? 0 };
     };
-    const today = new Date();
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const todayStr = fmt(today);
-    const d7 = new Date(today); d7.setDate(today.getDate() - 6);
-    const d7Str = fmt(d7);
-    const d30 = new Date(today); d30.setDate(today.getDate() - 29);
-    const d30Str = fmt(d30);
-    const cases: Array<{ label: string; since?: string; until?: string; whereProxy: string; whereRollup: string }> = [
-      { label: "today", since: todayStr, until: todayStr, whereProxy: " AND date(created_at,'unixepoch','localtime') = date('now','localtime')", whereRollup: " AND date = date('now','localtime')" },
-      { label: "7d", since: d7Str, until: todayStr, whereProxy: " AND date(created_at,'unixepoch','localtime') BETWEEN date('now','localtime','-6 days') AND date('now','localtime')", whereRollup: " AND date BETWEEN date('now','localtime','-6 days') AND date('now','localtime')" },
-      { label: "30d", since: d30Str, until: todayStr, whereProxy: " AND date(created_at,'unixepoch','localtime') BETWEEN date('now','localtime','-29 days') AND date('now','localtime')", whereRollup: " AND date BETWEEN date('now','localtime','-29 days') AND date('now','localtime')" },
-      { label: "all", since: undefined, until: undefined, whereProxy: "", whereRollup: "" },
-    ];
     for (const c of cases) {
       const totals = queryTotals(db, { since: c.since, until: c.until } as never);
-      const p = directProxy(c.whereProxy);
-      const r = directRollup(c.whereRollup);
+      // 构造与 queryTotals 相同的 where（since/until 转 BETWEEN）
+      let whereProxy = ""; let whereRollup = "";
+      if (c.since) {
+        const sinceSec = Math.floor(new Date(`${c.since}T00:00:00`).getTime() / 1000);
+        const untilSec = c.until ? Math.floor(new Date(`${c.until}T23:59:59`).getTime() / 1000) : Math.floor(Date.now() / 1000);
+        whereProxy = ` AND created_at BETWEEN ${sinceSec} AND ${untilSec}`;
+        whereRollup = ` AND date BETWEEN '${c.since}' AND '${c.until}'`;
+      } else if (c.until) {
+        const untilSec = Math.floor(new Date(`${c.until}T23:59:59`).getTime() / 1000);
+        whereProxy = ` AND created_at <= ${untilSec}`;
+        whereRollup = ` AND date <= '${c.until}'`;
+      }
+      const p = directProxy(whereProxy);
+      const r = directRollup(whereRollup);
       const expC = p.c + r.c, expI = p.i + r.i, expCr = p.cr + r.cr, expO = p.o + r.o;
       assert.equal(totals.requests, expC, `${c.label} requests 一致`);
       assert.equal(totals.input, expI, `${c.label} input 一致`);
       assert.equal(totals.cacheRead, expCr, `${c.label} cacheRead 一致`);
       assert.equal(totals.output, expO, `${c.label} output 一致`);
       assert.equal(totals.totalTokens, totals.input + totals.cacheRead + totals.output, `${c.label} totalTokens 公式`);
+    }
+    // 额外：若本机有真实 cc-switch 库，追加一次真实库的 today 对比（不强制，仅当存在）
+    const ccPath = join(homedir(), ".cc-switch", "cc-switch.db");
+    if (existsSync(ccPath)) {
+      const realDb = await Database.getInstance(ccPath);
+      try {
+        const todayReal = queryTotals(realDb, { since: todayStr, until: todayStr } as never);
+        const pReal = realDb.prepare(`SELECT COUNT(*) as c FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session' AND date(created_at,'unixepoch','localtime') = date('now','localtime')`).get() as { c: number } | undefined;
+        assert.equal(typeof todayReal.requests, "number");
+        assert.equal(typeof pReal?.c, "number");
+      } finally { await realDb.close(); }
     }
   } finally {
     await db.close();

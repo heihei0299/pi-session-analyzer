@@ -18,13 +18,13 @@ type Database struct {
 	Path string
 }
 
-// ResolveDbPath 按优先级解析：envDb > dbPath > ~/.cache > data（默认不共库，显式 env/--db 才共库）
+// ResolveDbPath 按优先级解析：envDb > dbPath > ~/.cache > data（默认不共库，显式 env/--db 才共库，空白归一）
 func ResolveDbPath(dbPath, envDb string) string {
 	if strings.TrimSpace(envDb) != "" {
-		return envDb
+		return strings.TrimSpace(envDb)
 	}
 	if strings.TrimSpace(dbPath) != "" {
-		return dbPath
+		return strings.TrimSpace(dbPath)
 	}
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" && home != "/" {

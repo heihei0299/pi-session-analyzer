@@ -11,10 +11,10 @@ import { join, dirname } from "node:path";
 
 export const SCHEMA_VERSION = 2;
 
-/** 路径解析：envDb（TOKEN_ANALYZER_DB）优先，其次 dbPath（--db），最后 XDG 回退（默认不共库，显式 env/--db 才共库） */
+/** 路径解析：envDb（TOKEN_ANALYZER_DB）优先，其次 dbPath（--db），最后 XDG 回退（默认不共库，显式 env/--db 才共库，空白归一） */
 export function resolveDbPath(opts: { dbPath?: string; envDb?: string }): string {
-  if (opts.envDb && opts.envDb.trim() !== "") return opts.envDb;
-  if (opts.dbPath && opts.dbPath.trim() !== "") return opts.dbPath;
+  if (opts.envDb && opts.envDb.trim() !== "") return opts.envDb.trim();
+  if (opts.dbPath && opts.dbPath.trim() !== "") return opts.dbPath.trim();
   // XDG 回退（默认不共库）
   try {
     const cache = join(homedir(), ".cache", "token-analyzer", "token-analyzer.db");
