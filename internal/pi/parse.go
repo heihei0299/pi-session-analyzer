@@ -21,6 +21,7 @@ type PiRecord struct {
 	Output       float64
 	CacheRead    float64
 	CacheWrite   float64
+	Reasoning    float64
 	Provider     string
 	RequestModel string
 	Model        string
@@ -152,6 +153,7 @@ func ParsePiUsageRecord(entry map[string]interface{}, sessionID string, sessionT
 	output := toFinite(usageRaw["output"])
 	cacheRead := toFinite(usageRaw["cacheRead"])
 	cacheWrite := toFinite(usageRaw["cacheWrite"])
+	reasoning := toFinite(usageRaw["reasoning"])
 	var costTotal float64
 	if c, ok := usageRaw["cost"].(map[string]interface{}); ok {
 		costTotal = toFinite(c["total"])
@@ -228,6 +230,7 @@ func ParsePiUsageRecord(entry map[string]interface{}, sessionID string, sessionT
 		Output:       output,
 		CacheRead:    cacheRead,
 		CacheWrite:   cacheWrite,
+		Reasoning:    reasoning,
 		Provider:     provider,
 		RequestModel: requestModel,
 		Model:        model,

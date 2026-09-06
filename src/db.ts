@@ -9,7 +9,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** 路径解析：envDb（TOKEN_ANALYZER_DB）优先，其次 dbPath（--db），最后 XDG 回退 */
 export function resolveDbPath(opts: { dbPath?: string; envDb?: string }): string {
@@ -55,6 +55,11 @@ export class Database {
     return Database.open(resolved);
   }
 
+  /** 内存库（读路径按目录隔离：每次全量同步后聚合，不污染持久库） */
+  static async memory(): Promise<Database> {
+    return Database.open(":memory:");
+  }
+
   private static open(path: string): Database {
     const dir = dirname(path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -80,6 +85,7 @@ export class Database {
     } catch {}
     const db = new Database(raw, path);
     db.createTables();
+    db.ensureColumns();
     db.ensureUserVersion();
     return db;
   }
@@ -114,7 +120,11 @@ export class Database {
         is_streaming INTEGER NOT NULL DEFAULT 0,
         cost_multiplier TEXT NOT NULL DEFAULT '1.0',
         created_at INTEGER NOT NULL,
-        data_source TEXT NOT NULL DEFAULT 'proxy'
+        data_source TEXT NOT NULL DEFAULT 'proxy',
+        kind TEXT NOT NULL DEFAULT 'assistant',
+        reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+        cwd TEXT NOT NULL DEFAULT '',
+        timestamp_text TEXT NOT NULL DEFAULT ''
       )
     `);
     this.raw.exec(`CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON proxy_request_logs(provider_id, app_type)`);
@@ -184,6 +194,32 @@ export class Database {
         cache_creation_cost_per_million TEXT NOT NULL DEFAULT '0'
       )
     `);
+
+    // pi_sessions（cc-switch 外的扩展：会话级元数据，供 sessions/detail 窗口）
+    this.raw.exec(`
+      CREATE TABLE IF NOT EXISTS pi_sessions (
+        session_id TEXT PRIMARY KEY,
+        header_ts TEXT NOT NULL DEFAULT '',
+        cwd TEXT NOT NULL DEFAULT '',
+        file_name TEXT NOT NULL DEFAULT '',
+        display_name TEXT NOT NULL DEFAULT '',
+        is_task INTEGER NOT NULL DEFAULT 0,
+        parent_session_id TEXT
+      )
+    `);
+  }
+
+  /** v1→v2 迁移：已存在的 proxy_request_logs 补扩展列 */
+  private ensureColumns(): void {
+    const cols = this.raw.prepare(`PRAGMA table_info(proxy_request_logs)`).all() as { name: string }[];
+    const names = new Set(cols.map((c) => c.name));
+    const add = (col: string, ddl: string): void => {
+      if (!names.has(col)) this.raw.exec(`ALTER TABLE proxy_request_logs ADD COLUMN ${ddl}`);
+    };
+    add("kind", `kind TEXT NOT NULL DEFAULT 'assistant'`);
+    add("reasoning_tokens", `reasoning_tokens INTEGER NOT NULL DEFAULT 0`);
+    add("cwd", `cwd TEXT NOT NULL DEFAULT ''`);
+    add("timestamp_text", `timestamp_text TEXT NOT NULL DEFAULT ''`);
   }
 
   private ensureUserVersion(): void {

@@ -42,11 +42,11 @@ test("S1-2 user_version=1 且幂等二次调用不报错", async () => {
     const db1 = await Database.getInstance(dbPath);
     const v1 = db1.getUserVersion();
     assert.equal(v1, SCHEMA_VERSION);
-    assert.equal(v1, 1);
+    assert.equal(v1, 2);
     await db1.close();
     const db2 = await Database.getInstance(dbPath);
     const v2 = db2.getUserVersion();
-    assert.equal(v2, 1);
+    assert.equal(v2, 2);
     await db2.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

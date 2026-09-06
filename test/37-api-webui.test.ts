@@ -23,7 +23,7 @@ test("S8-1 GET /api/db/meta 返回 dbPath 与 schemaVersion", async () => {
       assert.equal(res.status, 200);
       const body = await res.json() as { dbPath: string; schemaVersion: number };
       assert.ok(typeof body.dbPath === "string" && body.dbPath.length > 0);
-      assert.equal(body.schemaVersion, 1);
+      assert.equal(body.schemaVersion, 2);
     } finally { await server.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

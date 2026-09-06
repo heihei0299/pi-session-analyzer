@@ -2,10 +2,12 @@
  * 指纹增量同步（直切 cc-switch）— 修正版
  */
 import { statSync, readFileSync, openSync, readSync, closeSync } from "node:fs";
+import { basename } from "node:path";
 import { createHash } from "node:crypto";
 import { parsePiUsageRecord } from "./pi-parse.ts";
 import { piRequestIdentity } from "./pi-identity.ts";
 import { costForRecord } from "./cost/calculator.ts";
+import { defaultSessionData } from "./session-data.ts";
 import type { Database } from "./db.ts";
 
 export interface PiFileRevision {
@@ -84,27 +86,71 @@ function truncateLabel(s: string): string {
   return buf.subarray(0, end).toString();
 }
 
-export async function syncPiUsage(db: Database, files: string[]): Promise<SyncResult> {
+/** 从 message.entries 提取首条 user 文本（与 analyzeFile 同逻辑，供 displayName） */
+function extractFirstUserText(lines: string[]): string | undefined {
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.type !== "message") continue;
+    const msg = entry.message as Record<string, unknown> | undefined;
+    if (!msg || msg.role !== "user") continue;
+    const content = msg.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (part !== null && typeof part === "object" && !Array.isArray(part) && (part as Record<string, unknown>).type === "text") {
+        const text = String((part as Record<string, unknown>).text ?? "");
+        if (text.trim()) return text.trim();
+      }
+    }
+  }
+  return undefined;
+}
+
+export async function syncPiUsage(db: Database, files: string[], opts?: { full?: boolean }): Promise<SyncResult> {
   let imported = 0;
   let skipped = 0;
+  const full = opts?.full ?? false;
   for (const file of files) {
     const rev = piFileRevision(file);
+    if (!full) {
+      // revision 快跳：尺寸+尾指纹命中游标则文件无变化
+      const cursor = db.prepare(`SELECT last_byte_offset, last_tail_fingerprint FROM session_log_sync WHERE file_path = ?`).get(file) as
+        | { last_byte_offset: number | null; last_tail_fingerprint: number | null }
+        | undefined;
+      if (cursor && cursor.last_byte_offset === rev.fileSize && cursor.last_tail_fingerprint === rev.tailFingerprint) {
+        continue;
+      }
+    }
     const content = readFileSync(file, "utf8");
     const lines = content.split("\n");
     let header: Record<string, unknown> | null = null;
     let sessionId = "";
+    let headerTs = "";
+    let headerCwd = "";
+    let parentSessionId: string | undefined;
     let sessionTimestamp: number | null = null;
     let forkTs: number | null = null;
     try {
       header = JSON.parse(lines[0]);
       if (!header || (header.type as string) !== "session") continue;
       sessionId = (header.id as string) ?? "";
+      headerTs = typeof header.timestamp === "string" ? header.timestamp : "";
+      headerCwd = typeof header.cwd === "string" ? header.cwd : "";
       const ts = header.timestamp as string | undefined;
       if (ts) {
         const t = Date.parse(ts);
         if (!Number.isNaN(t)) sessionTimestamp = Math.floor(t / 1000);
       }
       const parentSession = header.parentSession as string | undefined;
+      if (typeof parentSession === "string" && parentSession.length > 0) {
+        parentSessionId = parentSession;
+      }
       if (parentSession && (parentSession.includes("/") || parentSession.includes("\\"))) {
         if (ts) {
           const t = Date.parse(ts);
@@ -118,6 +164,17 @@ export async function syncPiUsage(db: Database, files: string[]): Promise<SyncRe
 
     const seenInFile = new Map<string, NonNullable<ReturnType<typeof parsePiUsageRecord>>>();
     const identities = new Map<string, ReturnType<typeof piRequestIdentity>>();
+    const tsTextById = new Map<string, string>();
+    // model_pricing 一次加载，供 cost 回算
+    const pricingByModel = new Map<string, { inputCostPerMillion: string; outputCostPerMillion: string; cacheReadCostPerMillion: string; cacheCreationCostPerMillion: string }>();
+    try {
+      const pricingRows = db.prepare(`SELECT model_id, input_cost_per_million, output_cost_per_million, cache_read_cost_per_million, cache_creation_cost_per_million FROM model_pricing`).all() as Record<string, string>[];
+      for (const r of pricingRows) {
+        pricingByModel.set(r.model_id, { inputCostPerMillion: r.input_cost_per_million, outputCostPerMillion: r.output_cost_per_million, cacheReadCostPerMillion: r.cache_read_cost_per_million, cacheCreationCostPerMillion: r.cache_creation_cost_per_million });
+      }
+    } catch {
+      // model_pricing 表缺失时忽略，回算为 0
+    }
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
@@ -154,6 +211,7 @@ export async function syncPiUsage(db: Database, files: string[]): Promise<SyncRe
       }
       seenInFile.set(identity.requestId, rec);
       identities.set(identity.requestId, identity);
+      tsTextById.set(identity.requestId, typeof entry.timestamp === "string" ? entry.timestamp : "");
       // 挂载 for later use (compat)
       (rec as unknown as Record<string, unknown>).__identity = identity;
     }
@@ -178,14 +236,17 @@ export async function syncPiUsage(db: Database, files: string[]): Promise<SyncRe
         identity.semanticId,
         identity.hasEntryId ? 1 : 0,
       );
-      // 费用：reported 优先，否则 pricing 回算（暂无 pricing 表查询，传 null，回算为 0）
-      const cost = costForRecord({ input: rec.input, output: rec.output, cacheRead: rec.cacheRead, cacheWrite: rec.cacheWrite, cost: { total: rec.costTotal } }, null);
+      // 费用：reported 优先，否则 model_pricing 回算
+      const pricing = pricingByModel.get(rec.model) ?? null;
+      const cost = costForRecord({ input: rec.input, output: rec.output, cacheRead: rec.cacheRead, cacheWrite: rec.cacheWrite, cost: { total: rec.costTotal } }, pricing);
+      const tsText = tsTextById.get(requestId) ?? "";
       db.prepare(
         `INSERT OR IGNORE INTO proxy_request_logs (
           request_id, provider_id, app_type, model, request_model, pricing_model,
           input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-          input_token_semantics, total_cost_usd, latency_ms, status_code, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          input_token_semantics, total_cost_usd, latency_ms, status_code, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source,
+          kind, reasoning_tokens, cwd, timestamp_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         requestId,
         rec.provider,
@@ -208,8 +269,23 @@ export async function syncPiUsage(db: Database, files: string[]): Promise<SyncRe
         "1.0",
         rec.createdAt,
         "pi_session",
+        rec.kind,
+        rec.reasoning,
+        headerCwd,
+        tsText,
       );
       imported++;
+    }
+
+    // 会话元数据 upsert（零请求会话亦入库，供 sessions/detail 窗口）
+    {
+      const fileName = basename(file);
+      const firstUserText = extractFirstUserText(lines);
+      const displayName = defaultSessionData.displayNameOf(fileName, firstUserText);
+      const isTask = file.includes("/tasks/") || file.includes("\\tasks\\") ? 1 : 0;
+      db.prepare(
+        `INSERT OR REPLACE INTO pi_sessions (session_id, header_ts, cwd, file_name, display_name, is_task, parent_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(sessionId, headerTs, headerCwd, fileName, displayName, isTask, parentSessionId ?? null);
     }
 
     const encoded = encodeRevision(rev);

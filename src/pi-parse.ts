@@ -9,6 +9,7 @@ export interface PiRecord {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  reasoning: number;
   provider: string;
   requestModel: string;
   model: string;
@@ -88,6 +89,7 @@ export function parsePiUsageRecord(
   const output = toFinite(usageRaw.output);
   const cacheRead = toFinite(usageRaw.cacheRead);
   const cacheWrite = toFinite(usageRaw.cacheWrite);
+  const reasoning = toFinite(usageRaw.reasoning);
   const costObj = usageRaw.cost as Record<string, unknown> | undefined;
   const costTotal = costObj ? toFinite(costObj.total) : 0;
 
@@ -138,6 +140,7 @@ export function parsePiUsageRecord(
     output,
     cacheRead,
     cacheWrite,
+    reasoning,
     provider,
     requestModel,
     model,

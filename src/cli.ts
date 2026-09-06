@@ -16,6 +16,10 @@ import {
   filterFiles,
   periodRowsFromFiles,
 } from "./analyze.ts";
+import { Database, resolveDbPathFromEnv } from "./db.ts";
+import { withDirDb, queryTotals, queryGroups, queryPeriod, querySessions, queryRequests, rollupAndPrune } from "./db-aggregation.ts";
+import { collectPiJsonlFiles, resolvePiSessionRoot } from "./pi-discovery.ts";
+import { syncPiUsage } from "./pi-sync.ts";
 import { IncrementalReader, applyIncrements } from "./watch.ts";
 import { emptyTotals, type GroupBy, type Period, type Totals } from "./aggregate.ts";
 import { renderTotalsTable, renderSessionTable, renderRequestTable, renderGroupTable, renderPeriodTable } from "./render.ts";
@@ -72,6 +76,16 @@ export interface CliArgs {
   help: boolean;
   /** -v/--version：显示版本 */
   version: boolean;
+  /** sync：同步 pi 会话到 DB */
+  sync: boolean;
+  /** prune：剪枝旧数据 */
+  prune: boolean;
+  /** --db <path>：数据库路径 */
+  dbPath?: string;
+  /** --full：全量重扫 */
+  full: boolean;
+  /** --days <n>：prune 天数 */
+  days: number;
   /** opencode 子命令 */
   opencode?: "sync" | "export";
   opencodeSync?: OpencodeSyncCliOpts;
@@ -100,6 +114,11 @@ export function parseArgs(argv: string[]): CliArgs {
   let host = "127.0.0.1";
   let help = false;
   let version = false;
+  let sync = false;
+  let prune = false;
+  let dbPath: string | undefined;
+  let full = false;
+  let days = 30;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h" || a === "--help") {
@@ -188,6 +207,26 @@ export function parseArgs(argv: string[]): CliArgs {
       throw new Error(`缺少参数: --by 需要值`);
     } else if (a === "totals" || a === "sessions" || a === "requests") {
       window = a;
+    } else if (a === "sync") {
+      sync = true;
+    } else if (a === "prune") {
+      prune = true;
+    } else if (a === "--db" && argv[i + 1]) {
+      dbPath = argv[i + 1];
+      i++;
+    } else if (a === "--db") {
+      throw new Error(`缺少参数: --db 需要路径`);
+    } else if (a === "--full") {
+      full = true;
+    } else if (a === "--days" && argv[i + 1]) {
+      const n = Number(argv[i + 1]);
+      if (!Number.isInteger(n) || n < 0) {
+        throw new Error(`无效天数: ${argv[i + 1]}（需为非负整数）`);
+      }
+      days = n;
+      i++;
+    } else if (a === "--days") {
+      throw new Error(`缺少参数: --days 需要天数`);
     } else if (a === "serve") {
       serve = true;
     } else if (a.startsWith("-")) {
@@ -197,12 +236,38 @@ export function parseArgs(argv: string[]): CliArgs {
     }
   }
   if (help || version) {
-    return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version };
+    return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version, sync, prune, dbPath, full, days };
+  }
+  if (sync || prune) {
+    validateSyncMode(argv);
   }
   if (serve) {
     validateServeMode(argv);
   }
-  return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version };
+  return { window, dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version, sync, prune, dbPath, full, days };
+}
+
+/** sync/prune 模式参数校验：窗口/分组/汇总/watch 参数无意义，拒绝 */
+function validateSyncMode(argv: string[]): void {
+  const FORBIDDEN = [
+    "totals",
+    "sessions",
+    "requests",
+    "serve",
+    "--format",
+    "--by",
+    "--period",
+    "--watch",
+    "--interval",
+    "--model",
+    "--cwd",
+    "--since",
+    "--until",
+  ];
+  const hit = argv.find((a) => FORBIDDEN.includes(a));
+  if (hit !== undefined) {
+    throw new Error(`sync/prune 模式不支持参数（收到 ${hit}）`);
+  }
 }
 
 function parseOpencodeArgs(argv: string[]): CliArgs {
@@ -249,12 +314,17 @@ function parseOpencodeArgs(argv: string[]): CliArgs {
         host,
         help,
         version,
+        sync: false,
+        prune: false,
+        dbPath: undefined,
+        full: false,
+        days: 30,
         opencode: sub,
         opencodeSync: sub === "sync" ? { auth: undefined, workspace: undefined, full: false, limit: undefined, dataDir: "data/opencode" } : undefined,
         opencodeExport: sub === "export" ? { format: "json", output: undefined, month: undefined, dataDir: "data/opencode" } : undefined,
       };
     }
-    return { window: "totals", dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version };
+    return { window: "totals", dir, format, model, cwd, by, since, until, period, watch, interval, serve, port, host, help, version, sync: false, prune: false, dbPath: undefined, full: false, days: 30 };
   }
 
   const sub = argv[1];
@@ -325,6 +395,11 @@ function parseOpencodeArgs(argv: string[]): CliArgs {
       host,
       help,
       version,
+      sync: false,
+      prune: false,
+      dbPath: undefined,
+      full: false,
+      days: 30,
       opencode: "sync",
       opencodeSync: { auth, workspace, full, limit, dataDir },
     };
@@ -389,6 +464,11 @@ function parseOpencodeArgs(argv: string[]): CliArgs {
       host,
       help,
       version,
+      sync: false,
+      prune: false,
+      dbPath: undefined,
+      full: false,
+      days: 30,
       opencode: "export",
       opencodeExport: { format: expFormat, output, month, dataDir },
     };
@@ -443,7 +523,9 @@ const HELP_TEXT = `用法: token-analyzer [totals|sessions|requests] --dir <path
   --by <model|cwd|model,cwd> 仅 totals 窗口：按维度分组
   --period <day|week|month>   仅 totals 窗口：按周期汇总
   --watch [--interval <ms>] 实时监控（默认 1000ms）
-  serve [--port <n>] [--host <h>] [--dir <path>] 启动 Web 面板（默认 127.0.0.1:50080）
+  serve [--port <n>] [--host <h>] [--dir <path>] [--db <path>] 启动 Web 面板（默认 127.0.0.1:50080）
+  sync [--dir <path>] [--db <path>] [--full] 同步 pi 会话到 DB（四载体直切）
+  prune [--db <path>] [--days <n>] 剪枝旧数据（默认 30 天）
   -h, --help                显示帮助
   -v, --version             显示版本
 
@@ -458,7 +540,8 @@ OpenCode 数据同步（外部对比基准）:
 `;
 
 /** serve 子命令：启动 Web 服务器、打印访问 URL、Ctrl+C 优雅退出（长驻） */
-async function runServeCli(args: { dir: string; host: string; port: number }): Promise<string> {
+async function runServeCli(args: { dir: string; host: string; port: number; dbPath?: string }): Promise<string> {
+  const dbPath = resolveDbPathFromEnv(args.dbPath);
   const server = await startWebServer({ dir: args.dir, host: args.host, port: args.port });
   // SIGINT handler 先于 URL 打印注册：URL 打印即代表优雅退出已就绪（消除 kill 竞态）
   const exited = new Promise<void>((resolve) => {
@@ -467,6 +550,7 @@ async function runServeCli(args: { dir: string; host: string; port: number }): P
     });
   });
   process.stdout.write(`Token Analyzer WebUI: ${server.url}\n`);
+  process.stdout.write(`DB: ${dbPath}\n`);
   await exited;
   return "";
 }
@@ -486,8 +570,28 @@ export async function runCli(argv: string[]): Promise<string> {
     return runOpencodeExport({ format: e.format, output: e.output, month: e.month, dataDir: e.dataDir });
   }
   if (serve) {
-    // Web 服务器模式：启动、打印访问 URL、Ctrl+C 优雅退出（长驻，正常退出时返回空串）
-    return runServeCli({ dir, host, port });
+    return runServeCli({ dir, host, port, dbPath: parsed.dbPath });
+  }
+  if (parsed.sync) {
+    const dbPath = resolveDbPathFromEnv(parsed.dbPath);
+    const db = await Database.getInstance(dbPath);
+    try {
+      const root = resolvePiSessionRoot({ envDb: process.env.PI_CODING_AGENT_SESSION_DIR, defaultRoot: dir, piConfig: undefined });
+      const files = collectPiJsonlFiles(root.root, root.layout);
+      // 回退递归收集（兼容测试 fixture 扁平文件）
+      const fallback = files.length === 0 ? (await import("./session-data.ts")).collectJsonlFiles(dir) : [];
+      const allFiles = files.length > 0 ? files : fallback;
+      const res = await syncPiUsage(db, allFiles, { full: parsed.full });
+      return `同步完成: 新增 ${res.imported} 条, 跳过 ${res.skipped} 条, DB: ${dbPath}\n`;
+    } finally { await db.close(); }
+  }
+  if (parsed.prune) {
+    const dbPath = resolveDbPathFromEnv(parsed.dbPath);
+    const db = await Database.getInstance(dbPath);
+    try {
+      const res = rollupAndPrune(db, parsed.days);
+      return `清理完成: 聚合 ${res.rolled} 组, DB: ${dbPath}\n`;
+    } finally { await db.close(); }
   }
   validateArgs({ window, by, period });
   if (watch) {

@@ -9,7 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Database 封装 sql.DB，对应 cc-switch schema.rs
 type Database struct {
@@ -75,6 +75,10 @@ func Open(path string) (*Database, error) {
 		sqlDB.Close()
 		return nil, err
 	}
+	if err := db.ensureColumns(); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
 	if err := db.ensureUserVersion(); err != nil {
 		sqlDB.Close()
 		return nil, err
@@ -117,7 +121,11 @@ func (d *Database) createTables() error {
 			is_streaming INTEGER NOT NULL DEFAULT 0,
 			cost_multiplier TEXT NOT NULL DEFAULT '1.0',
 			created_at INTEGER NOT NULL,
-			data_source TEXT NOT NULL DEFAULT 'proxy'
+			data_source TEXT NOT NULL DEFAULT 'proxy',
+			kind TEXT NOT NULL DEFAULT 'assistant',
+			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+			cwd TEXT NOT NULL DEFAULT '',
+			timestamp_text TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON proxy_request_logs(provider_id, app_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON proxy_request_logs(created_at)`,
@@ -167,10 +175,55 @@ func (d *Database) createTables() error {
 			cache_read_cost_per_million TEXT NOT NULL DEFAULT '0',
 			cache_creation_cost_per_million TEXT NOT NULL DEFAULT '0'
 		)`,
+		`CREATE TABLE IF NOT EXISTS pi_sessions (
+			session_id TEXT PRIMARY KEY,
+			header_ts TEXT NOT NULL DEFAULT '',
+			cwd TEXT NOT NULL DEFAULT '',
+			file_name TEXT NOT NULL DEFAULT '',
+			display_name TEXT NOT NULL DEFAULT '',
+			is_task INTEGER NOT NULL DEFAULT 0,
+			parent_session_id TEXT
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := d.DB.Exec(s); err != nil {
 			return fmt.Errorf("建表失败: %w", err)
+		}
+	}
+	return nil
+}
+func (d *Database) ensureColumns() error {
+	rows, err := d.DB.Query(`PRAGMA table_info(proxy_request_logs)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	names := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		names[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	add := []struct{ col, ddl string }{
+		{"kind", `kind TEXT NOT NULL DEFAULT 'assistant'`},
+		{"reasoning_tokens", `reasoning_tokens INTEGER NOT NULL DEFAULT 0`},
+		{"cwd", `cwd TEXT NOT NULL DEFAULT ''`},
+		{"timestamp_text", `timestamp_text TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, a := range add {
+		if !names[a.col] {
+			if _, err := d.DB.Exec(fmt.Sprintf(`ALTER TABLE proxy_request_logs ADD COLUMN %s`, a.ddl)); err != nil {
+				return fmt.Errorf("补列 %s 失败: %w", a.col, err)
+			}
 		}
 	}
 	return nil
