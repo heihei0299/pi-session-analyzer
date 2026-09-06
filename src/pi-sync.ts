@@ -73,6 +73,54 @@ export function piFileRevision(filePath: string): PiFileRevision {
   };
 }
 
+/** 计算文件在 offset（已提交字节数）处的 tail 指纹（末 4096B 截止于 offset） */
+function tailFingerprintAt(filePath: string, offset: number): number {
+  const len = Math.min(offset, 4096);
+  if (len <= 0) return tailFingerprint(Buffer.alloc(0));
+  const fd = openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, offset - len);
+    return tailFingerprint(buf);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** 读取文件首行（header） */
+function readHeaderLine(filePath: string): string | null {
+  const fd = openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(4096);
+    const n = readSync(fd, buf, 0, 4096, 0);
+    if (n <= 0) return null;
+    const str = buf.subarray(0, n).toString("utf8");
+    const idx = str.indexOf("\n");
+    if (idx !== -1) return str.slice(0, idx);
+    // 首行超长（极少），回退全量读取
+    const content = readFileSync(filePath, "utf8");
+    return content.split("\n")[0] ?? null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** 读取文件从 offset 起的后缀内容 */
+function readSuffix(filePath: string, offset: number): Buffer {
+  const st = statSync(filePath);
+  const size = Number(st.size);
+  if (offset >= size) return Buffer.alloc(0);
+  const len = size - offset;
+  const fd = openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, offset);
+    return buf;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export interface SyncResult {
   imported: number;
   skipped: number;
@@ -116,19 +164,40 @@ export async function syncPiUsage(db: Database, files: string[], opts?: { full?:
   let imported = 0;
   let skipped = 0;
   const full = opts?.full ?? false;
+  // model_pricing 一次加载
+  const pricingByModel = new Map<string, { inputCostPerMillion: string; outputCostPerMillion: string; cacheReadCostPerMillion: string; cacheCreationCostPerMillion: string }>();
+  try {
+    const pricingRows = db.prepare(`SELECT model_id, input_cost_per_million, output_cost_per_million, cache_read_cost_per_million, cache_creation_cost_per_million FROM model_pricing`).all() as Record<string, string>[];
+    for (const r of pricingRows) {
+      pricingByModel.set(r.model_id, { inputCostPerMillion: r.input_cost_per_million, outputCostPerMillion: r.output_cost_per_million, cacheReadCostPerMillion: r.cache_read_cost_per_million, cacheCreationCostPerMillion: r.cache_creation_cost_per_million });
+    }
+  } catch {}
   for (const file of files) {
     const rev = piFileRevision(file);
+    let cursor: { last_modified: number; last_line_offset: number; last_synced_at: number; last_byte_offset: number | null; last_tail_fingerprint: number | null } | undefined;
+    let canSeek = false;
     if (!full) {
-      // revision 快跳：尺寸+尾指纹命中游标则文件无变化
-      const cursor = db.prepare(`SELECT last_byte_offset, last_tail_fingerprint FROM session_log_sync WHERE file_path = ?`).get(file) as
-        | { last_byte_offset: number | null; last_tail_fingerprint: number | null }
+      const row = db.prepare(`SELECT last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint FROM session_log_sync WHERE file_path = ?`).get(file) as
+        | { last_modified: number; last_line_offset: number; last_synced_at: number; last_byte_offset: number | null; last_tail_fingerprint: number | null }
         | undefined;
-      if (cursor && cursor.last_byte_offset === rev.fileSize && cursor.last_tail_fingerprint === rev.tailFingerprint) {
-        continue;
+      if (row && row.last_byte_offset !== null && row.last_tail_fingerprint !== null) {
+        cursor = row;
+        if (rev.fileSize >= row.last_byte_offset) {
+          const actualFp = tailFingerprintAt(file, row.last_byte_offset);
+          if (actualFp === row.last_tail_fingerprint) canSeek = true;
+          else canSeek = false;
+        } else {
+          // 截断
+          canSeek = false;
+        }
       }
     }
-    const content = readFileSync(file, "utf8");
-    const lines = content.split("\n");
+    // 快跳：已seek且无新数据
+    if (canSeek && cursor && rev.fileSize === cursor.last_byte_offset && rev.tailFingerprint === cursor.last_tail_fingerprint) {
+      continue;
+    }
+    let headerLine: string | null = null;
+    let linesToProcess: string[] = [];
     let header: Record<string, unknown> | null = null;
     let sessionId = "";
     let headerTs = "";
@@ -136,9 +205,17 @@ export async function syncPiUsage(db: Database, files: string[], opts?: { full?:
     let parentSessionId: string | undefined;
     let sessionTimestamp: number | null = null;
     let forkTs: number | null = null;
-    try {
-      header = JSON.parse(lines[0]);
-      if (!header || (header.type as string) !== "session") continue;
+    let newCommittedByte: number;
+    let newCommittedLines: number;
+    let newTailFp: number;
+    if (canSeek && cursor) {
+      headerLine = readHeaderLine(file);
+      if (!headerLine) continue;
+      try {
+        header = JSON.parse(headerLine);
+        if (!header || (header.type as string) !== "session") continue;
+      } catch { continue; }
+      // header 元信息
       sessionId = (header.id as string) ?? "";
       headerTs = typeof header.timestamp === "string" ? header.timestamp : "";
       headerCwd = typeof header.cwd === "string" ? header.cwd : "";
@@ -148,43 +225,92 @@ export async function syncPiUsage(db: Database, files: string[], opts?: { full?:
         if (!Number.isNaN(t)) sessionTimestamp = Math.floor(t / 1000);
       }
       const parentSession = header.parentSession as string | undefined;
-      if (typeof parentSession === "string" && parentSession.length > 0) {
-        parentSessionId = parentSession;
-      }
+      if (typeof parentSession === "string" && parentSession.length > 0) parentSessionId = parentSession;
       if (parentSession && (parentSession.includes("/") || parentSession.includes("\\"))) {
         if (ts) {
           const t = Date.parse(ts);
           if (!Number.isNaN(t)) forkTs = t;
         }
       }
-    } catch {
-      continue;
+      if (!header || (header.type as string) !== "session") continue;
+      const suffixBuf = readSuffix(file, cursor!.last_byte_offset!);
+      if (suffixBuf.length === 0) {
+        // 无新增，继续（已在快跳处理）
+        continue;
+      }
+      const suffixStr = suffixBuf.toString("utf8");
+      // 计算新增的完整行（半行不计入）
+      const parts = suffixStr.split("\n");
+      const completeNewLines = parts.length - 1;
+      // 本次可提交的完整行（排除末尾半行）
+      if (completeNewLines <= 0) {
+        // 只有半行，无完整新增，暂不推进游标（下轮重验）
+        // 但仍需处理？ 当前 suffix 仅半行，linesToProcess 为空，跳过插入但不更新游标
+        continue;
+      }
+      linesToProcess = parts.slice(0, -1);
+      // 新提交位点
+      if (rev.complete) {
+        newCommittedByte = rev.fileSize;
+      } else {
+        const lastNL = suffixStr.lastIndexOf("\n");
+        newCommittedByte = cursor!.last_byte_offset! + lastNL + 1;
+      }
+      newCommittedLines = cursor!.last_line_offset + completeNewLines;
+      newTailFp = tailFingerprintAt(file, newCommittedByte);
+    } else {
+      // 全量
+      const content = readFileSync(file, "utf8");
+      const parts = content.split("\n");
+      headerLine = parts[0] ?? null;
+      if (!headerLine) continue;
+      try {
+        header = JSON.parse(headerLine);
+        if (!header || (header.type as string) !== "session") continue;
+      } catch { continue; }
+      sessionId = (header.id as string) ?? "";
+      headerTs = typeof header.timestamp === "string" ? header.timestamp : "";
+      headerCwd = typeof header.cwd === "string" ? header.cwd : "";
+      const ts = header.timestamp as string | undefined;
+      if (ts) {
+        const t = Date.parse(ts);
+        if (!Number.isNaN(t)) sessionTimestamp = Math.floor(t / 1000);
+      }
+      const parentSession = header.parentSession as string | undefined;
+      if (typeof parentSession === "string" && parentSession.length > 0) parentSessionId = parentSession;
+      if (parentSession && (parentSession.includes("/") || parentSession.includes("\\"))) {
+        if (ts) {
+          const t = Date.parse(ts);
+          if (!Number.isNaN(t)) forkTs = t;
+        }
+      }
+      if (!header || (header.type as string) !== "session") continue;
+      // 完整行处理：排除末尾半行或空
+      if (parts.length <= 1) {
+        linesToProcess = [];
+      } else {
+        linesToProcess = parts.slice(1, -1);
+        // parts.slice(1, -1) 对完整（末空）和半行（末 partial）均排除末元素，符合“半行不推进”
+      }
+      if (rev.complete) {
+        newCommittedByte = rev.fileSize;
+        newCommittedLines = parts.length - 1;
+      } else {
+        const lastNL = content.lastIndexOf("\n");
+        newCommittedByte = lastNL !== -1 ? lastNL + 1 : 0;
+        newCommittedLines = parts.length - 1;
+      }
+      newTailFp = tailFingerprintAt(file, newCommittedByte);
     }
-    if (!header || (header.type as string) !== "session") continue;
-
+    if (!header) continue;
     const seenInFile = new Map<string, NonNullable<ReturnType<typeof parsePiUsageRecord>>>();
     const identities = new Map<string, ReturnType<typeof piRequestIdentity>>();
     const tsTextById = new Map<string, string>();
-    // model_pricing 一次加载，供 cost 回算
-    const pricingByModel = new Map<string, { inputCostPerMillion: string; outputCostPerMillion: string; cacheReadCostPerMillion: string; cacheCreationCostPerMillion: string }>();
-    try {
-      const pricingRows = db.prepare(`SELECT model_id, input_cost_per_million, output_cost_per_million, cache_read_cost_per_million, cache_creation_cost_per_million FROM model_pricing`).all() as Record<string, string>[];
-      for (const r of pricingRows) {
-        pricingByModel.set(r.model_id, { inputCostPerMillion: r.input_cost_per_million, outputCostPerMillion: r.output_cost_per_million, cacheReadCostPerMillion: r.cache_read_cost_per_million, cacheCreationCostPerMillion: r.cache_creation_cost_per_million });
-      }
-    } catch {
-      // model_pricing 表缺失时忽略，回算为 0
-    }
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
+    for (const rawLine of linesToProcess) {
+      const line = rawLine.trim();
       if (!line) continue;
       let entry: Record<string, unknown>;
-      try {
-        entry = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      // fork 切分：ts < forkTs 跳过
+      try { entry = JSON.parse(line); } catch { continue; }
       if (forkTs !== null) {
         const tsStr = entry.timestamp as string | undefined;
         if (tsStr) {
@@ -212,94 +338,50 @@ export async function syncPiUsage(db: Database, files: string[], opts?: { full?:
       seenInFile.set(identity.requestId, rec);
       identities.set(identity.requestId, identity);
       tsTextById.set(identity.requestId, typeof entry.timestamp === "string" ? entry.timestamp : "");
-      // 挂载 for later use (compat)
       (rec as unknown as Record<string, unknown>).__identity = identity;
     }
-
-    for (const [requestId, rec] of seenInFile) {
-      const identity = identities.get(requestId)!;
-      const exists = db.prepare(`SELECT 1 FROM session_usage_dedup WHERE data_source = ? AND request_id = ?`).get("pi_session", requestId) as unknown;
-      if (exists) {
-        skipped++;
-        continue;
-      }
-      if (!identity.hasEntryId) {
-        const semExists = db.prepare(`SELECT 1 FROM session_usage_dedup WHERE data_source = ? AND semantic_id = ?`).get("pi_session", identity.semanticId) as unknown;
-        if (semExists) {
-          skipped++;
-          continue;
-        }
-      }
-      db.prepare(`INSERT OR IGNORE INTO session_usage_dedup (data_source, request_id, semantic_id, has_entry_id) VALUES (?, ?, ?, ?)`).run(
-        "pi_session",
-        requestId,
-        identity.semanticId,
-        identity.hasEntryId ? 1 : 0,
-      );
-      // 费用：reported 优先，否则 model_pricing 回算
-      const pricing = pricingByModel.get(rec.model) ?? null;
-      const cost = costForRecord({ input: rec.input, output: rec.output, cacheRead: rec.cacheRead, cacheWrite: rec.cacheWrite, cost: { total: rec.costTotal } }, pricing);
-      const tsText = tsTextById.get(requestId) ?? "";
-      db.prepare(
-        `INSERT OR IGNORE INTO proxy_request_logs (
-          request_id, provider_id, app_type, model, request_model, pricing_model,
-          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-          input_token_semantics, total_cost_usd, latency_ms, status_code, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source,
-          kind, reasoning_tokens, cwd, timestamp_text
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        requestId,
-        rec.provider,
-        "pi",
-        rec.model,
-        rec.requestModel,
-        rec.model,
-        rec.input,
-        rec.output,
-        rec.cacheRead,
-        rec.cacheWrite,
-        0,
-        String(cost),
-        0,
-        rec.statusCode,
-        rec.errorMessage ?? null,
-        rec.sessionId,
-        "pi_session",
-        1,
-        "1.0",
-        rec.createdAt,
-        "pi_session",
-        rec.kind,
-        rec.reasoning,
-        headerCwd,
-        tsText,
-      );
-      imported++;
-    }
-
-    // 会话元数据 upsert（零请求会话亦入库，供 sessions/detail 窗口）
-    {
-      const fileName = basename(file);
-      const firstUserText = extractFirstUserText(lines);
-      const displayName = defaultSessionData.displayNameOf(fileName, firstUserText);
-      const isTask = file.includes("/tasks/") || file.includes("\\tasks\\") ? 1 : 0;
-      db.prepare(
-        `INSERT OR REPLACE INTO pi_sessions (session_id, header_ts, cwd, file_name, display_name, is_task, parent_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(sessionId, headerTs, headerCwd, fileName, displayName, isTask, parentSessionId ?? null);
-    }
-
-    const encoded = encodeRevision(rev);
-    // last_synced_at 存编码后的 revision（BigInt），last_modified 存 modifiedMs，last_line_offset 存行数
-    // node:sqlite 支持 bigint，需转为 string 或 number？直接传 BigInt
+    // 原子事务
+    try { db.exec("BEGIN"); } catch {}
     try {
-      db.prepare(
-        `INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint) VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(file, rev.modifiedMs, lines.length, encoded as unknown as number, rev.fileSize, rev.tailFingerprint);
-    } catch {
-      // 回退：若 BigInt 不被支持，转 number（可能截断，但测试环境文件小，安全）
-      db.prepare(
-        `INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint) VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(file, rev.modifiedMs, lines.length, Number(encoded), rev.fileSize, rev.tailFingerprint);
+      for (const [requestId, rec] of seenInFile) {
+        const identity = identities.get(requestId)!;
+        const exists = db.prepare(`SELECT 1 FROM session_usage_dedup WHERE data_source = ? AND request_id = ?`).get("pi_session", requestId) as unknown;
+        if (exists) { skipped++; continue; }
+        if (!identity.hasEntryId) {
+          const semExists = db.prepare(`SELECT 1 FROM session_usage_dedup WHERE data_source = ? AND semantic_id = ?`).get("pi_session", identity.semanticId) as unknown;
+          if (semExists) { skipped++; continue; }
+        }
+        db.prepare(`INSERT OR IGNORE INTO session_usage_dedup (data_source, request_id, semantic_id, has_entry_id) VALUES (?, ?, ?, ?)`).run("pi_session", requestId, identity.semanticId, identity.hasEntryId ? 1 : 0);
+        const pricing = pricingByModel.get(rec.model) ?? null;
+        const cost = costForRecord({ input: rec.input, output: rec.output, cacheRead: rec.cacheRead, cacheWrite: rec.cacheWrite, cost: { total: rec.costTotal } }, pricing);
+        const tsText = tsTextById.get(requestId) ?? "";
+        db.prepare(`INSERT OR IGNORE INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, input_token_semantics, total_cost_usd, latency_ms, status_code, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source, kind, reasoning_tokens, cwd, timestamp_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(requestId, rec.provider, "pi", rec.model, rec.requestModel, rec.model, rec.input, rec.output, rec.cacheRead, rec.cacheWrite, 0, String(cost), 0, rec.statusCode, rec.errorMessage ?? null, rec.sessionId, "pi_session", 1, "1.0", rec.createdAt, "pi_session", rec.kind, rec.reasoning, headerCwd, tsText);
+        imported++;
+      }
+      // 会话元数据
+      {
+        const fileName = basename(file);
+        // 提取首条 user 文本需全量内容；seek 路径可复用 header 已读，但为简化全量读首段
+        let firstUserText: string | undefined;
+        try {
+          const allContent = readFileSync(file, "utf8");
+          const allLines = allContent.split("\n");
+          firstUserText = extractFirstUserText(allLines);
+        } catch {}
+        const displayName = defaultSessionData.displayNameOf(fileName, firstUserText);
+        const isTask = file.includes("/tasks/") || file.includes("\\tasks\\") ? 1 : 0;
+        db.prepare(`INSERT OR REPLACE INTO pi_sessions (session_id, header_ts, cwd, file_name, display_name, is_task, parent_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(sessionId, headerTs, headerCwd, fileName, displayName, isTask, parentSessionId ?? null);
+      }
+      const encoded = encodeRevision(rev);
+      try {
+        db.prepare(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint) VALUES (?, ?, ?, ?, ?, ?)`).run(file, rev.modifiedMs, newCommittedLines, encoded as unknown as number, newCommittedByte, newTailFp);
+      } catch {
+        db.prepare(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint) VALUES (?, ?, ?, ?, ?, ?)`).run(file, rev.modifiedMs, newCommittedLines, Number(encoded), newCommittedByte, newTailFp);
+      }
+      try { db.exec("COMMIT"); } catch {}
+    } catch (e) {
+      try { db.exec("ROLLBACK"); } catch {}
+      throw e;
     }
   }
   return { imported, skipped };
