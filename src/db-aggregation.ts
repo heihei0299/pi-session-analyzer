@@ -6,6 +6,7 @@
 import type { Database } from "./db.ts";
 import { defaultSessionData } from "./session-data.ts";
 import { collectJsonlFiles } from "./session-data.ts";
+import { collectPiJsonlFiles, resolvePiSessionRoot } from "./pi-discovery.ts";
 import { syncPiUsage } from "./pi-sync.ts";
 import { Database as DbClass } from "./db.ts";
 import { emptyTotals, finalizeTotals, type Totals, type GroupRow, type GroupBy, type Period, type PeriodRow } from "./aggregate.ts";
@@ -48,12 +49,15 @@ function matchingRawCwds(db: Database, cwdFilter: string): string[] {
   return out;
 }
 
-/** 读路径统一入口：内存库 + 递归收集 + 全量同步 + 聚合 */
+/** 读路径统一入口：按目录隔离的内存库（全量同步后聚合），CLI/API 读路径统一入口（双布局） */
 export async function withDirDb<T>(dir: string, fn: (db: Database) => Promise<T> | T): Promise<T> {
   const db = await DbClass.memory();
   try {
-    const files = collectJsonlFiles(dir);
-    await syncPiUsage(db, files);
+    const { root, layout } = resolvePiSessionRoot({ envDb: process.env.PI_CODING_AGENT_SESSION_DIR, defaultRoot: dir, piConfig: undefined });
+    const files = collectPiJsonlFiles(root, layout);
+    const fallback = files.length === 0 ? collectJsonlFiles(dir) : [];
+    const allFiles = files.length > 0 ? files : fallback;
+    await syncPiUsage(db, allFiles);
     return await fn(db);
   } finally {
     await db.close();
