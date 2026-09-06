@@ -1,0 +1,202 @@
+package db
+
+import (
+	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	_ "modernc.org/sqlite"
+)
+
+const SchemaVersion = 1
+
+// Database 封装 sql.DB，对应 cc-switch schema.rs
+type Database struct {
+	DB   *sql.DB
+	Path string
+}
+
+// ResolveDbPath 按优先级解析：envDb > dbPath > ~/.cache > data
+func ResolveDbPath(dbPath, envDb string) string {
+	if envDb != "" {
+		return envDb
+	}
+	if dbPath != "" {
+		return dbPath
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" && home != "/" {
+		return filepath.Join(home, ".cache", "token-analyzer", "token-analyzer.db")
+	}
+	return filepath.Join("data", "token-analyzer.db")
+}
+
+func ResolveDbPathFromEnv(dbPath string) string {
+	return ResolveDbPath(dbPath, os.Getenv("TOKEN_ANALYZER_DB"))
+}
+
+// Open 打开或创建 DB 文件，建表并设置 PRAGMA
+func Open(path string) (*Database, error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		// 回退到 data/
+		fallback := filepath.Join("data", "token-analyzer.db")
+		if err2 := os.MkdirAll(filepath.Dir(fallback), 0o755); err2 != nil {
+			return nil, fmt.Errorf("创建 DB 目录失败: %w", err)
+		}
+		path = fallback
+	}
+	// modernc sqlite 需要 file: 前缀
+	dsn := fmt.Sprintf("file:%s?cache=shared", path)
+	// busy_timeout 通过 PRAGMA 设置
+	sqlDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	// PRAGMA 顺序：auto_vacuum 必须在 journal_mode 之前且在建表前
+	if _, err := sqlDB.Exec(`PRAGMA auto_vacuum = INCREMENTAL`); err != nil {
+		// 忽略，已存在表时无法修改
+	}
+	if _, err := sqlDB.Exec(`PRAGMA journal_mode = WAL`); err != nil {
+		return nil, err
+	}
+	if _, err := sqlDB.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		return nil, err
+	}
+	if _, err := sqlDB.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		return nil, err
+	}
+	if _, err := sqlDB.Exec(`PRAGMA synchronous = NORMAL`); err != nil {
+		return nil, err
+	}
+	db := &Database{DB: sqlDB, Path: path}
+	if err := db.createTables(); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	if err := db.ensureUserVersion(); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+// GetInstance 单例入口（简化：每次 Open）
+func GetInstance(dbPath string) (*Database, error) {
+	resolved := ResolveDbPathFromEnv(dbPath)
+	return Open(resolved)
+}
+
+func (d *Database) createTables() error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS proxy_request_logs (
+			request_id TEXT PRIMARY KEY,
+			provider_id TEXT NOT NULL,
+			app_type TEXT NOT NULL,
+			model TEXT NOT NULL,
+			request_model TEXT,
+			pricing_model TEXT,
+			input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+			input_token_semantics INTEGER NOT NULL DEFAULT 0,
+			input_cost_usd TEXT NOT NULL DEFAULT '0',
+			output_cost_usd TEXT NOT NULL DEFAULT '0',
+			cache_read_cost_usd TEXT NOT NULL DEFAULT '0',
+			cache_creation_cost_usd TEXT NOT NULL DEFAULT '0',
+			total_cost_usd TEXT NOT NULL DEFAULT '0',
+			latency_ms INTEGER NOT NULL,
+			first_token_ms INTEGER,
+			duration_ms INTEGER,
+			status_code INTEGER NOT NULL,
+			error_message TEXT,
+			session_id TEXT,
+			provider_type TEXT,
+			is_streaming INTEGER NOT NULL DEFAULT 0,
+			cost_multiplier TEXT NOT NULL DEFAULT '1.0',
+			created_at INTEGER NOT NULL,
+			data_source TEXT NOT NULL DEFAULT 'proxy'
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON proxy_request_logs(provider_id, app_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON proxy_request_logs(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_model ON proxy_request_logs(model)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_session ON proxy_request_logs(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_status ON proxy_request_logs(status_code)`,
+		`CREATE INDEX IF NOT EXISTS idx_request_logs_usage ON proxy_request_logs(app_type, data_source, created_at)`,
+		`CREATE TABLE IF NOT EXISTS session_log_sync (
+			file_path TEXT PRIMARY KEY,
+			last_modified INTEGER NOT NULL,
+			last_line_offset INTEGER NOT NULL DEFAULT 0,
+			last_synced_at INTEGER NOT NULL,
+			last_byte_offset INTEGER,
+			last_tail_fingerprint INTEGER
+		)`,
+		`CREATE TABLE IF NOT EXISTS session_usage_dedup (
+			data_source TEXT NOT NULL,
+			request_id TEXT NOT NULL,
+			semantic_id TEXT NOT NULL,
+			has_entry_id INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (data_source, request_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_usage_dedup_semantic ON session_usage_dedup(data_source, semantic_id, has_entry_id)`,
+		`CREATE TABLE IF NOT EXISTS usage_daily_rollups (
+			date TEXT NOT NULL,
+			app_type TEXT NOT NULL,
+			provider_id TEXT NOT NULL,
+			model TEXT NOT NULL,
+			request_model TEXT NOT NULL DEFAULT '',
+			pricing_model TEXT NOT NULL DEFAULT '',
+			request_count INTEGER NOT NULL DEFAULT 0,
+			success_count INTEGER NOT NULL DEFAULT 0,
+			input_tokens INTEGER NOT NULL DEFAULT 0,
+			output_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+			cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+			input_token_semantics INTEGER NOT NULL DEFAULT 0,
+			total_cost_usd TEXT NOT NULL DEFAULT '0',
+			avg_latency_ms INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (date, app_type, provider_id, model, request_model, pricing_model)
+		)`,
+		`CREATE TABLE IF NOT EXISTS model_pricing (
+			model_id TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL,
+			input_cost_per_million TEXT NOT NULL,
+			output_cost_per_million TEXT NOT NULL,
+			cache_read_cost_per_million TEXT NOT NULL DEFAULT '0',
+			cache_creation_cost_per_million TEXT NOT NULL DEFAULT '0'
+		)`,
+	}
+	for _, s := range stmts {
+		if _, err := d.DB.Exec(s); err != nil {
+			return fmt.Errorf("建表失败: %w", err)
+		}
+	}
+	return nil
+}
+
+func (d *Database) ensureUserVersion() error {
+	var v int
+	if err := d.DB.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return err
+	}
+	if v != SchemaVersion {
+		if _, err := d.DB.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, SchemaVersion)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *Database) GetUserVersion() (int, error) {
+	var v int
+	if err := d.DB.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+func (d *Database) Close() error {
+	return d.DB.Close()
+}
