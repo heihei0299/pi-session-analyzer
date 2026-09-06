@@ -24,6 +24,7 @@ import { OpenCodeStorage } from "./opencode/storage.ts";
 import { OpenCodeClient } from "./opencode/client.ts";
 import { buildAudit } from "./opencode/audit.ts";
 import { loadCredentials } from "./opencode/credentials.ts";
+import { resolveDbPathFromEnv, SCHEMA_VERSION } from "./db.ts";
 
 /** 会话活跃阈值：文件 mtime 距今 ≤ 5min 视为活跃（pi 正在写入） */
 const ACTIVE_MS = 5 * 60 * 1000;
@@ -172,6 +173,10 @@ export async function handleApi(
     if (method === "GET" && pathname === "/api/meta") {
       const result = await defaultSessionData.query(dir, { } as Filter, { kind: "meta" }) as { dir: string; sessionCount: number; dataRange: { since: string | null; until: string | null } };
       return { status: 200, body: result };
+    }
+    if (method === "GET" && pathname === "/api/db/meta") {
+      const dbPath = resolveDbPathFromEnv(params.get("db") ?? undefined);
+      return { status: 200, body: { dbPath, schemaVersion: SCHEMA_VERSION, lastSyncAt: null, rollupWatermark: null } };
     }
     // ---------- OpenCode 扩展端点 ----------
     if (method === "GET" && pathname === "/api/opencode/costs") {

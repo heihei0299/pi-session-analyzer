@@ -542,7 +542,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 
 <div class="status-wrap">
   <div id="status-line">加载中… <span id="updated-at" class="updated hidden"></span></div>
-  <div id="scope-note">口径说明：统计仅含 pi 会话中的对话请求（assistant+usage）；pi 压缩/内部请求与 opencode 等其他客户端请求不计入，与 pi-switch 网关有结构性差异（预期）。</div>
+  <div id="scope-note">口径说明：统计含 pi 四载体（assistant/toolResult/compaction/branch_summary，含 assistant+usage）；总输入 = input + cacheRead（总输入）；pi 压缩/内部请求与 opencode 等其他客户端请求不计入，与 pi-switch 网关有结构性差异（预期）。</div>
 </div>
 <div id="error-banner"></div>
 
