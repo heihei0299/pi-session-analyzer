@@ -51,18 +51,18 @@ function matchingRawCwds(db: Database, cwdFilter: string): string[] {
 
 /** 读路径统一入口：持久库（全量同步后聚合）+ 内存隔离（测试 fixture） */
 export async function withDirDb<T>(dir: string, fn: (db: Database) => Promise<T> | T): Promise<T> {
-  const isTest = dir.includes("token-analyzer") || dir.includes("ta-") || dir.startsWith("/tmp/") || dir.startsWith("/private/tmp/");
-  const db = isTest ? await DbClass.memory() : await DbClass.getInstance();
+  const isEphemeral = dir.includes("token-analyzer") || dir.includes("ta-") || dir.startsWith("/tmp/") || dir.startsWith("/private/tmp/");
+  const db = isEphemeral ? await DbClass.memory() : await DbClass.getInstance();
   try {
     const piNative = getPiNativeSessionDir();
     const { root, layout } = resolvePiSessionRoot({ envDb: process.env.PI_CODING_AGENT_SESSION_DIR, defaultRoot: dir, piConfig: piNative });
     let files = collectPiJsonlFiles(root, layout);
-    // 测试 fixture 扁平文件：projectDirectories 下无文件时回退到递归收集（仅 isTest）
-    if (isTest && files.length === 0) {
+    // 测试 fixture 扁平文件：projectDirectories 下无文件时回退到递归收集（仅 ephemeral）
+    if (isEphemeral && files.length === 0) {
       files = collectJsonlFiles(dir);
     }
     await syncPiUsage(db, files);
-    if (!isTest) rollupAndPrune(db, 30);
+    if (!isEphemeral) rollupAndPrune(db, 30);
     return await fn(db);
   } finally {
     await db.close();
@@ -503,6 +503,41 @@ export function queryPeriod(db: Database, period: Period, filter: DbFilter): { p
       g.cost += r.cost;
     }
   }
+  // UNION rollups：日级聚合按 period 归并（仅当无 cwd 过滤时，rollups 无 cwd 列）
+  if (filter.cwd === undefined) {
+    let rollupSql = `SELECT date, COALESCE(SUM(request_count),0) as requests, COALESCE(SUM(input_tokens),0) as input, COALESCE(SUM(output_tokens),0) as output, COALESCE(SUM(cache_read_tokens),0) as cacheRead, COALESCE(SUM(cache_creation_tokens),0) as cacheWrite, 0 as reasoning, COALESCE(SUM(CAST(total_cost_usd AS REAL)),0) as cost FROM usage_daily_rollups WHERE app_type='pi'`;
+    const rollupParams: unknown[] = [];
+    if (filter.model) {
+      rollupSql += ` AND model = ?`;
+      rollupParams.push(filter.model);
+    }
+    if (filter.since) {
+      rollupSql += ` AND date >= ?`;
+      rollupParams.push(filter.since.slice(0, 10));
+    }
+    if (filter.until) {
+      rollupSql += ` AND date <= ?`;
+      rollupParams.push(filter.until.slice(0, 10));
+    }
+    rollupSql += ` GROUP BY date`;
+    type RollRow = { date: string; requests: number; input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number; cost: number };
+    const rollRows = db.prepare(rollupSql).all(...(rollupParams as string[])) as unknown as RollRow[];
+    for (const r of rollRows) {
+      const sec = Math.floor(new Date(`${r.date}T00:00:00`).getTime() / 1000);
+      const key = periodKeyUtc(sec, period);
+      let g = map.get(key);
+      if (!g) {
+        g = emptyTotals();
+        map.set(key, g);
+      }
+      g.requests += r.requests;
+      g.input += r.input;
+      g.output += r.output;
+      g.cacheRead += r.cacheRead;
+      g.cacheWrite += r.cacheWrite;
+      g.cost += r.cost;
+    }
+  }
   const rows: PeriodRow[] = [...map.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([key, g]) => {
@@ -569,14 +604,17 @@ export function queryDetail(
 
 export function rollupAndPrune(db: Database, days: number): { rolled: number } {
   const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
-  const rows = db.prepare(`SELECT date(created_at, 'unixepoch') as date, app_type, provider_id, model, request_model, pricing_model, COUNT(*) as request_count, SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) as success_count, COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens, COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens, COALESCE(SUM(cache_creation_tokens),0) as cache_creation_tokens, COALESCE(SUM(CAST(total_cost_usd AS REAL)),0) as total_cost FROM proxy_request_logs WHERE created_at < ? GROUP BY date, app_type, provider_id, model, request_model, pricing_model`).all(cutoff) as { date: string; app_type: string; provider_id: string; model: string; request_model: string; pricing_model: string; request_count: number; success_count: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; total_cost: number }[];
+  const rows = db.prepare(`SELECT date(created_at, 'unixepoch', 'localtime') as date, app_type, provider_id, model, request_model, pricing_model, COUNT(*) as request_count, SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) as success_count, COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens, COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens, COALESCE(SUM(cache_creation_tokens),0) as cache_creation_tokens, COALESCE(SUM(CAST(total_cost_usd AS REAL)),0) as total_cost FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session' AND created_at < ? GROUP BY date, app_type, provider_id, model, request_model, pricing_model`).all(cutoff) as { date: string; app_type: string; provider_id: string; model: string; request_model: string; pricing_model: string; request_count: number; success_count: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; total_cost: number }[];
   for (const r of rows) {
     db.prepare(`INSERT OR REPLACE INTO usage_daily_rollups (date, app_type, provider_id, model, request_model, pricing_model, request_count, success_count, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_cost_usd, avg_latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       r.date, r.app_type, r.provider_id, r.model, r.request_model, r.pricing_model, r.request_count, r.success_count, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens, String(r.total_cost), 0,
     );
   }
-  const del = db.prepare(`DELETE FROM proxy_request_logs WHERE created_at < ?`).run(cutoff) as unknown as { changes: number };
+  const del = db.prepare(`DELETE FROM proxy_request_logs WHERE app_type='pi' AND data_source='pi_session' AND created_at < ?`).run(cutoff) as unknown as { changes: number };
   const changes = (del as { changes?: number })?.changes ?? 0;
+  if (changes > 0) {
+    try { db.exec(`PRAGMA incremental_vacuum`); } catch {}
+  }
   if (rows.length > 0 && changes === 0) {
     return { rolled: rows.length };
   }
