@@ -6,7 +6,7 @@
 import type { Database } from "./db.ts";
 import { defaultSessionData } from "./session-data.ts";
 import { collectJsonlFiles } from "./session-data.ts";
-import { collectPiJsonlFiles, resolvePiSessionRoot, getPiNativeSessionDir } from "./pi-discovery.ts";
+import { resolveAndCollect } from "./pi-discovery.ts";
 import { syncPiUsage } from "./pi-sync.ts";
 import { Database as DbClass } from "./db.ts";
 import { emptyTotals, finalizeTotals, type Totals, type GroupRow, type GroupBy, type Period, type PeriodRow } from "./aggregate.ts";
@@ -54,13 +54,13 @@ export async function withDirDb<T>(dir: string, fn: (db: Database) => Promise<T>
   const isEphemeral = dir.includes("token-analyzer") || dir.includes("ta-") || dir.startsWith("/tmp/") || dir.startsWith("/private/tmp/");
   const db = isEphemeral ? await DbClass.memory() : await DbClass.getInstance();
   try {
-    const piNative = getPiNativeSessionDir();
-    const { root, layout } = resolvePiSessionRoot({ envDb: process.env.PI_CODING_AGENT_SESSION_DIR, defaultRoot: dir, piConfig: piNative });
-    let files = collectPiJsonlFiles(root, layout);
+    let files = resolveAndCollect(dir);
     // 测试 fixture 扁平文件：projectDirectories 下无文件时回退到递归收集（仅 ephemeral）
     if (isEphemeral && files.length === 0) {
       files = collectJsonlFiles(dir);
     }
+    await syncPiUsage(db, files);
+    if (!isEphemeral) rollupAndPrune(db, 30);
     await syncPiUsage(db, files);
     if (!isEphemeral) rollupAndPrune(db, 30);
     return await fn(db);
@@ -128,7 +128,11 @@ export function queryTotals(db: Database, filter: DbFilter): Totals {
     params.push(untilTs);
   }
   const row = db.prepare(sql).get(...(params as string[])) as unknown as SumRow;
-  // UNION rollups：按 date 范围聚合后叠加（reasoning/cwd 不可恢复，记 0）
+  // UNION rollups：按 date 范围聚合后叠加（reasoning/cwd 不可恢复，记 0）；sessionIds 过滤时不叠加 rollup（rollup 按日聚合无法按 session 归属）
+  if (filter.sessionIds !== undefined) {
+    const emptyRoll: SumRow = { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 };
+    return sumsToTotals(row, emptyRoll);
+  }
   let rollupSql = `SELECT COALESCE(SUM(request_count),0) as requests, COALESCE(SUM(input_tokens),0) as input, COALESCE(SUM(output_tokens),0) as output, COALESCE(SUM(cache_read_tokens),0) as cacheRead, COALESCE(SUM(cache_creation_tokens),0) as cacheWrite, 0 as reasoning, COALESCE(SUM(CAST(total_cost_usd AS REAL)),0) as cost FROM usage_daily_rollups WHERE app_type='pi'`;
   const rollupParams: unknown[] = [];
   if (filter.model) {

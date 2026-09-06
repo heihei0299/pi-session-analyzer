@@ -18,7 +18,7 @@ import {
 } from "./analyze.ts";
 import { Database, resolveDbPathFromEnv } from "./db.ts";
 import { withDirDb, queryTotals, queryGroups, queryPeriod, querySessions, queryRequests, rollupAndPrune } from "./db-aggregation.ts";
-import { collectPiJsonlFiles, resolvePiSessionRoot, getPiNativeSessionDir } from "./pi-discovery.ts";
+import { resolveAndCollect } from "./pi-discovery.ts";
 import { syncPiUsage } from "./pi-sync.ts";
 import { IncrementalReader, applyIncrements } from "./watch.ts";
 import { emptyTotals, type GroupBy, type Period, type Totals } from "./aggregate.ts";
@@ -576,9 +576,7 @@ export async function runCli(argv: string[]): Promise<string> {
     const dbPath = resolveDbPathFromEnv(parsed.dbPath);
     const db = await Database.getInstance(dbPath);
     try {
-      const piNative = getPiNativeSessionDir();
-      const root = resolvePiSessionRoot({ envDb: process.env.PI_CODING_AGENT_SESSION_DIR, defaultRoot: dir, piConfig: piNative });
-      const files = collectPiJsonlFiles(root.root, root.layout);
+      const files = resolveAndCollect(dir);
       const res = await syncPiUsage(db, files, { full: parsed.full });
       return `同步完成: 新增 ${res.imported} 条, 跳过 ${res.skipped} 条, DB: ${dbPath}\n`;
     } finally { await db.close(); }

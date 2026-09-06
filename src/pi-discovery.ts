@@ -73,7 +73,6 @@ export function getPiNativeSessionDir(): string | undefined {
   }
   return undefined;
 }
-
 /** 解析会话根，envDb 对应 PI_CODING_AGENT_SESSION_DIR */
 export function resolvePiSessionRoot(opts: { envDb?: string; defaultRoot: string; piConfig?: string }): ResolveResult {
   const { envDb, defaultRoot, piConfig } = opts;
@@ -87,4 +86,11 @@ export function resolvePiSessionRoot(opts: { envDb?: string; defaultRoot: string
     return { root: piConfig, layout: "flat" };
   }
   return { root: defaultRoot, layout: "projectDirectories" };
+}
+
+/** 统一入口：解析根 + 枚举文件（消除 cli/db-aggregation 重复） */
+export function resolveAndCollect(dir: string): string[] {
+  const piNative = getPiNativeSessionDir();
+  const { root, layout } = resolvePiSessionRoot({ envDb: process.env.PI_CODING_AGENT_SESSION_DIR, defaultRoot: dir, piConfig: piNative });
+  return collectPiJsonlFiles(root, layout);
 }

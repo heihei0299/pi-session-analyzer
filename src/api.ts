@@ -171,11 +171,17 @@ export async function handleApi(
         try {
           const row = db.prepare(`SELECT MAX(last_synced_at) as v FROM session_log_sync`).get() as { v: number | null } | undefined;
           lastSyncAt = row?.v ?? null;
-        } catch {}
+        } catch (e) {
+          const msg = String(e instanceof Error ? e.message : e);
+          if (!msg.includes("no such table")) throw e;
+        }
         try {
           const row = db.prepare(`SELECT MIN(date) as v FROM usage_daily_rollups`).get() as { v: string | null } | undefined;
           rollupWatermark = row?.v ?? null;
-        } catch {}
+        } catch (e) {
+          const msg = String(e instanceof Error ? e.message : e);
+          if (!msg.includes("no such table")) throw e;
+        }
         return { lastSyncAt, rollupWatermark };
       });
       return { status: 200, body: { dbPath, schemaVersion: SCHEMA_VERSION, lastSyncAt: meta.lastSyncAt, rollupWatermark: meta.rollupWatermark } };
