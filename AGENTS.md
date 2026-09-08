@@ -1,3 +1,45 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+
+- `src/` contains the TypeScript CLI/API, parsing, sync, cost logic, and `webui.html`.
+- `internal/` contains the Go implementation, split into domain, session data, database, server, and integration packages; `cmd/token-analyzer/` is the Go entry point.
+- `test/` holds TypeScript `node:test` suites; Go tests live beside their packages.
+- `docs/adr/` records decisions. Treat `data/` and `dist/` as runtime/generated output, not source.
+
+## Build, Test, and Development Commands
+
+Use Node 24+ and Go 1.23+.
+
+```sh
+npm ci                         # install locked Node dependencies
+npm run typecheck              # strict TypeScript check
+npm test                       # TypeScript tests
+npm run build                  # build the TypeScript distribution
+go test -v ./...               # Go unit and parity tests
+make all                       # Go tests followed by Go build
+make release                   # cross-platform release binaries
+```
+
+For a local CLI smoke test, use `go run ./cmd/token-analyzer --help`.
+
+## Coding Style & Naming Conventions
+
+Run `gofmt` on Go changes. Match nearby TypeScript: two-space indentation, strict types, semicolons, and double-quoted imports. Use lower-case Go package names, PascalCase exported Go identifiers, and camelCase TypeScript identifiers. Reuse terminology from `CONTEXT.md`; keep `SessionData` as the domain boundary and adapters thin.
+
+## Testing Guidelines
+
+Name TypeScript tests `*.test.ts` and use the built-in `node:test` and `node:assert/strict`. Add a focused regression test for every behavior change; update parity coverage when CLI or aggregation behavior changes. Run both `npm test` and `go test -v ./...`; there is currently no separate coverage gate.
+
+## Commit & Pull Request Guidelines
+
+Use the existing Conventional Commit style, for example `feat(webui): ...`, `fix(db): ...`, or `chore: ...`. PRs should explain behavior and impact, list verification commands, link an issue or ADR when applicable, and include screenshots for Web UI changes.
+
+## Security & Configuration
+
+Never commit secrets, `.env` files, real session logs, or local databases. Use redacted fixtures and configure paths through flags or variables such as `TOKEN_ANALYZER_DB`; review `git diff` before committing.
+
+---
 
 ## 快速上手
 
