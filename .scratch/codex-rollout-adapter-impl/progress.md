@@ -19,5 +19,5 @@
 | NN | Status | Commit | Review | Tests |
 |---|---|---|---|---|
 | 01 | done | `8d323cb` | skipped by user | `go test -v ./...`; `go build ./cmd/token-analyzer`; `go vet ./...` passed |
-| 02 | blocked by 01 | — | — | — |
+| 02 | done | `0debd1a` | skipped by user | `go test -v ./...`; `npm run typecheck`; `npm test` (315); `npm run build` passed |
 | 03 | blocked by 02 | — | — | — |

@@ -24,6 +24,11 @@ func TestServerCodexSourceQueries(t *testing.T) {
 	}
 	srv := NewServer(t.TempDir(), sessiondata.NewSessionData(), Options{Source: "codex", CodexDir: codexHome, DBPath: filepath.Join(t.TempDir(), "ledger.db")})
 	handler := srv.Handler()
+	index := httptest.NewRecorder()
+	handler.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
+	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "source-selector") || !strings.Contains(index.Body.String(), "Codex") {
+		t.Fatalf("WebUI source selector missing: status=%d", index.Code)
+	}
 
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/totals", nil))

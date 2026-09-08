@@ -539,6 +539,9 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
       <select id="until-hour" title="结束小时"><option value="">时</option><option value="00">00</option><option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option><option value="21">21</option><option value="22">22</option><option value="23">23</option></select>
       <select id="until-minute" title="结束分钟"><option value="">分</option><option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option><option value="59">59</option></select>
     </div>
+    <label style="display:inline-flex;align-items:center;gap:6px;font:500 11px var(--font-mono);color:var(--slate-2)">数据源
+      <select id="source-selector" title="数据源"><option value="pi" selected>Pi</option><option value="codex">Codex</option><option value="all">All</option></select>
+    </label>
     <span style="flex:1"></span>
     <select id="auto-refresh" title="自动刷新">
       <option value="off" selected>自动刷新: Off</option>
@@ -727,7 +730,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 
 <script>
 "use strict";
-const state={preset:"today",since:null,until:null,groupBy:"model",tab:"overview",autoRefresh:"off",refreshTimer:null,sessions:[],requests:[]};
+const state={preset:"today",since:null,until:null,source:"pi",sourceTouched:false,groupBy:"model",tab:"overview",autoRefresh:"off",refreshTimer:null,sessions:[],requests:[]};
 const opencodeState={year:new Date().getFullYear(),month:new Date().getMonth()+1,historyPage:1,historySize:20,filterModel:"",total:0,lastSync:null};
 const $=sel=>document.querySelector(sel);
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -746,7 +749,7 @@ function fmtTimestamp(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 function dateStamp(){const d=new Date();return dateStr(d)+"-"+String(d.getHours()).padStart(2,"0")+String(d.getMinutes()).padStart(2,"0")+String(d.getSeconds()).padStart(2,"0")}
-function filterParams(){const p=new URLSearchParams(); if(state.since) p.set("since",state.since); if(state.until) p.set("until",state.until); return p}
+function filterParams(){const p=new URLSearchParams(); if(state.since) p.set("since",state.since); if(state.until) p.set("until",state.until); if(state.sourceTouched||state.source!=="pi") p.set("source",state.source); return p}
 async function api(path,params=filterParams()){const res=await fetch("/api/"+path+(params&&params.toString()?"?"+params:"")); if(!res.ok){let detail=""; try{detail=(await res.json()).detail??""}catch{} throw new Error(detail||`HTTP ${res.status}`)} return res.json()}
 function showError(msg){const el=$("#error-banner"); el.textContent=msg; el.classList.add("show")}
 function clearError(){$("#error-banner").classList.remove("show")}
@@ -778,6 +781,13 @@ async function refreshDbMeta() {
 }
 function renderStatus(meta) {
   lastMeta = meta;
+  if (!state.sourceTouched && Array.isArray(meta.sources) && meta.sources.length) {
+    state.source = meta.sources.length > 1 ? "all" : meta.sources[0];
+    const selector = $("#source-selector");
+    if (selector) selector.value = state.source;
+    const requestsTab = document.querySelector('[data-tab="requests"]');
+    if (requestsTab) requestsTab.disabled = state.source !== "pi";
+  }
   updateStatusRange();
   // header meta pills
   const dirEl = $("#meta-dir"), cntEl = $("#meta-count");
@@ -829,9 +839,10 @@ function renderCards(totals){
     if(cardRate) cardRate.title = `缓存命中率: ${fmtRate(totals.cacheRate)} (${(totals.cacheRead||0).toLocaleString()} / ${((totals.input||0)+(totals.cacheRead||0)).toLocaleString()})`;
   }
   const costEl=document.getElementById("v-cost");
-  if(totals.cost===0){ costEl.textContent=UNPRICED; costEl.classList.add("unpriced"); } else { costEl.textContent=fmtCost(totals.cost); costEl.classList.remove("unpriced"); }
+  const unpriced = totals.costStatus === "unpriced" || totals.cost === 0;
+  if(unpriced){ costEl.textContent=UNPRICED; costEl.classList.add("unpriced"); } else { costEl.textContent=fmtCost(totals.cost); costEl.classList.remove("unpriced"); }
   const cardCost = document.getElementById("card-cost");
-  if(cardCost) cardCost.title = totals.cost===0 ? UNPRICED : "$" + totals.cost.toFixed(6);
+  if(cardCost) cardCost.title = unpriced ? UNPRICED : "$" + totals.cost.toFixed(6);
   // tape
   const total = (totals.input||0) + (totals.cacheRead||0) + (totals.output||0);
   const a=totals.input||0, b=totals.cacheRead||0, c=totals.output||0;
@@ -890,7 +901,7 @@ function bindTapeInteractions(){
   segO.addEventListener("mouseleave",resetDetail);
 }
 const GROUP_COLS=[{key:"key",label:"分组键"},{key:"requests",label:"请求数"},{key:"input",label:"总输入"},{key:"output",label:"输出"},{key:"cacheRate",label:"缓存率"},{key:"totalTokens",label:"总token"},{key:"cost",label:"花费"}];
-const GROUP_FMTS={cacheRate:fmtRate,input:(v,r)=>fmtCompact((r.input??0)+(r.cacheRead??0)),output:fmtCompact,totalTokens:fmtCompact,cost:(v)=>(v===0?UNPRICED:fmtCost(v))};
+const GROUP_FMTS={cacheRate:fmtRate,input:(v,r)=>fmtCompact((r.input??0)+(r.cacheRead??0)),output:fmtCompact,totalTokens:fmtCompact,cost:(v,r)=>(r?.costStatus==="unpriced"||v===0?UNPRICED:fmtCost(v))};
 async function refreshGroups(){
   const params=filterParams();
   if(state.groupBy==="date"){
@@ -915,7 +926,7 @@ function renderTable(headEl,bodyEl,cols,rows,fmts={}){
 async function refreshOverview(){
   try{
     clearError();
-    const [totals,meta]=await Promise.all([api("totals"), api("meta", new URLSearchParams())]);
+    const [totals,meta]=await Promise.all([api("totals"), api("meta")]);
     renderCards(totals);
     renderStatus(meta);
     await refreshGroups();
@@ -1005,6 +1016,23 @@ function applyCustomRange() {
   updateStatusRange();
   refreshAll();
 }
+function bindSourceSelector() {
+  const selector = $("#source-selector");
+  if (!selector) return;
+  selector.addEventListener("change", () => {
+    state.source = selector.value;
+    state.sourceTouched = true;
+    const requestsTab = document.querySelector('[data-tab="requests"]');
+    if (requestsTab) {
+      requestsTab.disabled = state.source !== "pi";
+      requestsTab.title = state.source === "pi" ? "请求明细" : "Codex/All 不支持 requests 查询";
+    }
+    detailState.sessions.page = 1;
+    detailState.requests.page = 1;
+    lastSnapshot = "";
+    refreshAll();
+  });
+}
 function bindCustomRange() {
   for (const id of ["since-date", "since-hour", "since-minute", "until-date", "until-hour", "until-minute"]) {
     // date 用 input（实时），select 用 change（select 无 input 事件语义）
@@ -1037,7 +1065,7 @@ const METRIC_FMTS = {
   reasoning: fmtCompact,
   totalTokens: fmtCompact,
   cacheRate: fmtRate,
-  cost: (v) => (v === 0 ? UNPRICED : fmtCost(v)),
+  cost: (v, r) => (r?.costStatus === "unpriced" || v === 0 ? UNPRICED : fmtCost(v)),
 };
 // 排序/分页在服务端执行（避免明细端点全量传输）；rows=当前页、total=筛选后全量行数
 const detailState = {
@@ -1319,7 +1347,7 @@ async function snapshot() {
     const data = await api(state.tab, p);
     return JSON.stringify([data.total, data.rows]);
   }
-  return JSON.stringify((await api("sessions", new URLSearchParams())).rows);
+  return JSON.stringify((await api("sessions", filterParams())).rows);
 }
 async function poll(){
   if(detailDrawerState.open) return;
@@ -1348,7 +1376,7 @@ function sessionRowHtml(r){
 async function refreshSessionGroups(){
   try{
     clearError();
-    const data=await api("sessions", new URLSearchParams());
+    const data=await api("sessions", filterParams());
     const filterInput = $("#manage-filter-input");
     const filterVal = (filterInput?.value || "").trim().toLowerCase();
     const allRows = filterVal ? data.rows.filter(r =>
@@ -2095,6 +2123,7 @@ function init(){
     state.groupBy=b.dataset.group; document.querySelectorAll("[data-group]").forEach(x=>x.classList.toggle("active", x===b)); refreshOverview();
   }));
   document.querySelectorAll("[data-preset]").forEach(b=>b.addEventListener("click",()=>applyPreset(b.dataset.preset)));
+  bindSourceSelector();
   bindCustomRange();
   $("#export-json").addEventListener("click",()=>exportData("json"));
   $("#export-csv").addEventListener("click",()=>exportData("csv"));

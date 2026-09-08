@@ -184,6 +184,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	if res.Meta != nil {
+		for _, warning := range res.Meta.Warnings {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+		}
+	}
+
 	// 格式化输出
 	switch *format {
 	case "json":
@@ -204,6 +210,9 @@ func main() {
 			if res.Totals.CostStatus != "" {
 				outData.(map[string]any)["costStatus"] = res.Totals.CostStatus
 			}
+			if res.Meta != nil {
+				outData.(map[string]any)["meta"] = res.Meta
+			}
 		} else if res.Window == "totals" && res.By != "" {
 			outData = map[string]any{
 				"window": "totals",
@@ -220,6 +229,9 @@ func main() {
 			outData = map[string]any{
 				"window": res.Window,
 				"rows":   res.Rows,
+			}
+			if res.Meta != nil {
+				outData.(map[string]any)["meta"] = res.Meta
 			}
 		}
 		bytes, _ := serialize.SerializeJSON(outData)
