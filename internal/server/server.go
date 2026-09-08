@@ -17,6 +17,7 @@ import (
 	"github.com/heihei0299/pi-session-anylize/internal/db"
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
 	"github.com/heihei0299/pi-session-anylize/internal/opencode"
+	sourcequery "github.com/heihei0299/pi-session-anylize/internal/query"
 	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
 	"github.com/heihei0299/pi-session-anylize/internal/timerange"
 )
@@ -26,16 +27,30 @@ var webUIContent []byte
 
 const ActiveThreshold = 5 * time.Minute
 
+type Options struct {
+	Source   string
+	CodexDir string
+	DBPath   string
+}
+
 type Server struct {
 	dir             string
 	sessionData     *sessiondata.SessionData
 	opencodeStorage *opencode.Storage
+	queryConfig     sourcequery.Config
 	mux             *http.ServeMux
 }
 
-func NewServer(dir string, sd *sessiondata.SessionData) *Server {
+func NewServer(dir string, sd *sessiondata.SessionData, options ...Options) *Server {
 	if sd == nil {
 		sd = sessiondata.DefaultSessionData
+	}
+	var opts Options
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	if opts.Source == "" {
+		opts.Source = "pi"
 	}
 	opencodeDir := os.Getenv("OPENCODE_DATA_DIR")
 	if opencodeDir == "" {
@@ -45,6 +60,7 @@ func NewServer(dir string, sd *sessiondata.SessionData) *Server {
 		dir:             dir,
 		sessionData:     sd,
 		opencodeStorage: opencode.NewStorage(opencodeDir),
+		queryConfig:     sourcequery.Config{PiDir: dir, Source: opts.Source, CodexDir: opts.CodexDir, DBPath: opts.DBPath},
 		mux:             http.NewServeMux(),
 	}
 	s.registerRoutes()
@@ -95,12 +111,20 @@ func sendError(w http.ResponseWriter, status int, errName, detail string) {
 		"detail": detail,
 	})
 }
+func sendQueryError(w http.ResponseWriter, err error) {
+	if errors.Is(err, sourcequery.ErrRequestsUnsupported) || strings.HasPrefix(err.Error(), "未知 source:") {
+		sendError(w, http.StatusBadRequest, "Unsupported", err.Error())
+		return
+	}
+	sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+}
 
 func (s *Server) parseFilter(r *http.Request) (sessiondata.Filter, error) {
 	q := r.URL.Query()
 	f := sessiondata.Filter{
-		Model: q.Get("model"),
-		Cwd:   q.Get("cwd"),
+		Model:  q.Get("model"),
+		Cwd:    q.Get("cwd"),
+		Source: q.Get("source"),
 	}
 	since := q.Get("since")
 	until := q.Get("until")
@@ -120,9 +144,9 @@ func (s *Server) handleApiTotals(w http.ResponseWriter, r *http.Request) {
 		sendError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	res, err := s.sessionData.Query(s.dir, f, sessiondata.View{Kind: sessiondata.ViewTotals})
+	res, err := s.query(f, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		sendQueryError(w, err)
 		return
 	}
 	sendJSON(w, http.StatusOK, res)
@@ -140,7 +164,7 @@ func (s *Server) handleApiSessions(w http.ResponseWriter, r *http.Request) {
 	sortKey := q.Get("sortKey")
 	sortDir := q.Get("sortDir")
 
-	res, err := s.sessionData.Query(s.dir, f, sessiondata.View{
+	res, err := s.query(f, sessiondata.View{
 		Kind:    sessiondata.ViewSessions,
 		Page:    page,
 		Size:    size,
@@ -148,7 +172,7 @@ func (s *Server) handleApiSessions(w http.ResponseWriter, r *http.Request) {
 		SortDir: sortDir,
 	})
 	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		sendQueryError(w, err)
 		return
 	}
 	sendJSON(w, http.StatusOK, res)
@@ -166,7 +190,7 @@ func (s *Server) handleApiRequests(w http.ResponseWriter, r *http.Request) {
 	sortKey := q.Get("sortKey")
 	sortDir := q.Get("sortDir")
 
-	res, err := s.sessionData.Query(s.dir, f, sessiondata.View{
+	res, err := s.query(f, sessiondata.View{
 		Kind:    sessiondata.ViewRequests,
 		Page:    page,
 		Size:    size,
@@ -174,7 +198,7 @@ func (s *Server) handleApiRequests(w http.ResponseWriter, r *http.Request) {
 		SortDir: sortDir,
 	})
 	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		sendQueryError(w, err)
 		return
 	}
 	sendJSON(w, http.StatusOK, res)
@@ -192,12 +216,12 @@ func (s *Server) handleApiGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.sessionData.Query(s.dir, f, sessiondata.View{
+	res, err := s.query(f, sessiondata.View{
 		Kind: sessiondata.ViewGroups,
 		By:   by,
 	})
 	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		sendQueryError(w, err)
 		return
 	}
 	sendJSON(w, http.StatusOK, res)
@@ -215,24 +239,33 @@ func (s *Server) handleApiPeriod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.sessionData.Query(s.dir, f, sessiondata.View{
+	res, err := s.query(f, sessiondata.View{
 		Kind:   sessiondata.ViewPeriod,
 		Period: p,
 	})
 	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		sendQueryError(w, err)
 		return
 	}
 	sendJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleApiMeta(w http.ResponseWriter, r *http.Request) {
-	res, err := s.sessionData.Query(s.dir, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewMeta})
+	f, err := s.parseFilter(r)
 	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		sendError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	res, err := s.query(f, sessiondata.View{Kind: sessiondata.ViewMeta})
+	if err != nil {
+		sendQueryError(w, err)
 		return
 	}
 	sendJSON(w, http.StatusOK, res.Meta)
+}
+
+func (s *Server) query(filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
+	return sourcequery.Query(s.sessionData, s.queryConfig, filter, view)
 }
 
 func (s *Server) handleApiDbMeta(w http.ResponseWriter, r *http.Request) {
@@ -605,10 +638,14 @@ func (s *Server) handleApiOpencodeSync(w http.ResponseWriter, r *http.Request) {
 	_ = s.opencodeStorage.SaveHistory(allRecords, lastSynced)
 
 	sendJSON(w, http.StatusOK, opencode.SyncResult{
-		Added:          len(newAdded),
-		Pages:          pages,
-		ElapsedMs:      time.Since(start).Milliseconds(),
-		LastSyncedTime: func() string { if lastSynced != nil { return *lastSynced }; return "" }(),
+		Added:     len(newAdded),
+		Pages:     pages,
+		ElapsedMs: time.Since(start).Milliseconds(),
+		LastSyncedTime: func() string {
+			if lastSynced != nil {
+				return *lastSynced
+			}
+			return ""
+		}(),
 	})
 }
-

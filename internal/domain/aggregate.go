@@ -28,6 +28,7 @@ type Totals struct {
 	TotalTokens float64 `json:"totalTokens"`
 	Cost        float64 `json:"cost"`
 	CacheRate   float64 `json:"cacheRate"`
+	CostStatus  string  `json:"costStatus,omitempty"`
 }
 
 type GroupBy string
@@ -57,6 +58,7 @@ type SessionRow struct {
 	CwdNorm         string `json:"cwdNorm,omitempty"`
 	IsTask          bool   `json:"isTask,omitempty"`
 	ParentSessionId string `json:"parentSessionId,omitempty"`
+	Source          string `json:"source,omitempty"`
 }
 
 type RequestRow struct {

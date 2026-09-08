@@ -3,6 +3,11 @@ module github.com/heihei0299/pi-session-anylize
 go 1.23.0
 
 require (
+	github.com/klauspost/compress v1.18.0
+	modernc.org/sqlite v1.38.0
+)
+
+require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -13,5 +18,4 @@ require (
 	modernc.org/libc v1.65.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.38.0 // indirect
 )

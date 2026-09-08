@@ -136,6 +136,7 @@ func (d *Database) createTables() error {
 			cost_multiplier TEXT NOT NULL DEFAULT '1.0',
 			created_at INTEGER NOT NULL,
 			data_source TEXT NOT NULL DEFAULT 'proxy',
+			physical_rollout_id TEXT NOT NULL DEFAULT '',
 			kind TEXT NOT NULL DEFAULT 'assistant',
 			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
 			cwd TEXT NOT NULL DEFAULT '',
@@ -198,6 +199,30 @@ func (d *Database) createTables() error {
 			is_task INTEGER NOT NULL DEFAULT 0,
 			parent_session_id TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS source_sessions (
+			data_source TEXT NOT NULL,
+			physical_id TEXT NOT NULL,
+			session_id TEXT NOT NULL DEFAULT '',
+			thread_id TEXT NOT NULL DEFAULT '',
+			timestamp_text TEXT NOT NULL DEFAULT '',
+			cwd TEXT NOT NULL DEFAULT '',
+			file_path TEXT NOT NULL DEFAULT '',
+			file_name TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			provider_id TEXT NOT NULL DEFAULT '',
+			originator TEXT NOT NULL DEFAULT '',
+			cli_version TEXT NOT NULL DEFAULT '',
+			parent_thread_id TEXT NOT NULL DEFAULT '',
+			forked_from_id TEXT NOT NULL DEFAULT '',
+			forked_from_ordinal INTEGER,
+			subagent_history_start_ordinal INTEGER,
+			history_base TEXT NOT NULL DEFAULT '',
+			thread_source TEXT NOT NULL DEFAULT '',
+			agent_role TEXT NOT NULL DEFAULT '',
+			agent_path TEXT NOT NULL DEFAULT '',
+			agent_nickname TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (data_source, physical_id)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := d.DB.Exec(s); err != nil {
@@ -232,12 +257,43 @@ func (d *Database) ensureColumns() error {
 		{"reasoning_tokens", `reasoning_tokens INTEGER NOT NULL DEFAULT 0`},
 		{"cwd", `cwd TEXT NOT NULL DEFAULT ''`},
 		{"timestamp_text", `timestamp_text TEXT NOT NULL DEFAULT ''`},
+		{"physical_rollout_id", `physical_rollout_id TEXT NOT NULL DEFAULT ''`},
 	}
 	for _, a := range add {
 		if !names[a.col] {
 			if _, err := d.DB.Exec(fmt.Sprintf(`ALTER TABLE proxy_request_logs ADD COLUMN %s`, a.ddl)); err != nil {
 				return fmt.Errorf("补列 %s 失败: %w", a.col, err)
 			}
+		}
+	}
+	if _, err := d.DB.Exec(`CREATE INDEX IF NOT EXISTS idx_request_logs_physical ON proxy_request_logs(data_source, physical_rollout_id)`); err != nil {
+		return err
+	}
+	rows, err = d.DB.Query(`PRAGMA table_info(source_sessions)`)
+	if err != nil {
+		return err
+	}
+	sourceColumns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		sourceColumns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	if !sourceColumns["subagent_history_start_ordinal"] {
+		if _, err := d.DB.Exec(`ALTER TABLE source_sessions ADD COLUMN subagent_history_start_ordinal INTEGER`); err != nil {
+			return err
 		}
 	}
 	return nil

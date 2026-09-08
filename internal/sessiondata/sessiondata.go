@@ -34,11 +34,13 @@ type SessionFileData struct {
 	IsTask          bool          `json:"isTask"`
 	ParentSessionId string        `json:"parentSessionId,omitempty"`
 	FirstUserText   string        `json:"firstUserText,omitempty"`
+	Source          string        `json:"source,omitempty"`
 	Items           []MessageItem `json:"items"`
 }
 
 type Filter struct {
 	Model     string               `json:"model,omitempty"`
+	Source    string               `json:"source,omitempty"`
 	Cwd       string               `json:"cwd,omitempty"`
 	TimeRange *timerange.TimeRange `json:"timeRange,omitempty"`
 }
@@ -55,13 +57,13 @@ const (
 )
 
 type View struct {
-	Kind    ViewKind        `json:"kind"`
-	By      domain.GroupBy  `json:"by,omitempty"`
-	Period  domain.Period   `json:"period,omitempty"`
-	Page    int             `json:"page,omitempty"`
-	Size    int             `json:"size,omitempty"`
-	SortKey string          `json:"sortKey,omitempty"`
-	SortDir string          `json:"sortDir,omitempty"` // "asc" | "desc"
+	Kind    ViewKind       `json:"kind"`
+	By      domain.GroupBy `json:"by,omitempty"`
+	Period  domain.Period  `json:"period,omitempty"`
+	Page    int            `json:"page,omitempty"`
+	Size    int            `json:"size,omitempty"`
+	SortKey string         `json:"sortKey,omitempty"`
+	SortDir string         `json:"sortDir,omitempty"` // "asc" | "desc"
 }
 
 type FileCacheEntry struct {
@@ -501,6 +503,19 @@ func (s *SessionData) ApplyFilter(files []*SessionFileData, f Filter) []*Session
 	}
 
 	out := files
+	if f.Source != "" && f.Source != "all" {
+		var filtered []*SessionFileData
+		for _, file := range out {
+			source := file.Source
+			if source == "" {
+				source = "pi"
+			}
+			if source == f.Source {
+				filtered = append(filtered, file)
+			}
+		}
+		out = filtered
+	}
 	if normCwd != nil {
 		var filtered []*SessionFileData
 		for _, file := range out {
@@ -584,6 +599,9 @@ func (s *SessionData) ApplyFilter(files []*SessionFileData, f Filter) []*Session
 func (s *SessionData) TotalsFromFiles(files []*SessionFileData) domain.Totals {
 	tot := domain.EmptyTotals()
 	for _, file := range files {
+		if file.Source == "codex" {
+			tot.CostStatus = "unpriced"
+		}
 		for _, item := range file.Items {
 			domain.AddUsage(&tot, item.Usage)
 		}
@@ -612,6 +630,9 @@ func (s *SessionData) SessionRowsFromFiles(files []*SessionFileData) []domain.Se
 			modelStr = "mixed"
 		}
 
+		if file.Source == "codex" {
+			tot.CostStatus = "unpriced"
+		}
 		rows = append(rows, domain.SessionRow{
 			Totals:          tot,
 			SessionId:       file.SessionId,
@@ -623,6 +644,7 @@ func (s *SessionData) SessionRowsFromFiles(files []*SessionFileData) []domain.Se
 			CwdNorm:         s.NormalizeCwd(file.Cwd),
 			IsTask:          file.IsTask,
 			ParentSessionId: file.ParentSessionId,
+			Source:          file.Source,
 		})
 	}
 	return rows
@@ -690,6 +712,9 @@ func (s *SessionData) GroupRowsFromFiles(files []*SessionFileData, by domain.Gro
 				groupMap[k] = g
 				keysOrder = append(keysOrder, k)
 			}
+			if file.Source == "codex" {
+				g.CostStatus = "unpriced"
+			}
 			domain.AddUsage(&g.Totals, item.Usage)
 		}
 	}
@@ -746,6 +771,9 @@ func (s *SessionData) PeriodRowsFromFiles(files []*SessionFileData, p domain.Per
 			periodMap[k] = g
 			keysOrder = append(keysOrder, k)
 		}
+		if file.Source == "codex" {
+			g.CostStatus = "unpriced"
+		}
 		for _, item := range file.Items {
 			domain.AddUsage(&g.Totals, item.Usage)
 		}
@@ -762,21 +790,23 @@ func (s *SessionData) PeriodRowsFromFiles(files []*SessionFileData, p domain.Per
 }
 
 type QueryResult struct {
-	Window  string             `json:"window"`
-	Totals  *domain.Totals     `json:"totals,omitempty"`
-	By      domain.GroupBy     `json:"by,omitempty"`
-	Period  domain.Period      `json:"period,omitempty"`
-	Rows    any                `json:"rows,omitempty"`
-	Total   int                `json:"total,omitempty"`
-	Page    int                `json:"page,omitempty"`
-	Size    int                `json:"size,omitempty"`
-	Meta    *QueryMeta         `json:"meta,omitempty"`
+	Window string         `json:"window"`
+	Totals *domain.Totals `json:"totals,omitempty"`
+	By     domain.GroupBy `json:"by,omitempty"`
+	Period domain.Period  `json:"period,omitempty"`
+	Rows   any            `json:"rows,omitempty"`
+	Total  int            `json:"total,omitempty"`
+	Page   int            `json:"page,omitempty"`
+	Size   int            `json:"size,omitempty"`
+	Meta   *QueryMeta     `json:"meta,omitempty"`
 }
 
 type QueryMeta struct {
 	Dir          string         `json:"dir"`
 	SessionCount int            `json:"sessionCount"`
 	DataRange    DataRangeValue `json:"dataRange"`
+	Sources      []string       `json:"sources,omitempty"`
+	Warnings     []string       `json:"warnings,omitempty"`
 }
 
 type DataRangeValue struct {
@@ -785,15 +815,19 @@ type DataRangeValue struct {
 }
 
 func (s *SessionData) Query(dir string, f Filter, v View) (*QueryResult, error) {
+	files, err := s.ReadSessionFilesCached(dir)
+	if err != nil {
+		return nil, err
+	}
+	return s.QueryFiles(dir, files, f, v)
+}
+
+func (s *SessionData) QueryFiles(dir string, files []*SessionFileData, f Filter, v View) (*QueryResult, error) {
 	if v.Kind == ViewMeta {
-		files, err := s.ReadSessionFilesCached(dir)
-		if err != nil {
-			return nil, err
-		}
 		var timestamps []string
-		for _, f := range files {
-			if _, err := timerange.ParseUtcTimestamp(f.Timestamp); err == nil {
-				timestamps = append(timestamps, f.Timestamp)
+		for _, file := range files {
+			if _, err := timerange.ParseUtcTimestamp(file.Timestamp); err == nil {
+				timestamps = append(timestamps, file.Timestamp)
 			}
 		}
 		var minTs, maxTs *string
@@ -811,46 +845,21 @@ func (s *SessionData) Query(dir string, f Filter, v View) (*QueryResult, error) 
 			minTs = &minVal
 			maxTs = &maxVal
 		}
-		return &QueryResult{
-			Window: "meta",
-			Meta: &QueryMeta{
-				Dir:          dir,
-				SessionCount: len(files),
-				DataRange: DataRangeValue{
-					Since: minTs,
-					Until: maxTs,
-				},
-			},
-		}, nil
+		meta := &QueryMeta{Dir: dir, SessionCount: len(files), DataRange: DataRangeValue{Since: minTs, Until: maxTs}, Sources: sourcesFromFiles(files)}
+		return &QueryResult{Window: "meta", Meta: meta}, nil
 	}
 
-	files, err := s.ReadSessionFilesCached(dir)
-	if err != nil {
-		return nil, err
-	}
 	filtered := s.ApplyFilter(files, f)
-
 	switch v.Kind {
 	case ViewTotals:
 		tot := s.TotalsFromFiles(filtered)
-		return &QueryResult{
-			Window: "totals",
-			Totals: &tot,
-		}, nil
+		return &QueryResult{Window: "totals", Totals: &tot}, nil
 	case ViewGroups:
 		rows := s.GroupRowsFromFiles(filtered, v.By)
-		return &QueryResult{
-			Window: "totals",
-			By:     v.By,
-			Rows:   rows,
-		}, nil
+		return &QueryResult{Window: "totals", By: v.By, Rows: rows}, nil
 	case ViewPeriod:
 		rows := s.PeriodRowsFromFiles(filtered, v.Period)
-		return &QueryResult{
-			Window: "totals",
-			Period: v.Period,
-			Rows:   rows,
-		}, nil
+		return &QueryResult{Window: "totals", Period: v.Period, Rows: rows}, nil
 	case ViewSessions:
 		rows := s.SessionRowsFromFiles(filtered)
 		tot := s.TotalsFromFiles(filtered)
@@ -870,14 +879,7 @@ func (s *SessionData) Query(dir string, f Filter, v View) (*QueryResult, error) 
 			}
 			pageRows = rows[start:end]
 		}
-		return &QueryResult{
-			Window: "sessions",
-			Rows:   pageRows,
-			Total:  total,
-			Page:   v.Page,
-			Size:   v.Size,
-			Totals: &tot,
-		}, nil
+		return &QueryResult{Window: "sessions", Rows: pageRows, Total: total, Page: v.Page, Size: v.Size, Totals: &tot}, nil
 	case ViewRequests:
 		rows := s.RequestRowsFromFiles(filtered)
 		total := len(rows)
@@ -896,16 +898,26 @@ func (s *SessionData) Query(dir string, f Filter, v View) (*QueryResult, error) 
 			}
 			pageRows = rows[start:end]
 		}
-		return &QueryResult{
-			Window: "requests",
-			Rows:   pageRows,
-			Total:  total,
-			Page:   v.Page,
-			Size:   v.Size,
-		}, nil
+		return &QueryResult{Window: "requests", Rows: pageRows, Total: total, Page: v.Page, Size: v.Size}, nil
 	}
-
 	return nil, fmt.Errorf("unknown view kind: %s", v.Kind)
+}
+
+func sourcesFromFiles(files []*SessionFileData) []string {
+	seen := map[string]bool{}
+	for _, file := range files {
+		source := file.Source
+		if source == "" {
+			continue
+		}
+		seen[source] = true
+	}
+	var sources []string
+	for source := range seen {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	return sources
 }
 
 func compareTotalsMetric(a, b domain.Totals, key string) (bool, bool) {
@@ -1101,4 +1113,3 @@ func (s *SessionData) QueryDetail(dir, sessionId string) (*SessionDetailResult, 
 		},
 	}, nil
 }
-

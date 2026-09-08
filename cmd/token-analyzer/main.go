@@ -11,6 +11,7 @@ import (
 
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
 	"github.com/heihei0299/pi-session-anylize/internal/opencode"
+	"github.com/heihei0299/pi-session-anylize/internal/query"
 	"github.com/heihei0299/pi-session-anylize/internal/render"
 	"github.com/heihei0299/pi-session-anylize/internal/serialize"
 	"github.com/heihei0299/pi-session-anylize/internal/server"
@@ -35,7 +36,10 @@ func printHelp() {
   token-analyzer serve [--port <n>] [--host <h>] [--dir <path>]
 
 选项:
-  --dir <path>      数据目录 (默认 ~/.pi/agent/sessions)
+  --dir <path>      Pi 数据目录 (默认 ~/.pi/agent/sessions)
+  --source <s>       数据源 pi|codex|all (默认 pi)
+  --codex-dir <path> Codex 数据目录 (优先级高于 CODEX_HOME/~/.codex)
+  --db <path>        normalized ledger 路径 (默认按 TOKEN_ANALYZER_DB)
   --format <format> 输出格式 table|json|csv (默认 table)
   --model <id>      按模型过滤
   --cwd <path>      按项目路径过滤
@@ -80,7 +84,10 @@ func main() {
 	}
 
 	fs := flag.NewFlagSet("token-analyzer", flag.ExitOnError)
-	dir := fs.String("dir", defaultDir(), "数据目录")
+	dir := fs.String("dir", defaultDir(), "Pi 数据目录")
+	source := fs.String("source", "pi", "数据源 pi|codex|all")
+	codexDir := fs.String("codex-dir", "", "Codex 数据目录")
+	dbPath := fs.String("db", "", "normalized ledger 路径")
 	format := fs.String("format", "table", "输出格式 table|json|csv")
 	model := fs.String("model", "", "按模型过滤")
 	cwd := fs.String("cwd", "", "按项目路径过滤")
@@ -99,7 +106,7 @@ func main() {
 
 	// Serve 模式
 	if window == "serve" {
-		srv := server.NewServer(*dir, sd)
+		srv := server.NewServer(*dir, sd, server.Options{Source: *source, CodexDir: *codexDir, DBPath: *dbPath})
 		addr := fmt.Sprintf("%s:%d", *host, *port)
 		fmt.Printf("Token Analyzer WebUI 已启动: http://%s/\n数据目录: %s\n", addr, *dir)
 		if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
@@ -122,12 +129,17 @@ func main() {
 
 	filter := sessiondata.Filter{
 		Model:     *model,
+		Source:    *source,
 		Cwd:       *cwd,
 		TimeRange: tr,
 	}
 
 	// Watch 实时监控模式
 	if *watchMode {
+		if *source != "pi" {
+			fmt.Fprintln(os.Stderr, "错误: --watch 目前只支持 --source pi")
+			os.Exit(1)
+		}
 		fmt.Printf("开始监控会话目录: %s (轮询间隔: %dms)...\n", *dir, *interval)
 		reader := watch.NewIncrementalReader(*dir)
 		tot := domain.EmptyTotals()
@@ -166,7 +178,7 @@ func main() {
 		}
 	}
 
-	res, err := sd.Query(*dir, filter, view)
+	res, err := query.Query(sd, query.Config{PiDir: *dir, CodexDir: *codexDir, DBPath: *dbPath, Source: *source}, filter, view)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "查询失败: %v\n", err)
 		os.Exit(1)
@@ -188,6 +200,9 @@ func main() {
 				"totalTokens": res.Totals.TotalTokens,
 				"cost":        res.Totals.Cost,
 				"cacheRate":   res.Totals.CacheRate,
+			}
+			if res.Totals.CostStatus != "" {
+				outData.(map[string]any)["costStatus"] = res.Totals.CostStatus
 			}
 		} else if res.Window == "totals" && res.By != "" {
 			outData = map[string]any{
@@ -211,10 +226,10 @@ func main() {
 		fmt.Println(string(bytes))
 	case "csv":
 		var data any
-		if res.Totals != nil {
-			data = *res.Totals
-		} else {
+		if res.Rows != nil {
 			data = res.Rows
+		} else if res.Totals != nil {
+			data = *res.Totals
 		}
 		bytes, err := serialize.SerializeCSV(string(view.Kind), data)
 		if err != nil {
@@ -224,9 +239,7 @@ func main() {
 		fmt.Print(string(bytes))
 	default:
 		// Table 格式
-		if res.Totals != nil {
-			fmt.Print(render.RenderTotalsTable(*res.Totals))
-		} else if rows, ok := res.Rows.([]domain.SessionRow); ok {
+		if rows, ok := res.Rows.([]domain.SessionRow); ok {
 			fmt.Print(render.RenderSessionTable(rows))
 		} else if rows, ok := res.Rows.([]domain.RequestRow); ok {
 			fmt.Print(render.RenderRequestTable(rows))
@@ -234,6 +247,8 @@ func main() {
 			fmt.Print(render.RenderGroupTable(rows, view.By))
 		} else if rows, ok := res.Rows.([]domain.PeriodRow); ok {
 			fmt.Print(render.RenderPeriodTable(rows, view.Period))
+		} else if res.Totals != nil {
+			fmt.Print(render.RenderTotalsTable(*res.Totals))
 		}
 	}
 }
@@ -370,4 +385,3 @@ func handleOpencodeCommand(args []string) {
 		os.Exit(1)
 	}
 }
-

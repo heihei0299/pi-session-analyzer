@@ -18,7 +18,9 @@ func metricWidths() []int {
 func metricValues(t domain.Totals) []string {
 	rateStr := fmt.Sprintf("%.1f%%", t.CacheRate*100)
 	costStr := fmt.Sprintf("$%.4f", t.Cost)
-	if t.Cost == 0 {
+	if t.CostStatus != "" {
+		costStr = t.CostStatus
+	} else if t.Cost == 0 {
 		costStr = "$0.00"
 	}
 	return []string{
