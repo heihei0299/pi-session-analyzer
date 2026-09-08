@@ -1,62 +1,95 @@
 ---
 name: commit-check
-description: "Run the pre-commit gate before any commit: verify docs match the implementation, align README, keep the directory clean, and write a clear commit message. Use whenever the user is about to commit or asks to check anything about the commit — e.g. verifying docs/README are in sync, cleaning up temp files, scanning for secrets/keys/.env in the change, or having you write the commit message. Not for general PR/code review (that's code-review), and not for explaining git/commit conventions (that's a teach task)."
+description: "检查 matt-skills 当前 staged commit 的范围、敏感信息和 commit message，并按改动路径执行对应同步检查。"
+disable-model-invocation: true
 ---
 
 # Commit Check
 
-提交前的**门禁检查**：文档一致性 → 保持目录卫生 → 规范 commit message，三项全过才允许 commit。本技能是轻量检查清单，不重写 code-review 的审查语义（[code-review](.agents/skills/code-review/SKILL.md) 是唯一事实源），也不替代任何完整实现流程——它是任何 commit 前的通用门禁，无论改动来自哪个流程。
+用户显式调用 `/commit-check` 后运行本技能。它是提交前的 staged commit gate：检查将要提交的内容是否属于当前逻辑变更、是否包含敏感信息、以及 commit message 是否可追溯。
 
-## 三项检查（全部通过才 commit）
+本技能只检查，不负责 staging，不执行 `git commit`，也不要求整个工作区干净。通过后报告 `ready to commit`，由调用方执行提交。
 
-### ① 文档一致性
-> 覆盖原 ① 审查文档 的全部检查项与原 ② 对齐 README 的全部检查项
+## 三项核心 gate
 
-- 本次改动涉及的行为/接口/配置/命令是否有对应文档（README、`docs/`、技能正文）描述
-- 文档描述与实现一致：无过期信息、无声称未实现的功能、无遗留的旧接口描述
-- 发现不一致 → 先修文档（或更新实现），再进入下一步
-- 改动涉及项目结构、分发文件、技能/命令清单时，检查 README 中对应的结构说明、映射表、清单是否同步
-- 改动涉及用法/CLI/配置/示例时，检查 README 对应描述与实际一致
-- 存在模板镜像/分发副本时，确认源文件与副本同步（如有守护测试，跑一遍确认）
-- **特例**：`AGENTS.md` 的 `tdd-implement ↔ implement` 路由行 + 技能文件 + `.gitignore` 的 `.pi/` 忽略，且存在 `AGENTS.md.bak` 时，视为模板同步预期增量，不回滚
-### ② 保持目录卫生
+### ① Staged scope
 
-- `git status` 确认工作区只含预期改动：无残留未跟踪文件、无临时产物（调试脚本、日志、备份文件、`[DEBUG-...]` 残留）
-- 无关文件（一次性脚本、转储、探针、调试日志）直接追加至 `.gitignore`，不执行删除；仅对本次产生的 `[DEBUG-...]` 临时产物做受控清理，禁止为达干净而执行 `git reset --hard`、`git checkout .`、`git clean -fd`、`git stash push --include-untracked`、`git push --force`、`git rebase -i` 等（需显式用户确认；`stash` 如需使用改用 `--keep-index` 并在 `pop` 后校验 `git merge-base --is-ancestor $BASE_HEAD HEAD`）。详见 `CONTEXT.md` Git History Preservation 与 `docs/agents/skill-design.md` Rule 4
-- 若本次会话记录了 `BASE_HEAD`，commit 前校验 `git merge-base --is-ancestor $BASE_HEAD HEAD`，失败即经 `git reflog` 恢复后才提交
-- 确认没有敏感信息进入改动（密钥、token、`.env`、私钥）——跑 `scripts/scan-sensitive.sh`，不用手写扫描
-- 提交后工作区应为干净状态（`git status` 无输出）
+- 读取 `git diff --cached --name-status` 和 `git diff --cached`。
+- staged diff 必须非空，并且只包含当前用户请求的逻辑变更。
+- 列出 staged 文件和关键 diff，无法确认范围时报告疑点并阻塞。
+- 调用方负责 `git add`；本技能不自动 stage、unstage 或清理文件。
+- 工作区可以保留其它未暂存修改；不以 `git status` 全干净作为出口条件。
 
-### ③ 规范 commit message
+### ② Sensitive scan
 
-- 格式遵循仓库约定（常见：`<type>(<scope>): <subject>`，type 用 feat/fix/docs/chore/refactor/test）
-> 模板：`feat(<scope>): <subject>` / `fix(<scope>): <subject>` — 例 `feat(tdd): add seam login`，`fix(ci): gate publish on verify`
-- subject 描述变更内容而非过程（不说"我做了什么"，说"改成了什么"）
-- 需要时补充 body：动机、影响范围、验收证据（测试结果、同步确认）
-- 一次 commit 只含一个逻辑变更；多主题拆多个 commit
+运行确定性扫描脚本，不手写 grep：
 
-## 不做什么
+```bash
+bash .agents/skills/commit-check/scripts/scan-sensitive.sh --staged-only
+```
 
-- 不做全量 code review：审查语义以 [code-review](.agents/skills/code-review/SKILL.md) 为唯一事实源，本技能不重写
-- 不替代实现流程的收尾：`tdd-implement` 阶段⑦已含文档对齐与目录卫生，本技能只管独立 commit 的门禁
-- 不发明扫描规则：敏感信息检测跑 `scripts/scan-sensitive.sh`，不每次重写 grep 模式
+- 结构化 secret assignment 和 private key block → **fail**。
+- 普通 `api_key`、`secret`、`token`、`password`、`.env` 等关键词 → **warning**，由调用方人工确认。
+- 扫描只针对 staged diff；不因未暂存内容阻塞本次 commit。
 
-## 执行顺序（回合内串行）
+### ③ Commit message
 
-1. 跑 ① 文档一致性 → ② 保持目录卫生 → ③ 写 commit message
-2. 任一项发现问题：修复后重跑该项，全部通过才 commit
-3. commit 后确认 `git status` 干净，工作结束
+- 使用 `<type>(<scope>): <subject>` 基本格式；`type` 使用 `feat`、`fix`、`docs`、`chore`、`refactor`、`test` 等仓库约定值。
+- subject 描述变更结果，不描述操作过程。
+- body 可选；只有确实需要时补充动机、影响范围或验收证据。
+- 一个 commit 只表达一个逻辑变更；多主题拆分提交。
+- 本技能检查并给出 message 结论，但不代替调用方执行 commit。
 
-**回合连续性**：三项检查在一个回合内串行完成，不等用户"继续"；发现问题立即修复并重查，直到三项全过或遇到外部阻塞（权限/授权缺失）。
+## matt-skills 路径适配
 
-## 出口条件
+以下 staged 路径触发 matt-skills 专属检查；普通源码或测试 commit 不触发这些额外检查：
 
-- [ ] 文档一致性（文档与 README 均已对齐）
-- [ ] 目录卫生（`git status` 干净，无临时产物/敏感信息）
-- [ ] commit message 规范（遵循仓库格式）
-- 三项全过 → commit
+```text
+README.md
+AGENTS.md
+CONTEXT.md
+docs/agents/**
+template/**
+.agents/skills/**
+config/**
+scripts/build-template.js
+.opencode/commands/**
+.pi/prompts/**
+```
 
-## 引用
+相关路径变更时：
 
-- 代码审查语义：[code-review](.agents/skills/code-review/SKILL.md)（唯一事实源，本技能不重写）
-- 完整实现流程：[tdd-implement](.agents/skills/tdd-implement/SKILL.md)（含流程内收尾的文档对齐与目录卫生）
+- README、公开行为、命令、配置或流程描述变化 → 检查对应文档与实现一致；
+- `AGENTS.md`、`CONTEXT.md`、`docs/agents/`、`template/`、技能或镜像变化 → 运行相关模板/契约测试，至少覆盖 `test/template-sync.test.js`；
+- `commit-check` 自身变化 → 运行 `test/commit-check.test.js` 和 `test/commit-check-scan.test.js`；
+- `tdd-implement` 变化 → 运行 `test/tdd-implement-stages.test.js`；
+- `config/`、构建脚本、opencode command 或 pi prompt 变化 → 运行对应 CLI、模板或命令测试；
+- 只检查本次 staged 路径相关的内容，不通读全部 README、docs 或模板。
+
+这些是 matt-skills 的条件化仓库检查，不改变上面的三项核心 gate。
+
+## Git history pointer
+
+遵循 `CONTEXT.md` 和 `docs/agents/` 中的 Git History Preservation 规则。本技能只在当前会话存在 `BASE_HEAD` 时执行必要祖先校验：
+
+```bash
+git merge-base --is-ancestor "$BASE_HEAD" HEAD
+```
+
+完整的禁止命令、恢复和 stash 规则只在仓库级文档维护，不在本技能重复展开。
+
+## 执行顺序与出口
+
+1. 检查 staged scope，确认 staged diff 非空且属于当前逻辑变更。
+2. 执行 `scan-sensitive.sh --staged-only`。
+3. 检查 commit message。
+4. 根据 staged 路径执行必要的 matt-skills 条件化检查。
+5. 输出 staged 文件、三项 gate 结果、warning、条件化检查结果和 `ready to commit` 或具体阻塞项。
+
+发现阻塞项时停止并报告；不自动修复、不自动 stage、不自动 commit。
+
+## 不负责的内容
+
+- 不做完整代码审查；审查语义由对应审查流程负责。
+- 不执行测试先行、typecheck、build、真实运行或 tracker 收尾；这些属于对应实现流程。
+- 不成为任何实现流程的自动子步骤；仅按 staged 路径提供本仓库提交 gate。
