@@ -1,6 +1,6 @@
 # Token Analyzer
 
-分析 pi 会话数据（`~/.pi/agent/sessions/` 下的 JSONL 文件）token 消耗的 CLI 工具。读取全部合法会话，按统计口径 A 提取消耗数据（含 **fork 会话去重**——fork 复制的历史消息不重复计费），输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程（`--watch` 同样按 fork 去重口径）；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、**服务端分页排序**、自动刷新、导出 JSON/CSV 与会话重命名。
+分析 Pi 会话与 Codex rollout token 消耗的 CLI 工具。Pi 默认读取 `~/.pi/agent/sessions/`，Codex 读取 `sessions/` 与 `archived_sessions/` 下的 plain/zstd rollout。读取全部合法会话，按统计口径 A 提取消耗数据（含 **fork 会话去重**——fork 复制的历史消息不重复计费），输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程（`--watch` 同样按 fork 去重口径）；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、**服务端分页排序**、自动刷新、导出 JSON/CSV 与会话重命名。
 已发布为 npm 包 **`token-analyzer`**（npmjs.org，日期式版本如 `2026.8.6`）。
 功能规格见 [`.scratch/token-analyzer/spec.md`](.scratch/token-analyzer/spec.md)（含实施状态）；实现拆分为 5 个 issue（[`.scratch/token-analyzer-impl/issues/`](.scratch/token-analyzer-impl/issues/)）。WebUI 功能规格见 [`.scratch/token-analyzer-webui/spec.md`](.scratch/token-analyzer-webui/spec.md)，实现拆分为 6 个 issue（[`.scratch/token-analyzer-webui-impl/issues/`](.scratch/token-analyzer-webui-impl/issues/)）。WebUI 审查问题修复见 [`.scratch/token-analyzer-webui-fixes/spec.md`](.scratch/token-analyzer-webui-fixes/spec.md)（8 个 issue）。
 领域术语见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)（当前：`0001-fork-session-dedup.md`、`0002-total-tokens-gateway-alignment.md`）。
@@ -25,7 +25,7 @@ make release
 npm i -g token-analyzer
 ```
 
-开发环境（本仓库）：支持 Go 1.22+ 或 TypeScript + Node 24 双开发环境，均为零运行时依赖。
+开发环境（本仓库）：Go 1.23+ 或 TypeScript + Node 24。Go 版本使用纯 Go zstd decoder 读取 Codex compressed rollout。
 
 ```bash
 # Go 环境验证
@@ -40,7 +40,7 @@ npm run build    # tsc 编译
 ## 用法
 
 ```
-token-analyzer [totals|sessions|requests] --dir <path> [选项]
+token-analyzer [totals|sessions|requests] [--source pi|codex|all] [--dir <pi-dir>] [--codex-dir <codex-home>] [选项]
 token-analyzer opencode sync [--auth <a>] [--workspace <w>] [--data-dir <d>]
 token-analyzer opencode export [--format json|csv] [--output <path>] [--data-dir <d>]
 ```
@@ -48,20 +48,26 @@ token-analyzer opencode export [--format json|csv] [--output <path>] [--data-dir
 开发时可用 `node src/cli.ts` 或 `./dist/token-analyzer-go` 直接运行。
 
 - **窗口**（位置参数，默认 `totals`）：`totals` 总消耗量 / `sessions` 会话级（每会话一行）/ `requests` 单请求级（逐 assistant 消息）
+- **数据源**：`--source pi|codex|all`（默认 `pi`）；Codex 目录优先级为 `--codex-dir > CODEX_HOME > ~/.codex`。`--dir` 始终只表示 Pi 目录。
+- **数据库**：`--db <path>` 可指定 normalized ledger；未指定时使用 `TOKEN_ANALYZER_DB`/默认缓存路径。
 - **数据目录**：`--dir <path>`（默认 `~/.pi/agent/sessions/`）
 - **输出格式**：`--format table|json|csv`（默认 `table` 终端表格）
 - **筛选**（对所有窗口生效，可组合）：`--model <id>` / `--cwd <path>` / `--since <时间>` / `--until <时间>`
 - **分组**（仅 totals 窗口）：`--by model|cwd|model,cwd` 按维度汇总
 - **时间汇总**（仅 totals 窗口）：`--period day|week|month` 按周期汇总
 - **实时监控**：`--watch [--interval <ms>]` 长驻跟随（默认 1s 轮询）
-- **Web 面板**：`serve [--port <n>] [--host <h>] [--dir <path>]` 启动零依赖 HTTP 服务（默认 `127.0.0.1:50080`，仅本机；serve 模式仅支持这三个参数）
+- **Web 面板**：`serve [--port <n>] [--host <h>] [--dir <path>] [--source pi|codex|all] [--codex-dir <path>]` 启动本地 HTTP 服务；页面可切换 Pi/Codex/All，Codex cost 显示 `unpriced`，Codex/All 的 requests 查询明确不支持。
 - **帮助/版本**：`-h/--help` 显示用法，`-v/--version` 显示版本；未知参数/命令显式报错（可用 `-h` 查看）
 
 ### 示例
 
 ```bash
-# 总消耗量（终端表格）
+# 总消耗量（默认 Pi）
 token-analyzer
+
+# 查看 Codex totals/sessions
+TOKEN_ANALYZER_DB=./data/codex.db token-analyzer totals --source codex --codex-dir ~/.codex
+token-analyzer sessions --source codex --codex-dir ~/.codex --format json
 
 # 按模型分组
 token-analyzer totals --by model
@@ -150,6 +156,7 @@ src/                    TypeScript 原型与历史 Node.js 实现
   webui.html            单 HTML 内联前端（仪器台 dark bench + Canvas 2D 绘图，4 tab、服务端分页、导出）
 test/                   集成与双轨金样对账测试（Node vs Go 5大窗口 0 误差验证）
 dist/                   构建产物（包含多平台交叉编译二进制）
+internal/codex/testdata/ synthetic Codex rollout fixtures
 .scratch/               功能规格与 issue（token-analyzer / webui / opencode-sync 等）
 .github/workflows/      自动化 CI / 发布流程
 ```
