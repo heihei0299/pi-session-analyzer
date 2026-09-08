@@ -193,48 +193,7 @@ func main() {
 	// 格式化输出
 	switch *format {
 	case "json":
-		var outData any
-		if res.Window == "totals" && res.Rows == nil && res.Totals != nil {
-			outData = map[string]any{
-				"window":      "totals",
-				"requests":    res.Totals.Requests,
-				"input":       res.Totals.Input,
-				"output":      res.Totals.Output,
-				"cacheRead":   res.Totals.CacheRead,
-				"cacheWrite":  res.Totals.CacheWrite,
-				"reasoning":   res.Totals.Reasoning,
-				"totalTokens": res.Totals.TotalTokens,
-				"cost":        res.Totals.Cost,
-				"cacheRate":   res.Totals.CacheRate,
-			}
-			if res.Totals.CostStatus != "" {
-				outData.(map[string]any)["costStatus"] = res.Totals.CostStatus
-			}
-			if res.Meta != nil {
-				outData.(map[string]any)["meta"] = res.Meta
-			}
-		} else if res.Window == "totals" && res.By != "" {
-			outData = map[string]any{
-				"window": "totals",
-				"by":     string(res.By),
-				"rows":   res.Rows,
-			}
-		} else if res.Window == "totals" && res.Period != "" {
-			outData = map[string]any{
-				"window": "totals",
-				"period": string(res.Period),
-				"rows":   res.Rows,
-			}
-		} else {
-			outData = map[string]any{
-				"window": res.Window,
-				"rows":   res.Rows,
-			}
-			if res.Meta != nil {
-				outData.(map[string]any)["meta"] = res.Meta
-			}
-		}
-		bytes, _ := serialize.SerializeJSON(outData)
+		bytes, _ := serialize.SerializeJSON(jsonOutputData(res))
 		fmt.Println(string(bytes))
 	case "csv":
 		var data any
@@ -263,6 +222,48 @@ func main() {
 			fmt.Print(render.RenderTotalsTable(*res.Totals))
 		}
 	}
+}
+
+func jsonOutputData(res *sessiondata.QueryResult) map[string]any {
+	var outData map[string]any
+	if res.Window == "totals" && res.Rows == nil && res.Totals != nil {
+		outData = map[string]any{
+			"window":      "totals",
+			"requests":    res.Totals.Requests,
+			"input":       res.Totals.Input,
+			"output":      res.Totals.Output,
+			"cacheRead":   res.Totals.CacheRead,
+			"cacheWrite":  res.Totals.CacheWrite,
+			"reasoning":   res.Totals.Reasoning,
+			"totalTokens": res.Totals.TotalTokens,
+			"cost":        res.Totals.Cost,
+			"cacheRate":   res.Totals.CacheRate,
+		}
+		if res.Totals.CostStatus != "" {
+			outData["costStatus"] = res.Totals.CostStatus
+		}
+	} else if res.Window == "totals" && res.By != "" {
+		outData = map[string]any{
+			"window": "totals",
+			"by":     string(res.By),
+			"rows":   res.Rows,
+		}
+	} else if res.Window == "totals" && res.Period != "" {
+		outData = map[string]any{
+			"window": "totals",
+			"period": string(res.Period),
+			"rows":   res.Rows,
+		}
+	} else {
+		outData = map[string]any{
+			"window": res.Window,
+			"rows":   res.Rows,
+		}
+	}
+	if res.Meta != nil {
+		outData["meta"] = res.Meta
+	}
+	return outData
 }
 
 func handleOpencodeCommand(args []string) {

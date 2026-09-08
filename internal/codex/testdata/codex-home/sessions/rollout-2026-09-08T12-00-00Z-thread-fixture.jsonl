@@ -6,3 +6,4 @@
 {"timestamp":"2026-09-08T12:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":999,"output_tokens":999}}}}
 {"timestamp":"2026-09-08T12:00:06Z","type":"model_reroute","payload":{"from_model":"fixture-model","to_model":"fixture-reroute"}}
 {"timestamp":"2026-09-08T12:00:07Z","type":"unknown_fixture_event","payload":{}}
+{"timestamp":"2026-09-08T12:00:08Z","type":"bad_json"

@@ -62,6 +62,8 @@ test("S13 总览骨架标记：8 卡片 / 分组切换 / 时间预设 / 状态�
     assert.match(body, /id="export-json"/);
     assert.match(body, /id="export-csv"/);
     assert.match(body, /id="error-banner"/);
+    assert.match(body, /id="diagnostics"/);
+    assert.match(body, /meta\.warnings/);
 
     // 深色主题（zinc 暗色系，data-theme 标记或 CSS 变量）
     assert.match(body, /data-theme="dark"/);

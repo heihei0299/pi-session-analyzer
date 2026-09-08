@@ -206,6 +206,11 @@ a{color:inherit}
   background:linear-gradient(90deg, rgba(255,255,255,.05), transparent);
   border-left:3px solid var(--brass); padding:8px 14px; border-radius:0 10px 10px 0;
 }
+#diagnostics{
+  margin-top:8px; font:500 11px var(--font-mono); line-height:1.5; color:#FFE8B0;
+  background:rgba(197,162,84,.08); border-left:3px solid var(--brass); padding:8px 14px; border-radius:0 10px 10px 0; white-space:pre-wrap;
+}
+#diagnostics:not(.show){display:none}
 #error-banner{
   max-width:1280px; margin:10px auto 0; padding:0 24px;
 }
@@ -555,6 +560,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 
 <div class="status-wrap">
   <div id="status-line">加载中… <span id="updated-at" class="updated hidden"></span></div>
+  <div id="diagnostics" role="status" aria-live="polite"></div>
   <div id="scope-note">口径说明：统计含 pi 四载体（assistant/toolResult/compaction/branch_summary，含 assistant+usage）；总输入 = input + cacheRead（总输入）；pi 压缩/内部请求与 opencode 等其他客户端请求不计入，与 pi-switch 网关有结构性差异（预期）。</div>
 </div>
 <div id="error-banner"></div>
@@ -793,6 +799,12 @@ function renderStatus(meta) {
   const dirEl = $("#meta-dir"), cntEl = $("#meta-count");
   if (dirEl) dirEl.textContent = meta.dir;
   if (cntEl) cntEl.textContent = String(meta.sessionCount);
+  const diagnostics = $("#diagnostics");
+  const warnings = Array.isArray(meta.warnings) ? meta.warnings : [];
+  if (diagnostics) {
+    diagnostics.textContent = warnings.length ? `诊断警告：\n${warnings.join("\n")}` : "";
+    diagnostics.classList.toggle("show", warnings.length > 0);
+  }
   refreshDbMeta();
 }
 function updateStatusRange() {

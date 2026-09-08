@@ -141,7 +141,7 @@ HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` 
 CONTEXT.md              领域术语表（统计口径、fork 会话、字段语义）
 docs/adr/               架构决策记录（0001-fork-session-dedup、0002-total-tokens-gateway-alignment）
 Makefile                多平台交叉编译与自动化测试脚本
-go.mod                  Go 模块配置（零外部第三方依赖，保持纯标准库）
+go.mod                  Go 模块配置（含纯 Go zstd decoder 与 SQLite 依赖）
 cmd/token-analyzer/     Go CLI 与 Serve 统一主程序入口
 internal/
   domain/               核心聚合模型与指标定义（ADR-0002 口径、Totals）

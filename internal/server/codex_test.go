@@ -19,6 +19,7 @@ func TestServerCodexSourceQueries(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(codexHome, "sessions", "rollout-2026-09-08T12-00-00Z-thread-1.jsonl"), []byte(`{"timestamp":"2026-09-08T12:00:00Z","type":"session_meta","payload":{"session_id":"s1","id":"t1","cwd":"/workspace","model_provider":"openai"}}
 {"timestamp":"2026-09-08T12:00:01Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":10,"output_tokens":5}}}
+{"timestamp":"2026-09-08T12:00:02Z","type":"unknown_fixture_event","payload":{}}
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -26,8 +27,8 @@ func TestServerCodexSourceQueries(t *testing.T) {
 	handler := srv.Handler()
 	index := httptest.NewRecorder()
 	handler.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
-	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "source-selector") || !strings.Contains(index.Body.String(), "Codex") {
-		t.Fatalf("WebUI source selector missing: status=%d", index.Code)
+	if index.Code != http.StatusOK || !strings.Contains(index.Body.String(), "source-selector") || !strings.Contains(index.Body.String(), "Codex") || !strings.Contains(index.Body.String(), `id="diagnostics"`) {
+		t.Fatalf("WebUI source selector or diagnostics marker missing: status=%d", index.Code)
 	}
 
 	w := httptest.NewRecorder()
@@ -41,12 +42,18 @@ func TestServerCodexSourceQueries(t *testing.T) {
 			TotalTokens float64 `json:"totalTokens"`
 			CostStatus  string  `json:"costStatus"`
 		} `json:"totals"`
+		Meta struct {
+			Warnings []string `json:"warnings"`
+		} `json:"meta"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &totals); err != nil {
 		t.Fatal(err)
 	}
 	if totals.Totals.Requests != 1 || totals.Totals.TotalTokens != 15 || totals.Totals.CostStatus != "unpriced" {
 		t.Fatalf("unexpected totals: %+v", totals)
+	}
+	if len(totals.Meta.Warnings) == 0 || !strings.Contains(strings.Join(totals.Meta.Warnings, "\n"), "未知 Codex event type") {
+		t.Fatalf("expected API diagnostics warning: %+v", totals.Meta.Warnings)
 	}
 
 	w = httptest.NewRecorder()
