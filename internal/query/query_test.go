@@ -3,6 +3,7 @@ package query
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
@@ -67,5 +68,47 @@ func TestQueryCodexAndAllSources(t *testing.T) {
 	}
 	if res.Totals.Requests != 0 {
 		t.Fatalf("changing codex directory must not reuse old ledger rows: %+v", res.Totals)
+	}
+}
+
+// 真实同形基线 fixture（真实命名 + 按日目录 + archived_sessions + revert + 非 canonical 干扰）
+// 必须整条路径可见：发现 → 解析 → 账本 → totals/sessions 窗口。
+func TestQueryCodexRealShapedFixtureBaseline(t *testing.T) {
+	cfg := Config{
+		CodexDir: filepath.Join("..", "codex", "testdata", "codex-home"),
+		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
+		Source:   "codex",
+	}
+	sd := sessiondata.NewSessionData()
+
+	totals, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if totals.Totals == nil || totals.Totals.Requests != 3 || totals.Totals.TotalTokens <= 0 {
+		t.Fatalf("real-shaped fixture must produce codex totals: %+v", totals)
+	}
+	if totals.Totals.CostStatus != "unpriced" {
+		t.Fatalf("codex cost must stay unpriced: %+v", totals.Totals)
+	}
+	if totals.Meta == nil || len(totals.Meta.Sources) != 1 || totals.Meta.Sources[0] != "codex" {
+		t.Fatalf("missing codex source metadata: %+v", totals.Meta)
+	}
+	if !strings.Contains(strings.Join(totals.Meta.Warnings, "\n"), "notes.jsonl") {
+		t.Fatalf("non-canonical fixture file must surface as a diagnostic: %+v", totals.Meta.Warnings)
+	}
+
+	sessions, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, ok := sessions.Rows.([]domain.SessionRow)
+	if !ok || len(rows) != 3 {
+		t.Fatalf("real-shaped fixture must expose three codex sessions: %+v", sessions.Rows)
+	}
+	for _, row := range rows {
+		if row.Source != "codex" || row.SessionId == "" {
+			t.Fatalf("codex session row must carry source and session id: %+v", row)
+		}
 	}
 }

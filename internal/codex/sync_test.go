@@ -11,11 +11,11 @@ import (
 
 func TestSyncRolloutsWritesCodexLedgerIdempotently(t *testing.T) {
 	home := t.TempDir()
-	root := filepath.Join(home, "sessions")
+	root := filepath.Join(home, "sessions", "2026", "09", "08")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "rollout-2026-09-08T12-00-00Z-thread-1.jsonl")
+	path := filepath.Join(root, "rollout-2026-09-08T12-00-00-00000000-0000-7000-8000-000000000001.jsonl")
 	base := `{"timestamp":"2026-09-08T12:00:00Z","type":"session_meta","payload":{"session_id":"root-1","id":"thread-1","cwd":"/workspace","model_provider":"openai"}}
 {"timestamp":"2026-09-08T12:00:01Z","type":"token_usage_record","payload":{"response_id":"resp-1","turn_id":"turn-1","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":4}}}
 {"timestamp":"2026-09-08T12:00:02Z","type":"token_usage_record","payload":{"response_id":"resp-1","turn_id":"turn-1","usage":{"input_tokens":999,"output_tokens":999}}}

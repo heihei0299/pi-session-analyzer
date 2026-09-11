@@ -8,14 +8,45 @@ import (
 	"github.com/heihei0299/pi-session-anylize/internal/db"
 )
 
-func TestSyntheticFixtureCoversPlainArchiveAndRevertedRollouts(t *testing.T) {
+// 真实同形验收基线：真实命名（无 Z 后缀）、按年/月/日分目录、archived_sessions 归档根、
+// revert 形态（thread id + '_' + rollout id）、以及一份非 canonical 干扰文件。
+func TestSyntheticFixtureMatchesRealWorldLayout(t *testing.T) {
 	codexHome := filepath.Join("testdata", "codex-home")
 	files, discoveryDiagnostics, err := DiscoverRollouts(codexHome)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 3 || discoveryDiagnostics.Skipped != 0 {
+	if len(files) != 3 || discoveryDiagnostics.Skipped != 1 {
 		t.Fatalf("unexpected synthetic fixture discovery: files=%+v diagnostics=%+v", files, discoveryDiagnostics)
+	}
+	if !strings.Contains(strings.Join(discoveryDiagnostics.Warnings, "\n"), "notes.jsonl") {
+		t.Fatalf("non-canonical fixture file must be reported: %+v", discoveryDiagnostics)
+	}
+
+	plainName := "rollout-2026-09-08T12-00-00-00000000-0000-7000-8000-000000000001.jsonl"
+	revertedName := "rollout-2026-09-08T12-01-00-00000000-0000-7000-8000-000000000001_00000000-0000-7000-8000-000000000002.jsonl"
+	archiveName := "rollout-2026-09-07T12-00-00-00000000-0000-7000-8000-000000000003.jsonl"
+	wantPaths := map[string]string{
+		plainName:    "sessions/2026/09/08/" + plainName,
+		revertedName: "sessions/2026/09/08/" + revertedName,
+		archiveName:  "archived_sessions/2026/09/07/" + archiveName,
+	}
+
+	relOf := func(path string) string {
+		rel, err := filepath.Rel(codexHome, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return filepath.ToSlash(rel)
+	}
+	got := make(map[string]string, len(files))
+	for _, file := range files {
+		got[filepath.Base(file.Path)] = relOf(file.Path)
+	}
+	for name, wantPath := range wantPaths {
+		if got[name] != wantPath {
+			t.Fatalf("fixture rollout %q must live at %q, got %q (%+v)", name, wantPath, got[name], files)
+		}
 	}
 
 	parsedByName := make(map[string]ParsedRollout, len(files))
@@ -33,7 +64,6 @@ func TestSyntheticFixtureCoversPlainArchiveAndRevertedRollouts(t *testing.T) {
 		diagnosticsByName[name] = diagnostics
 	}
 
-	plainName := "rollout-2026-09-08T12-00-00Z-thread-fixture.jsonl"
 	plain, ok := parsedByName[plainName]
 	if !ok {
 		t.Fatalf("plain fixture missing: %s", plainName)
@@ -49,13 +79,11 @@ func TestSyntheticFixtureCoversPlainArchiveAndRevertedRollouts(t *testing.T) {
 		t.Fatalf("plain fixture diagnostics incomplete: %+v", diagnosticsByName[plainName])
 	}
 
-	archiveName := "rollout-2026-09-07T12-00-00Z-thread-archive_fixture-1.jsonl"
 	archive, ok := parsedByName[archiveName]
 	if !ok || len(archive.Usage) != 1 || archive.Usage[0].ResponseID != "archive-response-1" || archive.Usage[0].Model != "unknown" {
 		t.Fatalf("archive fixture mapping incomplete: %+v", archive)
 	}
 
-	revertedName := "rollout-2026-09-08T12-01-00Z-thread-fixture_revert-1.jsonl"
 	reverted, ok := parsedByName[revertedName]
 	if !ok {
 		t.Fatalf("reverted fixture missing: %s", revertedName)

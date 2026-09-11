@@ -12,11 +12,11 @@ import (
 
 func TestSyncRolloutsIgnoresHalfLineAndPlainCompressedSwitch(t *testing.T) {
 	home := t.TempDir()
-	root := filepath.Join(home, "sessions")
+	root := filepath.Join(home, "sessions", "2026", "09", "08")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	plain := filepath.Join(root, "rollout-2026-09-08T12-00-00Z-thread-1.jsonl")
+	plain := filepath.Join(root, "rollout-2026-09-08T12-00-00-00000000-0000-7000-8000-000000000001.jsonl")
 	header := `{"timestamp":"2026-09-08T12:00:00Z","type":"session_meta","payload":{"session_id":"s1","id":"t1","cwd":"/workspace","model_provider":"openai"}}
 `
 	first := `{"timestamp":"2026-09-08T12:00:01Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":1,"output_tokens":2}}}
@@ -87,11 +87,11 @@ func TestSyncRolloutsIgnoresHalfLineAndPlainCompressedSwitch(t *testing.T) {
 
 func TestSyncRolloutsRescansReplacementAndKeepsOldLedger(t *testing.T) {
 	home := t.TempDir()
-	root := filepath.Join(home, "sessions")
+	root := filepath.Join(home, "sessions", "2026", "09", "08")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "rollout-2026-09-08T12-00-00Z-thread-1.jsonl")
+	path := filepath.Join(root, "rollout-2026-09-08T12-00-00-00000000-0000-7000-8000-000000000001.jsonl")
 	header := `{"timestamp":"2026-09-08T12:00:00Z","type":"session_meta","payload":{"session_id":"s1","id":"t1","cwd":"/workspace","model_provider":"openai"}}` + "\n"
 	response1 := `{"timestamp":"2026-09-08T12:00:01Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":1,"output_tokens":2}}}` + "\n"
 	response2 := `{"timestamp":"2026-09-08T12:00:02Z","type":"token_usage_record","payload":{"response_id":"r2","usage":{"input_tokens":3,"output_tokens":4}}}` + "\n"
