@@ -524,7 +524,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
     <div class="meta-strip">
       <span class="meta-pill">dir <code id="meta-dir">—</code></span>
       <span class="meta-pill" id="meta-db-pill" style="display:none">db <code id="meta-db">—</code></span>
-      <span class="meta-pill"><strong id="meta-count">—</strong> sessions</span>
+      <span class="meta-pill" id="meta-sessions-pill">会话数: <strong id="meta-count">—</strong></span>
       <span class="meta-pill" id="meta-range">—</span>
     </div>
   </div>
@@ -844,17 +844,32 @@ async function refreshDbMeta() {
     }
   } catch {}
 }
+let filteredSessionCount = null;
+function hasTimeFilter() {
+  return Boolean(state.since || state.until);
+}
+function renderSessionCount() {
+  const cntEl = $("#meta-count");
+  if (!cntEl || !lastMeta) return;
+  const m = lastMeta.sessionCount ?? 0;
+  if (hasTimeFilter() && filteredSessionCount !== null) {
+    cntEl.textContent = `${filteredSessionCount}（全量 ${m}）`;
+  } else {
+    cntEl.textContent = String(m);
+  }
+}
 function renderStatus(meta) {
-  lastMeta = meta;
+  if (meta) lastMeta = meta;
+  if (!lastMeta) return;
   // 只按后端声明的能力渲染可选源；不因「声明了多个源」就把默认视图跳到 All（默认始终是 Pi）。
-  applySourceCapabilities(meta.sources);
+  applySourceCapabilities(lastMeta.sources);
   updateStatusRange();
   // header meta pills
-  const dirEl = $("#meta-dir"), cntEl = $("#meta-count");
-  if (dirEl) dirEl.textContent = meta.dir;
-  if (cntEl) cntEl.textContent = String(meta.sessionCount);
+  const dirEl = $("#meta-dir");
+  if (dirEl) dirEl.textContent = lastMeta.dir;
+  renderSessionCount();
   const diagnostics = $("#diagnostics");
-  const warnings = Array.isArray(meta.warnings) ? meta.warnings : [];
+  const warnings = Array.isArray(meta?.warnings) ? meta.warnings : (Array.isArray(lastMeta?.warnings) ? lastMeta.warnings : []);
   if (diagnostics) {
     diagnostics.textContent = warnings.length ? `诊断警告：\n${warnings.join("\n")}` : "";
     diagnostics.classList.toggle("show", warnings.length > 0);
@@ -983,22 +998,30 @@ function bindTapeInteractions(){
 }
 const GROUP_COLS=[{key:"key",label:"分组键"},{key:"requests",label:"请求数"},{key:"input",label:"总输入"},{key:"output",label:"输出"},{key:"cacheRate",label:"缓存率"},{key:"totalTokens",label:"总token"},{key:"cost",label:"花费"}];
 const GROUP_FMTS={cacheRate:fmtRate,input:(v,r)=>fmtCompact((r.input??0)+(r.cacheRead??0)),output:fmtCompact,totalTokens:fmtCompact,cost:fmtCostCell};
-async function refreshGroups(){
-  const params=filterParams();
+function renderGroupsData(data){
   if(state.groupBy==="date"){
-    params.set("period","day");
-    const data=await api("period",params);
     const rows=(data.rows||[]).map(r=>({key:r.date||"-",...r}));
     rows.sort((a,b)=>String(b.key).localeCompare(String(a.key)));
     const cols=GROUP_COLS.map(c=>c.key==="key"?{key:"key",label:"日期"}:c);
     renderTable($("#group-head"),$("#group-body"),cols,rows,GROUP_FMTS);
     return;
   }
-  params.set("by",state.groupBy);
-  const data=await api("groups",params);
-  const rows=data.rows.map(r=>({key:state.groupBy==="model"?(r.model??"-"):(r.cwd??"-"),...r}));
+  const rows=(data.rows||[]).map(r=>({key:state.groupBy==="model"?(r.model??"-"):(r.cwd??"-"),...r}));
   const cols=GROUP_COLS.map(c=>c.key==="key"?{key:"key",label:state.groupBy==="model"?"模型":"项目"}:c);
   renderTable($("#group-head"),$("#group-body"),cols,rows,GROUP_FMTS);
+}
+async function fetchGroupsData(){
+  const params=filterParams();
+  if(state.groupBy==="date"){
+    params.set("period","day");
+    return api("period",params);
+  }
+  params.set("by",state.groupBy);
+  return api("groups",params);
+}
+async function refreshGroups(){
+  const data=await fetchGroupsData();
+  renderGroupsData(data);
 }
 function renderTable(headEl,bodyEl,cols,rows,fmts={}){
   headEl.innerHTML=cols.map(c=>`<th data-key="${c.key}">${c.label}</th>`).join("");
@@ -1007,10 +1030,18 @@ function renderTable(headEl,bodyEl,cols,rows,fmts={}){
 async function refreshOverview(){
   try{
     clearError();
-    const [totals,meta]=await Promise.all([api("totals"), api("meta")]);
+    const reqs = [api("totals"), api("meta"), fetchGroupsData()];
+    if (hasTimeFilter()) {
+      const sp = filterParams();
+      sp.set("page", "1");
+      sp.set("size", "1");
+      reqs.push(api("sessions", sp).catch(() => null));
+    }
+    const [totals, meta, groups, sess] = await Promise.all(reqs);
+    filteredSessionCount = sess ? sess.total : null;
     renderCards(totals);
     renderStatus(meta);
-    await refreshGroups();
+    renderGroupsData(groups);
   }catch(e){showError("加载失败: "+e.message)}
 }
 function applyPreset(preset) {
@@ -1021,6 +1052,8 @@ function applyPreset(preset) {
   if (preset === "all") {
     state.since = null;
     state.until = null;
+    filteredSessionCount = null;
+    renderSessionCount();
   } else if (preset === "custom") {
     (function(){
       const pad=n=>String(n).padStart(2,"0");
@@ -1124,9 +1157,11 @@ function bindCustomRange() {
 async function exportData(format){
   const jsonBtn=$("#export-json"), csvBtn=$("#export-csv");
   const origJson=jsonBtn?.textContent||"导出 JSON", origCsv=csvBtn?.textContent||"导出 CSV";
-  const setBusy=b=>{
-    if(jsonBtn){ jsonBtn.disabled=b; jsonBtn.textContent=b?"导出中…":origJson; }
-    if(csvBtn){ csvBtn.disabled=b; csvBtn.textContent=b?"导出中…":origCsv; }
+  const buttons=[[jsonBtn, origJson], [csvBtn, origCsv]];
+  const setBusy=isBusy=>{
+    for(const [btn, text] of buttons){
+      if(btn){ btn.disabled=isBusy; btn.textContent=isBusy?"导出中…":text; }
+    }
   };
   setBusy(true);
   try{
@@ -1177,7 +1212,11 @@ async function fetchRows(kind) {
   const data = await api(kind, params);
   st.rows = data.rows;
   st.total = data.total;
-  if (kind === "sessions" && data.totals) st.totals = data.totals;
+  if (kind === "sessions") {
+    filteredSessionCount = st.total;
+    renderSessionCount();
+    if (data.totals) st.totals = data.totals;
+  }
   return st;
 }
 function renderDetailTable(kind) {
@@ -1380,7 +1419,24 @@ function renderDetailTable(kind) {
   applySourceGuards();
 }
 async function refreshSessionTable(){try{clearError(); await fetchRows("sessions"); renderDetailTable("sessions")}catch(e){showError("会话明细加载失败: "+e.message)}}
-async function refreshRequestTable(){try{clearError(); await fetchRows("requests"); renderDetailTable("requests")}catch(e){showError("请求明细加载失败: "+e.message)}}
+async function refreshRequestTable(){
+  try{
+    clearError();
+    const reqs = [fetchRows("requests")];
+    if(hasTimeFilter() && filteredSessionCount === null) {
+      const sp = filterParams();
+      sp.set("page", "1");
+      sp.set("size", "1");
+      reqs.push(api("sessions", sp).catch(() => null));
+    }
+    const [, sess] = await Promise.all(reqs);
+    if(sess){
+      filteredSessionCount = sess.total;
+      renderSessionCount();
+    }
+    renderDetailTable("requests");
+  }catch(e){showError("请求明细加载失败: "+e.message)}
+}
 function bindDetailInteractions() {
   for (const kind of ["sessions", "requests"]) {
     const errLabel = kind === "sessions" ? "会话明细加载失败: " : "请求明细加载失败: ";
@@ -1425,9 +1481,7 @@ async function snapshot() {
   const params = filterParams();
   if (state.tab === "overview") {
     const t = await api("totals", params);
-    const gp = filterParams();
-    gp.set("by", state.groupBy);
-    const g = await api("groups", gp);
+    const g = await fetchGroupsData();
     return JSON.stringify([t, g]);
   }
   if (state.tab === "sessions" || state.tab === "requests") {
@@ -1446,7 +1500,30 @@ async function poll(){
   if(detailDrawerState.open) return;
   try{
     const snap=await snapshot();
-    if(snap!==lastSnapshot){ lastSnapshot=snap; await refreshAll(); const now=new Date(); $("#updated-at").textContent="已更新 "+pad2(now.getHours())+":"+pad2(now.getMinutes())+":"+pad2(now.getSeconds()); $("#updated-at").classList.remove("hidden"); updateStatusRange(); }
+    if(snap!==lastSnapshot){
+      lastSnapshot=snap;
+      if(state.tab==="overview"){
+        // 复用快照数据渲染，仅拉取 meta 更新状态行（每周期收敛至 totals+groups+meta）
+        const [totals, groups] = JSON.parse(snap);
+        renderCards(totals);
+        renderGroupsData(groups);
+        const meta = await api("meta");
+        renderStatus(meta);
+      } else if(state.tab==="sessions" || state.tab==="requests"){
+        await fetchRows(state.tab);
+        renderDetailTable(state.tab);
+        if(state.tab==="sessions") {
+          filteredSessionCount = detailState.sessions.total;
+          renderSessionCount();
+        }
+      } else {
+        await refreshAll();
+      }
+      const now=new Date();
+      $("#updated-at").textContent="已更新 "+pad2(now.getHours())+":"+pad2(now.getMinutes())+":"+pad2(now.getSeconds());
+      $("#updated-at").classList.remove("hidden");
+      updateStatusRange();
+    }
   }catch{}
 }
 function switchTab(tab){

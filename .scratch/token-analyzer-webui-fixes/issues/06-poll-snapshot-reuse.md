@@ -4,10 +4,10 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] 总览页一个轮询周期内无重复的 totals/groups 请求
-- [ ] 数据变化时卡片/分组表/状态行正常更新，「已更新 HH:MM:SS」正常显示
-- [ ] 无变化时不触发渲染
-- [ ] 明细页（会话/请求）轮询仍只请求当前页 + total
-- [ ] 会话管理页轮询语义不变（全量会话对比）
+- [x] 总览页一个轮询周期内无重复的 totals/groups 请求
+- [x] 数据变化时卡片/分组表/状态行正常更新，「已更新 HH:MM:SS」正常显示
+- [x] 无变化时不触发渲染
+- [x] 明细页（会话/请求）轮询仍只请求当前页 + total
+- [x] 会话管理页轮询语义不变（全量会话对比）
