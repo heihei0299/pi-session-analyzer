@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -170,5 +171,25 @@ func TestNodeAndGoParity(t *testing.T) {
 	_ = json.Unmarshal(outGoPer, &goPer)
 	if len(nodePer.Rows) != len(goPer.Rows) || len(goPer.Rows) != 1 {
 		t.Fatalf("Period length mismatch: Node=%d, Go=%d", len(nodePer.Rows), len(goPer.Rows))
+	}
+
+	// 6. 日期校验对账：非法公历日期（如 2026-02-30）Node 与 Go 均拒绝退出并报错
+	cmdNodeErr := exec.Command("node", "src/cli.ts", "totals", "--since", "2026-02-30", "--dir", tmpDir)
+	cmdNodeErr.Dir = repoRoot
+	outNodeErr, errNode := cmdNodeErr.CombinedOutput()
+	if errNode == nil {
+		t.Fatalf("node CLI should reject invalid date 2026-02-30")
+	}
+	if !strings.Contains(string(outNodeErr), "2026-02-30") {
+		t.Fatalf("node CLI error message should mention invalid date: %s", string(outNodeErr))
+	}
+
+	cmdGoErr := exec.Command(goBin, "totals", "--since", "2026-02-30", "--dir", tmpDir)
+	outGoErr, errGo := cmdGoErr.CombinedOutput()
+	if errGo == nil {
+		t.Fatalf("go CLI should reject invalid date 2026-02-30")
+	}
+	if !strings.Contains(string(outGoErr), "2026-02-30") {
+		t.Fatalf("go CLI error message should mention invalid date: %s", string(outGoErr))
 	}
 }

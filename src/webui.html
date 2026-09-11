@@ -1067,6 +1067,7 @@ function applyPreset(preset) {
       setCustom("#until-date","#until-hour","#until-minute", uVal ?? today, true);
     })();
     applyCustomRange();
+    return;
   } else {
     const days = preset === "today" ? 0 : preset === "7d" ? 6 : 29;
     // 本地自然日：本地日期字段推算（setDate 自动处理跨月/跨年）；后端 parseTimestamp 按本地解释

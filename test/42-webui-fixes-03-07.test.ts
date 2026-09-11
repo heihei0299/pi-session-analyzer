@@ -101,11 +101,11 @@ test("T07 自定义预设预填与切换隐藏契约", () => {
     "自定义预设预填 until 应优先取当前 state.until，回退取 lastMeta.dataRange.until"
   );
 
-  // 3. 预填后应调用 applyCustomRange() 即时生效
+  // 3. 预填后应调用 applyCustomRange() 即时生效，且立即 return 避免重复触发 refreshAll
   assert.match(
     applyPresetSrc,
-    /applyCustomRange\(\)/,
-    "自定义预设分支应调用 applyCustomRange()"
+    /applyCustomRange\(\);\s*return;/,
+    "自定义预设分支应调用 applyCustomRange() 并立即 return 避免二次触发 refreshAll"
   );
 
   // 4. 6 个控件的 input/change 监听绑定

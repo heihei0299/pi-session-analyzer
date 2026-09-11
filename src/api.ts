@@ -27,9 +27,7 @@ import { loadCredentials } from "./opencode/credentials.ts";
 import { resolveDbPathFromEnv, SCHEMA_VERSION } from "./db.ts";
 import { withDirDb, queryTotals, queryGroups, queryPeriod, querySessions, queryRequests, queryMeta, queryDetail } from "./db-aggregation.ts";
 import type { DbFilter } from "./db-aggregation.ts";
-import { GO_EDITION_HINT, supportedSources } from "./source-capabilities.ts";
-
-export { supportedSources };
+import { GO_EDITION_HINT } from "./source-capabilities.ts";
 
 /** 会话活跃阈值：文件 mtime 距今 ≤ 5min 视为活跃（pi 正在写入） */
 const ACTIVE_MS = 5 * 60 * 1000;
