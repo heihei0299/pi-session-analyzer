@@ -25,9 +25,19 @@ import { emptyTotals, type GroupBy, type Period, type Totals } from "./aggregate
 import { renderTotalsTable, renderSessionTable, renderRequestTable, renderGroupTable, renderPeriodTable } from "./render.ts";
 import { serializeJson, serializeCsv, serializeGroupJson, serializeGroupCsv, serializePeriodJson, serializePeriodCsv } from "./serialize.ts";
 import { startWebServer } from "./server.ts";
+import { parseTimestamp } from "./time-range.ts";
 import { runOpencodeSync, runOpencodeExport } from "./opencode/cli.ts";
 
 const DEFAULT_DIR = join(homedir(), ".pi", "agent", "sessions");
+/** npm/TS 版本无法提供 Codex 数据源；所有入口统一拒绝并指向 Go 版本。 */
+function isGoOnlySourceArg(arg: string): boolean {
+  return arg === "--source" || arg.startsWith("--source=") || arg === "--codex-dir" || arg.startsWith("--codex-dir=");
+}
+function rejectGoOnlySourceArg(arg: string): never {
+  const flag = arg.split("=", 1)[0];
+  throw new Error(`${flag} 仅 Go 原生版本支持；npm/TS 版本只提供 Pi 数据源，请改用 Go 版本（token-analyzer-go）`);
+}
+
 
 export type WindowName = "totals" | "sessions" | "requests";
 export type FormatName = "table" | "json" | "csv";
@@ -229,6 +239,8 @@ export function parseArgs(argv: string[]): CliArgs {
       throw new Error(`缺少参数: --days 需要天数`);
     } else if (a === "serve") {
       serve = true;
+    } else if (isGoOnlySourceArg(a)) {
+      rejectGoOnlySourceArg(a);
     } else if (a.startsWith("-")) {
       throw new Error(`未知参数: ${a}（可用 -h 查看帮助）`);
     } else {
@@ -372,6 +384,8 @@ function parseOpencodeArgs(argv: string[]): CliArgs {
       } else if (b === "-h" || b === "--help" || b === "-v" || b === "--version") {
         // 已在顶部处理，此处忽略
         continue;
+      } else if (isGoOnlySourceArg(b)) {
+        rejectGoOnlySourceArg(b);
       } else if (b.startsWith("-")) {
         throw new Error(`未知参数: ${b}（可用 -h 查看帮助）`);
       } else {
@@ -441,6 +455,8 @@ function parseOpencodeArgs(argv: string[]): CliArgs {
         throw new Error(`缺少参数: --data-dir 需要目录`);
       } else if (b === "-h" || b === "--help" || b === "-v" || b === "--version") {
         continue;
+      } else if (isGoOnlySourceArg(b)) {
+        rejectGoOnlySourceArg(b);
       } else if (b.startsWith("-")) {
         throw new Error(`未知参数: ${b}（可用 -h 查看帮助）`);
       } else {
@@ -516,6 +532,7 @@ const HELP_TEXT = `用法: token-analyzer [totals|sessions|requests] --dir <path
 选项:
   --dir <path>              数据目录（默认 ~/.pi/agent/sessions/）
   --format <table|json|csv> 输出格式（默认 table）
+  （npm/TS 版本仅提供 Pi 数据源；--source/--codex-dir 仅 Go 原生版本支持）
   --model <id>              只统计指定模型
   --cwd <path>              只统计指定项目
   --since <时间>            只统计会话时间戳 ≥ 该值的会话
@@ -589,7 +606,7 @@ export async function runCli(argv: string[]): Promise<string> {
       return `清理完成: 聚合 ${res.rolled} 组, DB: ${dbPath}\n`;
     } finally { await db.close(); }
   }
-  validateArgs({ window, by, period });
+  validateArgs({ window, by, period, since, until });
   if (watch) {
     // 实时监控模式：长驻循环（测试通过 runWatch 单步驱动，此处仅打印初始状态并进入循环）
     return runWatchCli({ dir, format, model, cwd, since, until, window, interval });
@@ -636,11 +653,25 @@ export async function runCli(argv: string[]): Promise<string> {
 }
 
 /** 参数合法性校验（IO 之前） */
-function validateArgs(args: { window: WindowName; by?: GroupBy; period?: Period; opencode?: string }): void {
+function validateArgs(args: { window: WindowName; by?: GroupBy; period?: Period; since?: string; until?: string; opencode?: string }): void {
   if (args.opencode) {
     if (args.by !== undefined) throw new Error(`opencode 模式不支持 --by`);
     if (args.period !== undefined) throw new Error(`opencode 模式不支持 --period`);
     return;
+  }
+  if (args.since !== undefined) {
+    try {
+      parseTimestamp(args.since, false);
+    } catch {
+      throw new Error(`无效 since: ${args.since}（支持 ISO 日期或时间戳）`);
+    }
+  }
+  if (args.until !== undefined) {
+    try {
+      parseTimestamp(args.until, true);
+    } catch {
+      throw new Error(`无效 until: ${args.until}（支持 ISO 日期或时间戳）`);
+    }
   }
   if (args.period !== undefined && args.window !== "totals") {
     throw new Error(`--period 汇总仅支持 totals 窗口（当前 ${args.window}）`);

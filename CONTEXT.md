@@ -23,8 +23,10 @@
 - **Codex usage event**：一个有可靠 usage 的 Codex response 记录；累计 snapshot 只是状态，不是额外的 usage event。
 - **Codex response identity**：由 Codex source 与 response ID 确定的一次 usage 记录，用于跨重扫、fork/revert 和压缩切换保持幂等。
 - **Codex cost 状态**：本 effort 只确认 token usage；`unpriced` 表示没有可用美元花费，不等于花费为零。
+- **All 模式成本状态**：All 窗口可能同时含可定价 Pi 与 `unpriced` Codex；窗口 `cost` 保留可定价源的美元合计，`costStatus=unpriced` 表示合计含未定价源，展示必须标注「含 unpriced 源 / 部分可用」，不得把已知金额显示成 unpriced 或真实 `$0`。Codex 单源仍为 `unpriced`；真实零花费由空 `costStatus` + `cost=0` 区分。
 - **Codex 计入口径**：上游 `usage.input_tokens` 是**含缓存**的 prompt 总量，因此账本 `input` 一律记非缓存输入（`input_tokens - cached_input_tokens`，饱和减、不为负），`cacheRead = cached_input_tokens`；据此 `totalTokens = input + cacheRead + output`（ADR-0002）等于上游自报的 `usage.total_tokens`（唯一例外是 `cached > input` 的口径异常记录，此时按 0 饱和计入并告警，数值会大于上游）。`cacheWrite` / `reasoning` 独立成列且不参与 `totalTokens`（ADR-0004）。
 - **Codex 覆盖率诊断**：物理 rollout 只有 `token_count` 快照、没有 durable usage record 时不计入任何窗口，但必须产生 per-file 诊断（含未计入快照条数，结构化字段 `meta.uncountedSnapshots`）；诊断随文件 revision 存续、每次查询都会重放，游标命中跳过重扫也不例外。累计 snapshot 永远不是 Codex usage event，不参与 totals。
+- **Codex 源能力**：`meta.sources` 是后端能力唯一声明源。Go 原生后端声明 `["pi","codex"]`，npm/TS 后端只声明 `["pi"]`；共享 WebUI 只按该声明渲染源选择器。requests、会话详情、重命名仅覆盖 Pi：Codex/All 下这些入口必须禁用并给出原因，服务端返回明确 `unsupported`（400），不得返回 404 或写入 Pi 目录。
 
 ## 统计窗口
 

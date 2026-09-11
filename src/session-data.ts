@@ -404,10 +404,11 @@ export class SessionData {
   }
   periodRowsFromFiles(files: SessionFileData[], period: Period): PeriodRow[] {
     const map = new Map<string, PeriodRow>();
-    for (const file of files) {
-      const key = this.periodKey(file.timestamp, period); if (key === null) continue;
+    // period 按每条 usage event 的消息 timestamp 归属；header timestamp 只用于会话级。
+    for (const file of files) for (const item of file.items) {
+      const key = this.periodKey(item.timestamp, period); if (key === null) continue;
       let g = map.get(key); if (!g) { g = { period: key, ...emptyTotals() }; map.set(key, g); }
-      for (const item of file.items) addUsage(g, item.usage);
+      addUsage(g, item.usage);
     }
     for (const g of map.values()) finalizeTotals(g);
     return [...map.values()].sort((a, b) => a.period.localeCompare(b.period));

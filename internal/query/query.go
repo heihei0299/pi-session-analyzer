@@ -18,6 +18,19 @@ type Config struct {
 	Source   string
 }
 
+// SupportedSources 声明本后端能提供的数据源（能力声明，不代表本次查询的参与源）。
+// 共享 WebUI 只用它决定源选择器的选项，不再自行假设后端支持什么。
+func SupportedSources() []string {
+	return []string{"pi", "codex"}
+}
+
+func withCapabilities(result *sessiondata.QueryResult) *sessiondata.QueryResult {
+	if result != nil && result.Meta != nil {
+		result.Meta.Sources = SupportedSources()
+	}
+	return result
+}
+
 func Query(sd *sessiondata.SessionData, cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
 	source := cfg.Source
 	if filter.Source != "" {
@@ -34,10 +47,10 @@ func Query(sd *sessiondata.SessionData, cfg Config, filter sessiondata.Filter, v
 	}
 	if source == "pi" {
 		result, err := sd.Query(cfg.PiDir, filter, view)
-		if err == nil && view.Kind == sessiondata.ViewMeta && filter.Source != "" && result.Meta != nil {
-			result.Meta.Sources = []string{"pi"}
+		if err != nil {
+			return result, err
 		}
-		return result, err
+		return withCapabilities(result), nil
 	}
 	if source == "codex" {
 		return queryCodex(sd, cfg, filter, view)
@@ -57,7 +70,7 @@ func Query(sd *sessiondata.SessionData, cfg Config, filter sessiondata.Filter, v
 		return nil, err
 	}
 	attachMeta(sd, cfg.PiDir, files, result, diagnostics)
-	return result, nil
+	return withCapabilities(result), nil
 }
 
 func queryCodex(sd *sessiondata.SessionData, cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
@@ -75,10 +88,7 @@ func queryCodex(sd *sessiondata.SessionData, cfg Config, filter sessiondata.Filt
 		return nil, err
 	}
 	attachMeta(sd, codex.ResolveHome(cfg.CodexDir), files, result, diagnostics)
-	if result.Meta != nil && len(result.Meta.Sources) == 0 {
-		result.Meta.Sources = []string{"codex"}
-	}
-	return result, nil
+	return withCapabilities(result), nil
 }
 
 func loadCodex(cfg Config) ([]*sessiondata.SessionFileData, codex.Diagnostics, error) {
@@ -126,8 +136,5 @@ func attachMeta(sd *sessiondata.SessionData, dir string, files []*sessiondata.Se
 	meta := metaResult.Meta
 	meta.Warnings = append(meta.Warnings, diagnostics.Warnings...)
 	meta.UncountedSnapshots += diagnostics.UncountedSnapshots
-	if len(meta.Sources) == 0 && len(files) > 0 {
-		meta.Sources = []string{"codex"}
-	}
 	result.Meta = meta
 }

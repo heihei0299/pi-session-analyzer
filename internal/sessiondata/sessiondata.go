@@ -757,24 +757,26 @@ func (s *SessionData) PeriodRowsFromFiles(files []*SessionFileData, p domain.Per
 	periodMap := make(map[string]*domain.PeriodRow)
 	var keysOrder []string
 
+	// period 按每条 usage event 的消息 timestamp 归属，而不是整个 rollout/file 的 header timestamp。
+	// 跨天长 rollout 因此会按实际使用日拆分；header timestamp 只用于会话级归属。
 	for _, file := range files {
-		k, err := s.PeriodKey(file.Timestamp, p)
-		if err != nil {
-			continue
-		}
-		g, ok := periodMap[k]
-		if !ok {
-			g = &domain.PeriodRow{
-				Period: k,
-				Totals: domain.EmptyTotals(),
-			}
-			periodMap[k] = g
-			keysOrder = append(keysOrder, k)
-		}
-		if file.Source == "codex" {
-			g.CostStatus = "unpriced"
-		}
 		for _, item := range file.Items {
+			k, err := s.PeriodKey(item.Timestamp, p)
+			if err != nil {
+				continue
+			}
+			g, ok := periodMap[k]
+			if !ok {
+				g = &domain.PeriodRow{
+					Period: k,
+					Totals: domain.EmptyTotals(),
+				}
+				periodMap[k] = g
+				keysOrder = append(keysOrder, k)
+			}
+			if file.Source == "codex" {
+				g.CostStatus = "unpriced"
+			}
 			domain.AddUsage(&g.Totals, item.Usage)
 		}
 	}

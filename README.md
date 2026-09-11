@@ -1,6 +1,6 @@
 # Token Analyzer
 
-分析 Pi 会话与 Codex rollout token 消耗的 CLI 工具。Pi 默认读取 `~/.pi/agent/sessions/`，Codex 读取 `sessions/` 与 `archived_sessions/` 下的 plain/zstd rollout。读取全部合法会话，按统计口径 A 提取消耗数据（含 **fork 会话去重**——fork 复制的历史消息不重复计费），输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程（`--watch` 同样按 fork 去重口径）；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、**服务端分页排序**、自动刷新、导出 JSON/CSV 与会话重命名。
+分析 Pi 会话与 Codex rollout token 消耗的 CLI 工具。Codex 能力仅 Go 原生版本提供；npm/TS 分发包只提供 Pi 数据源。Pi 默认读取 `~/.pi/agent/sessions/`，Codex 读取 `sessions/` 与 `archived_sessions/` 下的 plain/zstd rollout。读取全部合法会话，按统计口径 A 提取消耗数据（含 **fork 会话去重**——fork 复制的历史消息不重复计费），输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程（`--watch` 同样按 fork 去重口径）；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、**服务端分页排序**、自动刷新、导出 JSON/CSV 与会话重命名。
 已发布为 npm 包 **`token-analyzer`**（npmjs.org，日期式版本如 `2026.8.6`）。
 功能规格见 [`.scratch/token-analyzer/spec.md`](.scratch/token-analyzer/spec.md)（含实施状态）；实现拆分为 5 个 issue（[`.scratch/token-analyzer-impl/issues/`](.scratch/token-analyzer-impl/issues/)）。WebUI 功能规格见 [`.scratch/token-analyzer-webui/spec.md`](.scratch/token-analyzer-webui/spec.md)，实现拆分为 6 个 issue（[`.scratch/token-analyzer-webui-impl/issues/`](.scratch/token-analyzer-webui-impl/issues/)）。WebUI 审查问题修复见 [`.scratch/token-analyzer-webui-fixes/spec.md`](.scratch/token-analyzer-webui-fixes/spec.md)（8 个 issue）。
 领域术语见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)（当前：`0001-fork-session-dedup.md`、`0002-total-tokens-gateway-alignment.md`）。
@@ -19,13 +19,27 @@ make build
 make release
 ```
 
-### 方式 B：npm 安装（Node ≥ 18）
+### 方式 B：npm 安装（Node ≥ 18；仅 Pi 数据源）
 
 ```bash
 npm i -g token-analyzer
 ```
 
+npm/TS 版本只提供 Pi 数据源，不解析 Codex rollout：`/api/meta` 的 `sources` 为 `["pi"]`，面板不会显示 Codex/All 选项。它收到 `--source` / `--codex-dir` 时会明确报错并提示改用 Go 版本；需要 Codex 请使用方式 A。
+
 开发环境（本仓库）：Go 1.23+ 或 TypeScript + Node 24。Go 版本使用纯 Go zstd decoder 读取 Codex compressed rollout。
+
+### 安装方式能力矩阵（与 `/api/meta.sources` 一致）
+
+| 能力 | Go 原生二进制 | npm / TS 后端 |
+| --- | --- | --- |
+| `/api/meta.sources` | `["pi","codex"]` | `["pi"]` |
+| CLI `--source pi\|codex\|all` | 支持 | 不支持；传入即报错并提示 Go 版本 |
+| CLI `--codex-dir` | 支持 | 不支持；传入即报错并提示 Go 版本 |
+| Codex rollout 发现与解析（含 plain/zstd、archived） | 支持 | 不支持 |
+| totals / sessions / groups / period | Pi / Codex / All | 仅 Pi |
+| requests 窗口 | 仅 Pi；Codex/All 明确拒绝 | 仅 Pi |
+| 会话详情、重命名 | 仅 Pi；Codex/All 明确拒绝且不写 Pi 目录 | 仅 Pi |
 
 ```bash
 # Go 环境验证
@@ -40,15 +54,18 @@ npm run build    # tsc 编译
 ## 用法
 
 ```
+# Go 原生版本
 token-analyzer [totals|sessions|requests] [--source pi|codex|all] [--dir <pi-dir>] [--codex-dir <codex-home>] [选项]
+# npm/TS 版本（仅 Pi；以下示例中的 --source / --codex-dir 会被明确拒绝）
+token-analyzer [totals|sessions|requests] --dir <pi-dir> [选项]
 token-analyzer opencode sync [--auth <a>] [--workspace <w>] [--data-dir <d>]
 token-analyzer opencode export [--format json|csv] [--output <path>] [--data-dir <d>]
 ```
 
-开发时可用 `node src/cli.ts` 或 `./dist/token-analyzer-go` 直接运行。
+开发时可用 `node src/cli.ts`（仅 Pi）或 `./dist/token-analyzer-go` 直接运行。
 
 - **窗口**（位置参数，默认 `totals`）：`totals` 总消耗量 / `sessions` 会话级（每会话一行）/ `requests` 单请求级（逐 assistant 消息）
-- **数据源**：`--source pi|codex|all`（默认 `pi`）；Codex 目录优先级为 `--codex-dir > CODEX_HOME > ~/.codex`。`--dir` 始终只表示 Pi 目录。
+- **数据源**（仅 Go）：`--source pi|codex|all`（默认 `pi`）；Codex 目录优先级为 `--codex-dir > CODEX_HOME > ~/.codex`。`--dir` 始终只表示 Pi 目录。npm/TS 版本只提供 Pi，传入这两个参数会明确报错并指向 Go 版本。
 - **数据库**：`--db <path>` 可指定 normalized ledger；未指定时使用 `TOKEN_ANALYZER_DB`/默认缓存路径。
 - **数据目录**：`--dir <path>`（默认 `~/.pi/agent/sessions/`）
 - **输出格式**：`--format table|json|csv`（默认 `table` 终端表格）
@@ -56,7 +73,8 @@ token-analyzer opencode export [--format json|csv] [--output <path>] [--data-dir
 - **分组**（仅 totals 窗口）：`--by model|cwd|model,cwd` 按维度汇总
 - **时间汇总**（仅 totals 窗口）：`--period day|week|month` 按周期汇总
 - **实时监控**：`--watch [--interval <ms>]` 长驻跟随（默认 1s 轮询）
-- **Web 面板**：`serve [--port <n>] [--host <h>] [--dir <path>] [--source pi|codex|all] [--codex-dir <path>]` 启动本地 HTTP 服务；页面可切换 Pi/Codex/All，Codex cost 显示 `unpriced`，Codex/All 的 requests 查询明确不支持。
+- **Web 面板**（Go 版本）：`serve [--port <n>] [--host <h>] [--dir <path>] [--source pi|codex|all] [--codex-dir <path>]` 启动本地 HTTP 服务；面板只按后端 `/api/meta.sources` 声明渲染源选择器，Codex/All 下 requests、会话详情、重命名会禁用并给出原因。
+- **Web 面板**（npm/TS 版本）：`serve [--port <n>] [--host <h>] [--dir <path>]` 启动同一共享前端；后端 `/api/meta.sources` 为 `["pi"]`，面板不提供 Codex/All 选项。
 - **帮助/版本**：`-h/--help` 显示用法，`-v/--version` 显示版本；未知参数/命令显式报错（可用 `-h` 查看）
 
 ### 示例
@@ -117,7 +135,7 @@ npm version 2026.8.28 && git push && git push --tags
 - **会话管理**：顶部最近会话 10 条 + 按规范化 cwd 分组展示全部会话（默认收起，组可折叠，点击标题展开），点击名称行内编辑重命名——改文件名前缀保留尾 UUID（`<显示名>_<UUID>.jsonl`），仅非活跃会话（mtime > 5min）可改，非法名 400 / 不存在 404 / 活跃与重名 409
 - **会话详情抽屉**：点击会话/请求明细的会话名称或会话 ID 滑出右侧抽屉（760px，移动端全屏，遮罩/×/Esc 关闭），展示头部（可点击标题行内重命名，同校验 400/409、成功后重刷抽屉与列表）、Token 构成条、汇总卡（总 token/请求数/花费/缓存率，合并时小字“其中主 X · 子代理 Y（N 个）”）与请求时间线（按时间升序、全量无分页、子代理行淡底 #FFF6D6 +“子代理 短 ID 8”徽标）；支持“合并子代理”开关（默认开、每次打开重置，无子代理隐藏）与时间线“暂无计入口径请求”空态；请求表容器 max-height:60vh 可滚动（极端 >200 行）；打开期间暂停自动刷新轮询
 
-HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` / `sessions` / `requests` / `groups?by=` / `period?period=` / `meta`（筛选参数 `model`/`cwd`/`since`/`until`；明细端点另支持 `page`/`size`/`sortKey`/`sortDir`，响应含 `total`，`sessions` 另含 `totals` 聚合计与行 `isTask` 子代理标记）+ `POST /api/sessions/rename` + `GET /api/sessions/:id/detail`（或 `GET /api/sessions/detail?sessionId=`，返回 `{ session, children, totals{main,merged,childrenCount}, requests{source,sourceSessionId}, meta{hasChildren} }`，视图合并子代理消耗仅详情视图、列表保持独立，404 会话不存在）；错误统一 `{ error, detail }`（400/404/409/500）。
+HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` / `sessions` / `requests` / `groups?by=` / `period?period=` / `meta`（筛选参数 `source`/`model`/`cwd`/`since`/`until`；Go 版 `source=pi|codex|all`，npm/TS 版 `source=pi` 或空，其他值返回 400 Unsupported；明细端点另支持 `page`/`size`/`sortKey`/`sortDir`，响应含 `total`，`sessions` 另含 `totals` 聚合计与行 `isTask` 子代理标记）+ `POST /api/sessions/rename` + `GET /api/sessions/:id/detail`（或 `GET /api/sessions/detail?sessionId=`，返回 `{ session, children, totals{main,merged,childrenCount}, requests{source,sourceSessionId}, meta{hasChildren} }`，视图合并子代理消耗仅详情视图、列表保持独立；Codex/All source 下 details/rename 明确返回 400 Unsupported，404 仅表示 Pi 会话不存在）；错误统一 `{ error, detail }`（400/404/409/500）。
 
 ## 统计口径（口径 A）
 
@@ -126,10 +144,10 @@ HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` 
 - **请求数**：带 usage 的 assistant 消息数；全 0 usage 的失败/中止消息也计入请求数（token 为 0）
 - **总 token**：总输入 + 输出 = `input + cacheRead + output`（对齐 pi-switch 网关 total；不含 cacheWrite，ADR-0002 已 Accepted，实现见 `.scratch/token-analyzer-gateway-alignment/`）
 - **缓存率**：`cacheRead / (input + cacheRead)`（分母不含 cacheWrite，ADR-0002）；分母为 0 记 0；聚合先求和分子分母再除
-- **花费**：直接累加 `usage.cost.total`；全 0 花费标注「费率未配置（免费/未定价）」
+- **花费**：直接累加 `usage.cost.total`；全 0 花费标注「费率未配置（免费/未定价）」。All 窗口保留可定价 Pi 的美元合计并标注「含 unpriced 源 / 部分可用」（CLI 表格显示 `$X*`，表尾解释 `* 含 unpriced 源`；WebUI 在金额后标注）；Codex 单源仍为 `unpriced`；JSON/CSV 的 `costStatus` 与 `cost` 组合可区分完全未定价、部分可用与真实零花费。
 - **模型归属**：请求级（每条消息的 `model` 字段）
 - **cwd 归属**：会话 header `cwd` 为权威键，规范化（绝对路径、去尾斜杠、符号链接解析）；目录名有损编码不参与归属
-- **时间归属**：CLI `--since`/`--until` 按会话 header timestamp 闭区间（含端点）；webui 全端点（`totals`/`sessions`/`requests`/`groups`/`period`）按消息 timestamp 消息级（跨天会话凌晨请求计入当天，总览与会话明细求和一致；与 CLI 在跨天场景有预期差异）
+- **时间归属**：CLI `--since`/`--until` 时间筛选按会话 header timestamp 闭区间（含端点）；period 汇总（CLI 与 webui）按每条 usage event 的消息 timestamp 归属，跨天 rollout 会拆分到实际使用日；webui 其余全端点（`totals`/`sessions`/`requests`/`groups`）也按消息 timestamp 消息级（总览与会话明细求和一致）
 - **网关可比窗口**：pi-switch 网关数据起点 = `2026-08-01T00:00:00Z`（UTC）；历史 webui「自 8/1」预设已移除（2026-09-01 清理），如需对账可通过自定义输入该起点，切「全部」查看含 8/1 前数据的完整历史
 - **时区语义**：webui/CLI 时间参数按本地时区解释（CST 自然日）；网关日志 `ts` 为 UTC——对账时以本地时区解释网关 ts，「今天」边界差 8 小时属预期
 - **与网关对比**（2026-08-06 对账）：8/1 起累计 session 940.5M vs 网关 935.0M（差 0.6%）；8/2、8/4 分毫不差；差异全部为覆盖结构——8/1 网关刚启用（仅 4 条记录，+37.2M）、8/3/8/5 网关多出其他客户端请求、pi 直连请求只在 session 目录；CLI 全量窗口含 8/1 前数据（≈494M）与网关不可比

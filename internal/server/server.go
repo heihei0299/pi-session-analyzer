@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -301,7 +302,32 @@ func (s *Server) handleApiDbMeta(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// effectiveSource 解析本次请求的数据源：请求参数优先，其次 serve 启动时的 --source，最后默认 pi。
+func (s *Server) effectiveSource(query url.Values) string {
+	if v := strings.TrimSpace(query.Get("source")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(s.queryConfig.Source); v != "" {
+		return v
+	}
+	return "pi"
+}
+
+// rejectNonPiSource 对仅覆盖 Pi 会话的能力（会话详情、重命名）给出明确 unsupported，
+// 而不是回落到 Pi 目录去猜、也不会写错目录。
+func (s *Server) rejectNonPiSource(w http.ResponseWriter, query url.Values, feature string) bool {
+	source := s.effectiveSource(query)
+	if source == "pi" {
+		return false
+	}
+	sendError(w, http.StatusBadRequest, "Unsupported", fmt.Sprintf("%s 数据源不支持%s：该能力仅覆盖 Pi 会话", source, feature))
+	return true
+}
+
 func (s *Server) handleApiSessionDetailPath(w http.ResponseWriter, r *http.Request) {
+	if s.rejectNonPiSource(w, r.URL.Query(), "会话详情") {
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		sendError(w, http.StatusBadRequest, "Bad Request", "缺少 sessionId")
@@ -312,6 +338,9 @@ func (s *Server) handleApiSessionDetailPath(w http.ResponseWriter, r *http.Reque
 
 func (s *Server) handleApiSessionDetail(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if s.rejectNonPiSource(w, q, "会话详情") {
+		return
+	}
 	sessionId := q.Get("sessionId")
 	if sessionId == "" {
 		sessionId = q.Get("sessionID")
@@ -354,6 +383,9 @@ func sanitizeFilename(name string) string {
 }
 
 func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) {
+	if s.rejectNonPiSource(w, r.URL.Query(), "重命名") {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		sendError(w, http.StatusBadRequest, "Bad Request", "读取请求体失败")

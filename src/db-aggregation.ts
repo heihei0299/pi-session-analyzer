@@ -11,6 +11,7 @@ import { syncPiUsage } from "./pi-sync.ts";
 import { Database as DbClass } from "./db.ts";
 import { emptyTotals, finalizeTotals, type Totals, type GroupRow, type GroupBy, type Period, type PeriodRow } from "./aggregate.ts";
 import type { SessionRowEnriched, RequestRowEnriched } from "./session-data.ts";
+import { supportedSources } from "./source-capabilities.ts";
 
 export interface DbFilter {
   since?: string;
@@ -551,7 +552,7 @@ export function queryPeriod(db: Database, period: Period, filter: DbFilter): { p
   return { period, rows };
 }
 
-export function queryMeta(db: Database, dir: string): { dir: string; sessionCount: number; dataRange: { since: string | null; until: string | null } } {
+export function queryMeta(db: Database, dir: string): { dir: string; sessionCount: number; dataRange: { since: string | null; until: string | null }; sources: string[] } {
   const metas = loadSessionMetas(db);
   const timestamps = metas
     .map((m) => m.headerTs)
@@ -560,7 +561,7 @@ export function queryMeta(db: Database, dir: string): { dir: string; sessionCoun
     timestamps.length === 0
       ? { since: null as string | null, until: null as string | null }
       : { since: timestamps.reduce((a, b) => (a < b ? a : b)), until: timestamps.reduce((a, b) => (a > b ? a : b)) };
-  return { dir, sessionCount: metas.length, dataRange };
+  return { dir, sessionCount: metas.length, dataRange, sources: supportedSources() };
 }
 
 export function queryDetail(

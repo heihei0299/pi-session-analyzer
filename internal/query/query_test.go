@@ -36,8 +36,9 @@ func TestQueryCodexAndAllSources(t *testing.T) {
 	if res.Totals == nil || res.Totals.Requests != 1 || res.Totals.TotalTokens != 15 || res.Totals.CostStatus != "unpriced" {
 		t.Fatalf("unexpected codex totals: %+v", res)
 	}
-	if res.Meta == nil || len(res.Meta.Sources) != 1 || res.Meta.Sources[0] != "codex" {
-		t.Fatalf("missing codex source metadata: %+v", res.Meta)
+	// meta.sources 是后端能力声明（能提供哪些数据源），不是本次查询的参与源。
+	if res.Meta == nil || len(res.Meta.Sources) != 2 || res.Meta.Sources[0] != "pi" || res.Meta.Sources[1] != "codex" {
+		t.Fatalf("meta must declare backend capabilities: %+v", res.Meta)
 	}
 
 	cfg.Source = "all"
@@ -99,8 +100,8 @@ func TestQueryCodexRealShapedFixtureBaseline(t *testing.T) {
 	if totals.Totals.CostStatus != "unpriced" {
 		t.Fatalf("codex cost must stay unpriced: %+v", totals.Totals)
 	}
-	if totals.Meta == nil || len(totals.Meta.Sources) != 1 || totals.Meta.Sources[0] != "codex" {
-		t.Fatalf("missing codex source metadata: %+v", totals.Meta)
+	if totals.Meta == nil || len(totals.Meta.Sources) != 2 || totals.Meta.Sources[0] != "pi" || totals.Meta.Sources[1] != "codex" {
+		t.Fatalf("meta must declare backend capabilities: %+v", totals.Meta)
 	}
 	warnings := strings.Join(totals.Meta.Warnings, "\n")
 	if !strings.Contains(warnings, "notes.jsonl") {
@@ -192,5 +193,109 @@ func TestQueryCodexCoverageDiagnosticsSurviveRepeatedQueries(t *testing.T) {
 		if res.Totals == nil || res.Totals.TotalTokens != 34 {
 			t.Fatalf("run %d: totals must not drift across queries: %+v", run, res.Totals)
 		}
+	}
+}
+
+// period 必须按每条 usage event 的消息 timestamp 归属；All 必须保留 Pi 的已知美元金额，
+// 同时用 costStatus=unpriced 标注合计里含未定价源。
+func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) {
+	piDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(piDir, "pi_period.jsonl"), []byte(`{"type":"session","id":"pi-period","timestamp":"2026-09-09T12:00:00Z","cwd":"/pi"}
+{"type":"message","timestamp":"2026-09-09T12:00:01Z","message":{"role":"assistant","model":"pi-model","usage":{"input":2,"output":3,"cost":{"total":0.25}}}}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sd := sessiondata.NewSessionData()
+	cfg := Config{
+		PiDir:    piDir,
+		CodexDir: filepath.Join("..", "codex", "testdata", "codex-period-home"),
+		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
+		Source:   "codex",
+	}
+
+	codexTotals, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codexTotals.Totals.TotalTokens != 39 || codexTotals.Totals.Cost != 0 || codexTotals.Totals.CostStatus != "unpriced" {
+		t.Fatalf("codex totals should stay fully unpriced: %+v", codexTotals.Totals)
+	}
+
+	codexPeriod, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewPeriod, Period: domain.PeriodDay})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexRows, ok := codexPeriod.Rows.([]domain.PeriodRow)
+	if !ok || len(codexRows) != 2 {
+		t.Fatalf("cross-day codex rollout must split into two day rows: %#v", codexPeriod.Rows)
+	}
+	if codexRows[0].Period != "2026-09-08" || codexRows[0].TotalTokens != 13 || codexRows[0].CostStatus != "unpriced" {
+		t.Fatalf("unexpected 09-08 period row: %+v", codexRows[0])
+	}
+	if codexRows[1].Period != "2026-09-09" || codexRows[1].TotalTokens != 26 || codexRows[1].CostStatus != "unpriced" {
+		t.Fatalf("unexpected 09-09 period row: %+v", codexRows[1])
+	}
+
+	cfg.Source = "all"
+	allTotals, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allTotals.Totals.TotalTokens != 44 || allTotals.Totals.Cost != 0.25 || allTotals.Totals.CostStatus != "unpriced" {
+		t.Fatalf("all totals must keep known priced cost while marking unpriced source: %+v", allTotals.Totals)
+	}
+
+	allPeriod, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewPeriod, Period: domain.PeriodDay})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allRows, ok := allPeriod.Rows.([]domain.PeriodRow)
+	if !ok || len(allRows) != 2 {
+		t.Fatalf("all period must keep two split day rows: %#v", allPeriod.Rows)
+	}
+	if allRows[0].Period != "2026-09-08" || allRows[0].TotalTokens != 13 || allRows[0].Cost != 0 {
+		t.Fatalf("unexpected all 09-08 row: %+v", allRows[0])
+	}
+	if allRows[1].Period != "2026-09-09" || allRows[1].TotalTokens != 31 || allRows[1].Cost != 0.25 {
+		t.Fatalf("unexpected all 09-09 row: %+v", allRows[1])
+	}
+	groups, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewGroups, By: domain.GroupByModel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupRows, ok := groups.Rows.([]domain.GroupRow)
+	if !ok || len(groupRows) != 2 {
+		t.Fatalf("all groups must expose both models: %#v", groups.Rows)
+	}
+	groupTokens := map[string]float64{}
+	for _, row := range groupRows {
+		groupTokens[row.Model] = row.TotalTokens
+	}
+	if groupTokens["period-model"] != 39 || groupTokens["pi-model"] != 5 {
+		t.Fatalf("unexpected all groups: %+v", groupTokens)
+	}
+
+	sessions, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionRows, ok := sessions.Rows.([]domain.SessionRow)
+	if !ok || len(sessionRows) != 2 {
+		t.Fatalf("all sessions must expose pi and codex rows: %#v", sessions.Rows)
+	}
+	sourceSet := map[string]bool{}
+	for _, row := range sessionRows {
+		sourceSet[row.Source] = true
+	}
+	if !sourceSet["codex"] || !sourceSet["pi"] {
+		t.Fatalf("all sessions must expose both sources: %+v", sessionRows)
+	}
+
+	meta, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewMeta})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Meta == nil || len(meta.Meta.Sources) != 2 || meta.Meta.Sources[0] != "pi" || meta.Meta.Sources[1] != "codex" {
+		t.Fatalf("meta.sources must declare backend capabilities: %+v", meta.Meta)
 	}
 }

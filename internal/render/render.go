@@ -15,10 +15,17 @@ func metricWidths() []int {
 	return []int{8, 10, 10, 10, 10, 10, 12, 10, 8}
 }
 
+func hasPartialCost(t domain.Totals) bool {
+	return t.CostStatus != "" && t.Cost > 0
+}
+
 func metricValues(t domain.Totals) []string {
 	rateStr := fmt.Sprintf("%.1f%%", t.CacheRate*100)
 	costStr := fmt.Sprintf("$%.4f", t.Cost)
-	if t.CostStatus != "" {
+	if hasPartialCost(t) {
+		// * 由表格末尾图例解释：合计保留可定价源金额，但含 unpriced 源，成本仅部分可用。
+		costStr = fmt.Sprintf("$%.4f*", t.Cost)
+	} else if t.CostStatus != "" {
 		costStr = t.CostStatus
 	} else if t.Cost == 0 {
 		costStr = "$0.00"
@@ -36,11 +43,18 @@ func metricValues(t domain.Totals) []string {
 	}
 }
 
+func withPartialCostLegend(out string, partial bool) string {
+	if !partial {
+		return out
+	}
+	return out + "* 含 unpriced 源：cost 为可定价源合计，成本仅部分可用\n"
+}
+
 func RenderTotalsTable(t domain.Totals) string {
 	headers := metricHeaders()
 	vals := metricValues(t)
 	widths := metricWidths()
-	return renderRows([][]string{headers, vals}, widths)
+	return withPartialCostLegend(renderRows([][]string{headers, vals}, widths), hasPartialCost(t))
 }
 
 func RenderSessionTable(rows []domain.SessionRow) string {
@@ -49,11 +63,13 @@ func RenderSessionTable(rows []domain.SessionRow) string {
 
 	var allRows [][]string
 	allRows = append(allRows, headers)
+	partial := false
 	for _, r := range rows {
+		partial = partial || hasPartialCost(r.Totals)
 		vals := append([]string{r.SessionId, r.Timestamp, r.Cwd, r.Model}, metricValues(r.Totals)...)
 		allRows = append(allRows, vals)
 	}
-	return renderRows(allRows, widths)
+	return withPartialCostLegend(renderRows(allRows, widths), partial)
 }
 
 func RenderRequestTable(rows []domain.RequestRow) string {
@@ -62,11 +78,13 @@ func RenderRequestTable(rows []domain.RequestRow) string {
 
 	var allRows [][]string
 	allRows = append(allRows, headers)
+	partial := false
 	for _, r := range rows {
+		partial = partial || hasPartialCost(r.Totals)
 		vals := append([]string{r.SessionId, r.Timestamp, r.Model}, metricValues(r.Totals)...)
 		allRows = append(allRows, vals)
 	}
-	return renderRows(allRows, widths)
+	return withPartialCostLegend(renderRows(allRows, widths), partial)
 }
 
 func RenderGroupTable(rows []domain.GroupRow, by domain.GroupBy) string {
@@ -89,7 +107,9 @@ func RenderGroupTable(rows []domain.GroupRow, by domain.GroupBy) string {
 
 	var allRows [][]string
 	allRows = append(allRows, headers)
+	partial := false
 	for _, r := range rows {
+		partial = partial || hasPartialCost(r.Totals)
 		var prefix []string
 		if byModel {
 			prefix = append(prefix, r.Model)
@@ -99,7 +119,7 @@ func RenderGroupTable(rows []domain.GroupRow, by domain.GroupBy) string {
 		}
 		allRows = append(allRows, append(prefix, metricValues(r.Totals)...))
 	}
-	return renderRows(allRows, widths)
+	return withPartialCostLegend(renderRows(allRows, widths), partial)
 }
 
 func RenderPeriodTable(rows []domain.PeriodRow, period domain.Period) string {
@@ -114,11 +134,13 @@ func RenderPeriodTable(rows []domain.PeriodRow, period domain.Period) string {
 
 	var allRows [][]string
 	allRows = append(allRows, headers)
+	partial := false
 	for _, r := range rows {
+		partial = partial || hasPartialCost(r.Totals)
 		vals := append([]string{r.Period}, metricValues(r.Totals)...)
 		allRows = append(allRows, vals)
 	}
-	return renderRows(allRows, widths)
+	return withPartialCostLegend(renderRows(allRows, widths), partial)
 }
 
 func renderRows(rows [][]string, widths []int) string {

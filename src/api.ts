@@ -27,6 +27,9 @@ import { loadCredentials } from "./opencode/credentials.ts";
 import { resolveDbPathFromEnv, SCHEMA_VERSION } from "./db.ts";
 import { withDirDb, queryTotals, queryGroups, queryPeriod, querySessions, queryRequests, queryMeta, queryDetail } from "./db-aggregation.ts";
 import type { DbFilter } from "./db-aggregation.ts";
+import { GO_EDITION_HINT, supportedSources } from "./source-capabilities.ts";
+
+export { supportedSources };
 
 /** 会话活跃阈值：文件 mtime 距今 ≤ 5min 视为活跃（pi 正在写入） */
 const ACTIVE_MS = 5 * 60 * 1000;
@@ -41,6 +44,13 @@ class ApiError extends Error {
   constructor(status: number, error: string, detail: string) {
     super(detail); this.status = status; this.detail = detail; this.name = error;
   }
+}
+
+// TS/npm 后端只实际提供 Pi；meta.sources 声明的能力与这里的校验必须一致。
+function assertSupportedSource(params: URLSearchParams): void {
+  const source = (params.get("source") ?? "").trim();
+  if (source === "" || source === "pi") return;
+  throw new ApiError(400, "Unsupported", `${source} 数据源不支持：${GO_EDITION_HINT}`);
 }
 
 function serializeDetail(detail: {
@@ -108,6 +118,7 @@ export async function handleApi(
       return { status: 200, body: out };
     }
     if (method === "GET" && pathname === "/api/sessions/detail") {
+      assertSupportedSource(params);
       const sessionId = params.get("sessionId") ?? params.get("sessionID") ?? params.get("id") ?? "";
       if (!sessionId || sessionId.trim() === "") throw new ApiError(400, "Bad Request", "缺少 sessionId");
       try {
@@ -119,6 +130,7 @@ export async function handleApi(
       }
     }
     if (method === "GET" && pathname.startsWith("/api/sessions/") && pathname.endsWith("/detail")) {
+      assertSupportedSource(params);
       const m = pathname.match(/^\/api\/sessions\/([^/]+)\/detail$/);
       if (!m) throw new ApiError(400, "Bad Request", "缺少 sessionId");
       let sessionId: string;
@@ -133,6 +145,7 @@ export async function handleApi(
       }
     }
     if (method === "POST" && pathname === "/api/sessions/rename") {
+      assertSupportedSource(params);
       return await renameSession(dir, body);
     }
     if (method === "GET" && pathname === "/api/requests") {
@@ -148,18 +161,21 @@ export async function handleApi(
       return { status: 200, body: out };
     }
     if (method === "GET" && pathname === "/api/groups") {
+      assertSupportedSource(params);
       const by = parseGroupBy(params);
       const filter = dbFilterFromParams(params);
       const rows = await withDirDb(dir, (db) => queryGroups(db, by, filter));
       return { status: 200, body: { window: "totals", by, rows: rows.map(groupToObject) } };
     }
     if (method === "GET" && pathname === "/api/period") {
+      assertSupportedSource(params);
       const period = parsePeriod(params);
       const filter = dbFilterFromParams(params);
       const res = await withDirDb(dir, (db) => queryPeriod(db, period, filter));
       return { status: 200, body: { window: "totals", period, rows: res.rows.map(periodToObject) } };
     }
     if (method === "GET" && pathname === "/api/meta") {
+      assertSupportedSource(params);
       const result = await withDirDb(dir, (db) => queryMeta(db, dir));
       return { status: 200, body: result };
     }
@@ -340,6 +356,7 @@ function filterFromParams(params: URLSearchParams, kind: "session" | "message"):
 }
 
 function dbFilterFromParams(params: URLSearchParams): DbFilter {
+  assertSupportedSource(params);
   const since = params.get("since") ?? undefined;
   const until = params.get("until") ?? undefined;
   if (since !== undefined) {

@@ -289,6 +289,10 @@ main{max-width:1280px; margin:14px auto 40px; padding:0 24px}
   background: rgba(255,255,255,.05); border:1px dashed rgba(255,255,255,.2); box-shadow:none; padding:4px 8px; border-radius:6px;
   display:inline-block;
 }
+.card .value.partial{
+  font-family:var(--font-ui); font-size:13px; font-weight:600; color:var(--brass-glint);
+  display:inline-block; line-height:1.25; padding:2px 0;
+}
 .card .sub{
   font-family:var(--font-mono);
   margin-top:8px; font:500 11px var(--font-mono); color:var(--slate-2); letter-spacing:.02em;
@@ -486,6 +490,13 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 .drawer-merge-switch:hover{border-color:var(--brass)}
 .detail-trigger{cursor:pointer}
 .detail-trigger:hover{text-decoration:underline;text-decoration-color:var(--brass)}
+/* Codex/All 数据源：会话详情与重命名只覆盖 Pi 会话，去掉可点击的可供性 */
+.source-non-pi .detail-trigger{cursor:not-allowed;opacity:.72}
+.source-non-pi .detail-trigger:hover{text-decoration:none}
+.source-non-pi .session-row .name{cursor:not-allowed;opacity:.72}
+.source-non-pi .session-row .name:hover{background:#172023;border-color:rgba(255,255,255,.08);color:var(--enamel);box-shadow:none}
+.source-non-pi [data-tab="requests"]{cursor:not-allowed;opacity:.55}
+.source-non-pi #drawer-title{cursor:default}
 .detail-child-row{background:rgba(197,162,84,.14); /* FFF6D6 淡背景 */}
 .detail-child-row td{background:rgba(197,162,84,.14) !important; /* FFF6D6 淡背景 */}
 .session-parent-toggle{appearance:none;border:1px solid rgba(255,255,255,.15);background:#182225;color:var(--brass-glint);width:22px;height:22px;border-radius:6px;cursor:pointer;font:700 12px var(--font-mono);display:inline-grid;place-items:center;margin-right:6px;vertical-align:middle;flex:0 0 22px;transition:all .15s ease}
@@ -545,7 +556,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
       <select id="until-minute" title="结束分钟"><option value="">分</option><option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option><option value="59">59</option></select>
     </div>
     <label style="display:inline-flex;align-items:center;gap:6px;font:500 11px var(--font-mono);color:var(--slate-2)">数据源
-      <select id="source-selector" title="数据源"><option value="pi" selected>Pi</option><option value="codex">Codex</option><option value="all">All</option></select>
+      <select id="source-selector" title="数据源"></select>
     </label>
     <span style="flex:1"></span>
     <select id="auto-refresh" title="自动刷新">
@@ -743,6 +754,15 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":
 function fmtCompact(n){ if(n>=1e6) return (n/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(n>=1e4) return (n/1e3).toFixed(1).replace(/\.0$/,"")+"k"; return n.toLocaleString("en-US"); }
 const UNPRICED="费率未配置（免费/未定价）";
 function fmtCost(n){return n===0?UNPRICED:n.toLocaleString("en-US",{maximumFractionDigits:6})}
+/** All 窗口可能同时含可定价 Pi 与 unpriced Codex：保留已知金额，并标注「含 unpriced 源 / 部分可用」。 */
+function fmtCostCell(v,r){
+  const cost=Number(v??0)||0;
+  if(r?.costStatus==="unpriced"){
+    if(cost>0) return `<span class="cost-partial" title="部分可用：含 unpriced 源">$${fmtCost(cost)}（含 unpriced 源）</span>`;
+    return UNPRICED;
+  }
+  return cost===0?UNPRICED:fmtCost(cost);
+}
 function fmtRate(r){return (r*100).toFixed(2)+"%"}
 function fmtMicroCost(n){return "$"+(n/1e8).toLocaleString("en-US",{minimumFractionDigits:4,maximumFractionDigits:4})}
 function fmtOpencodeCost(n){return n===0?UNPRICED:"$"+Number(n).toLocaleString("en-US",{minimumFractionDigits:4,maximumFractionDigits:4})}
@@ -755,7 +775,46 @@ function fmtTimestamp(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 function dateStamp(){const d=new Date();return dateStr(d)+"-"+String(d.getHours()).padStart(2,"0")+String(d.getMinutes()).padStart(2,"0")+String(d.getSeconds()).padStart(2,"0")}
-function filterParams(){const p=new URLSearchParams(); if(state.since) p.set("since",state.since); if(state.until) p.set("until",state.until); if(state.sourceTouched||state.source!=="pi") p.set("source",state.source); return p}
+function filterParams(){const p=new URLSearchParams(); p.set("source",state.source); if(state.since) p.set("since",state.since); if(state.until) p.set("until",state.until); return p}
+/* ——— 数据源能力声明：后端用 /api/meta 的 sources 声明它能提供哪些源，UI 不再自行假设 ——— */
+const SOURCE_LABELS={pi:"Pi",codex:"Codex"};
+/** 后端未声明任何源时保守只提供 Pi：绝不呈现后端做不到的源。 */
+function declaredSources(sources){const declared=Array.isArray(sources)?sources.filter(s=>SOURCE_LABELS[s]):[]; return declared.length?declared:["pi"]}
+function sourceSupportsPiOnlyFeatures(){return state.source==="pi"}
+function sourceDisplayName(){return state.source==="pi"?"Pi":"Codex/All"}
+function sourceUnsupportedReason(feature){return `${sourceDisplayName()} 不支持${feature}（该能力仅覆盖 Pi 会话）`}
+function applySourceGuards(){
+  const piOnly=!sourceSupportsPiOnlyFeatures();
+  const requestsTab=document.querySelector('[data-tab="requests"]');
+  if(requestsTab){
+    requestsTab.disabled=piOnly;
+    requestsTab.setAttribute("aria-disabled",String(piOnly));
+    requestsTab.title=piOnly?"Codex/All 不支持 requests 查询":"请求明细";
+  }
+  document.body.classList.toggle("source-non-pi",piOnly);
+  document.querySelectorAll(".detail-trigger").forEach(el=>{
+    el.setAttribute("aria-disabled",String(piOnly));
+    el.title=piOnly?sourceUnsupportedReason("会话详情"):"点击查看详情";
+  });
+  document.querySelectorAll(".session-row .name").forEach(el=>{
+    el.setAttribute("aria-disabled",String(piOnly));
+    el.title=piOnly?sourceUnsupportedReason("重命名"):"点击重命名："+el.textContent;
+  });
+  if(piOnly && detailDrawerState.open) closeDrawer();
+}
+function applySourceCapabilities(sources){
+  const available=declaredSources(sources);
+  const options=available.length>1?available.concat(["all"]):available.slice();
+  const selector=$("#source-selector");
+  if(selector){
+    selector.innerHTML=options.map(v=>`<option value="${v}">${v==="all"?"All":SOURCE_LABELS[v]||escapeHtml(v)}</option>`).join("");
+    if(!options.includes(state.source)) state.source=available.includes("pi")?"pi":available[0];
+    selector.value=state.source;
+    selector.disabled=options.length<2;
+    selector.title=options.length<2?`当前后端只提供 ${options.map(v=>v==="all"?"All":SOURCE_LABELS[v]||v).join("/")} 数据源`:"数据源";
+  }
+  applySourceGuards();
+}
 async function api(path,params=filterParams()){const res=await fetch("/api/"+path+(params&&params.toString()?"?"+params:"")); if(!res.ok){let detail=""; try{detail=(await res.json()).detail??""}catch{} throw new Error(detail||`HTTP ${res.status}`)} return res.json()}
 function showError(msg){const el=$("#error-banner"); el.textContent=msg; el.classList.add("show")}
 function clearError(){$("#error-banner").classList.remove("show")}
@@ -787,13 +846,8 @@ async function refreshDbMeta() {
 }
 function renderStatus(meta) {
   lastMeta = meta;
-  if (!state.sourceTouched && Array.isArray(meta.sources) && meta.sources.length) {
-    state.source = meta.sources.length > 1 ? "all" : meta.sources[0];
-    const selector = $("#source-selector");
-    if (selector) selector.value = state.source;
-    const requestsTab = document.querySelector('[data-tab="requests"]');
-    if (requestsTab) requestsTab.disabled = state.source !== "pi";
-  }
+  // 只按后端声明的能力渲染可选源；不因「声明了多个源」就把默认视图跳到 All（默认始终是 Pi）。
+  applySourceCapabilities(meta.sources);
   updateStatusRange();
   // header meta pills
   const dirEl = $("#meta-dir"), cntEl = $("#meta-count");
@@ -851,10 +905,25 @@ function renderCards(totals){
     if(cardRate) cardRate.title = `缓存命中率: ${fmtRate(totals.cacheRate)} (${(totals.cacheRead||0).toLocaleString()} / ${((totals.input||0)+(totals.cacheRead||0)).toLocaleString()})`;
   }
   const costEl=document.getElementById("v-cost");
-  const unpriced = totals.costStatus === "unpriced" || totals.cost === 0;
-  if(unpriced){ costEl.textContent=UNPRICED; costEl.classList.add("unpriced"); } else { costEl.textContent=fmtCost(totals.cost); costEl.classList.remove("unpriced"); }
+  const cost=Number(totals.cost||0);
+  const partialCost = totals.costStatus === "unpriced" && cost > 0;
+  const unpriced = totals.costStatus === "unpriced" && cost === 0;
+  const pricedZero = totals.costStatus !== "unpriced" && cost === 0;
+  costEl.classList.toggle("partial", partialCost);
+  costEl.classList.toggle("unpriced", unpriced || pricedZero);
+  if(partialCost){
+    costEl.textContent=`$${fmtCost(cost)}（含 unpriced 源）`;
+  } else if(unpriced || pricedZero){
+    costEl.textContent=UNPRICED;
+  } else {
+    costEl.textContent=fmtCost(cost);
+  }
   const cardCost = document.getElementById("card-cost");
-  if(cardCost) cardCost.title = unpriced ? UNPRICED : "$" + totals.cost.toFixed(6);
+  if(cardCost){
+    if(partialCost) cardCost.title=`部分可用：含 unpriced 源，已知花费 $${cost.toFixed(6)}`;
+    else if(unpriced) cardCost.title="含 unpriced 源；无可用的已知美元花费";
+    else cardCost.title="$" + cost.toFixed(6);
+  }
   // tape
   const total = (totals.input||0) + (totals.cacheRead||0) + (totals.output||0);
   const a=totals.input||0, b=totals.cacheRead||0, c=totals.output||0;
@@ -913,7 +982,7 @@ function bindTapeInteractions(){
   segO.addEventListener("mouseleave",resetDetail);
 }
 const GROUP_COLS=[{key:"key",label:"分组键"},{key:"requests",label:"请求数"},{key:"input",label:"总输入"},{key:"output",label:"输出"},{key:"cacheRate",label:"缓存率"},{key:"totalTokens",label:"总token"},{key:"cost",label:"花费"}];
-const GROUP_FMTS={cacheRate:fmtRate,input:(v,r)=>fmtCompact((r.input??0)+(r.cacheRead??0)),output:fmtCompact,totalTokens:fmtCompact,cost:(v,r)=>(r?.costStatus==="unpriced"||v===0?UNPRICED:fmtCost(v))};
+const GROUP_FMTS={cacheRate:fmtRate,input:(v,r)=>fmtCompact((r.input??0)+(r.cacheRead??0)),output:fmtCompact,totalTokens:fmtCompact,cost:fmtCostCell};
 async function refreshGroups(){
   const params=filterParams();
   if(state.groupBy==="date"){
@@ -947,13 +1016,12 @@ async function refreshOverview(){
 function applyPreset(preset) {
   state.preset = preset;
   document.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("active", b.dataset.preset === preset));
+  $("#custom-range").classList.toggle("hidden", preset !== "custom");
   const now = new Date();
   if (preset === "all") {
     state.since = null;
     state.until = null;
-    $("#custom-range").classList.add("hidden");
   } else if (preset === "custom") {
-    $("#custom-range").classList.remove("hidden");
     (function(){
       const pad=n=>String(n).padStart(2,"0");
       const setCustom=(dateSel,hourSel,minuteSel,val,isUntil)=>{
@@ -1034,14 +1102,15 @@ function bindSourceSelector() {
   selector.addEventListener("change", () => {
     state.source = selector.value;
     state.sourceTouched = true;
-    const requestsTab = document.querySelector('[data-tab="requests"]');
-    if (requestsTab) {
-      requestsTab.disabled = state.source !== "pi";
-      requestsTab.title = state.source === "pi" ? "请求明细" : "Codex/All 不支持 requests 查询";
-    }
+    applySourceGuards();
     detailState.sessions.page = 1;
     detailState.requests.page = 1;
     lastSnapshot = "";
+    // 请求级窗口只覆盖 Pi：若当前正停留在 requests，切到非 Pi 后必须离开该 tab。
+    if (!sourceSupportsPiOnlyFeatures() && state.tab === "requests") {
+      switchTab("overview");
+      return;
+    }
     refreshAll();
   });
 }
@@ -1055,7 +1124,9 @@ async function exportData(format){
   try{
     clearError();
     const params=filterParams();
-    const [totals,sessions,requests]=await Promise.all([api("totals",params), api("sessions",params), api("requests",params)]);
+    // Codex/All 不支持 requests：导出时不要把已知的 totals/sessions 一起拖垮。
+    const requestPromise = sourceSupportsPiOnlyFeatures() ? api("requests",params) : Promise.resolve({ rows: [] });
+    const [totals,sessions,requests]=await Promise.all([api("totals",params), api("sessions",params), requestPromise]);
     const stamp=dateStamp();
     if(format==="json"){ const blob=new Blob([JSON.stringify({totals,sessions,requests},null,2)],{type:"application/json"}); downloadBlob(blob,`token-analyzer-${stamp}.json`)}
     else{ const blob=new Blob([toCsv3(totals,sessions,requests)],{type:"text/csv"}); downloadBlob(blob,`token-analyzer-${stamp}.csv`)}
@@ -1077,7 +1148,7 @@ const METRIC_FMTS = {
   reasoning: fmtCompact,
   totalTokens: fmtCompact,
   cacheRate: fmtRate,
-  cost: (v, r) => (r?.costStatus === "unpriced" || v === 0 ? UNPRICED : fmtCost(v)),
+  cost: fmtCostCell,
 };
 // 排序/分页在服务端执行（避免明细端点全量传输）；rows=当前页、total=筛选后全量行数
 const detailState = {
@@ -1297,6 +1368,7 @@ function renderDetailTable(kind) {
       sumEl.title = `总计 ${st.totals.totalTokens.toLocaleString()} tokens，${st.totals.requests} 请求，${st.total} 会话（已按时间与筛选条件聚合，含子代理）`;
     }
   }
+  applySourceGuards();
 }
 async function refreshSessionTable(){try{clearError(); await fetchRows("sessions"); renderDetailTable("sessions")}catch(e){showError("会话明细加载失败: "+e.message)}}
 async function refreshRequestTable(){try{clearError(); await fetchRows("requests"); renderDetailTable("requests")}catch(e){showError("请求明细加载失败: "+e.message)}}
@@ -1414,12 +1486,14 @@ async function refreshSessionGroups(){
       h3.addEventListener("click",()=>g.classList.toggle("collapsed"));
       g.appendChild(h3); g.appendChild(body); wrap.appendChild(g);
     }
+    applySourceGuards();
   }catch(e){showError("会话管理加载失败: "+e.message)}
 }
 function bindSessionManage(){
   const handleRenameClick = e=>{
     const nameEl=e.target.closest(".session-row .name");
     if(!nameEl||document.querySelector(".session-row.editing")) return;
+    if(!sourceSupportsPiOnlyFeatures()){ showError(sourceUnsupportedReason("重命名")); return; }
     startSessionRename(nameEl);
   };
   $("#session-groups")?.addEventListener("click", handleRenameClick);
@@ -1433,12 +1507,16 @@ function bindSessionManage(){
   });
 }
 function startSessionRename(nameEl){
+  if(!sourceSupportsPiOnlyFeatures()){ showError(sourceUnsupportedReason("重命名")); return; }
   const row=nameEl.closest(".session-row"); const errEl=row.querySelector(".err"); errEl.textContent=""; row.classList.add("editing");
   const prevText=nameEl.textContent; const input=document.createElement("input"); input.type="text"; input.className="rename-input"; input.value=prevText; input.maxLength=100; nameEl.replaceWith(input); input.focus(); input.select();
   let saveOnBlur=false; let done=false;
   const exitEdit=save=>{
     if(done) return; done=true; const name=input.value.trim();
-    if(!save||!name){ if(name==="") errEl.textContent="显示名不能为空"; restoreSessionName(input,row,prevText); return; }
+    // Esc/失焦取消：静默恢复原名称，不把取消误报成空名错误。
+    if(!save){ restoreSessionName(input,row,prevText); return; }
+    // Enter 保存但名称为空：这是唯一需要提示「显示名不能为空」的路径。
+    if(!name){ errEl.textContent="显示名不能为空"; restoreSessionName(input,row,prevText); return; }
     saveSessionRename(row,input,errEl,name);
   };
   input.addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault(); saveOnBlur=true; input.blur()} else if(e.key==="Escape"){e.preventDefault(); saveOnBlur=false; input.blur()}});
@@ -1448,7 +1526,8 @@ function restoreSessionName(input,row,text){const span=document.createElement("s
 async function saveSessionRename(row,input,errEl,name){
   const sid=row.dataset.sid;
   try{
-    const res=await fetch("/api/sessions/rename",{method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({sessionId:sid, name})});
+    const qs=filterParams().toString();
+    const res=await fetch("/api/sessions/rename"+(qs?"?"+qs:""),{method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({sessionId:sid, name})});
     const body=await res.json();
     if(!res.ok){ errEl.textContent=body.detail||("HTTP "+res.status); restoreSessionName(input,row,name); return; }
     await refreshSessionGroups();
@@ -1850,11 +1929,13 @@ function refreshAll(){ if(state.tab==="overview") refreshOverview(); if(state.ta
 
 const detailDrawerState_unused = null; // placeholder to keep lint happy
 async function fetchDetail(sessionId){
-  const res = await fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/detail");
+  const params = filterParams();
+  const res = await fetch("/api/sessions/" + encodeURIComponent(sessionId) + "/detail?" + params);
   if(!res.ok){ let detail=""; try{detail=(await res.json()).detail||""}catch{} throw new Error(detail||`HTTP ${res.status}`); }
   return res.json();
 }
 async function openDrawer(sessionId){
+  if(!sourceSupportsPiOnlyFeatures()){ showError(sourceUnsupportedReason("会话详情")); return; }
   detailDrawerState.sessionId = sessionId;
   detailDrawerState.merge = true;
   detailDrawerState.open = true;
@@ -2017,6 +2098,7 @@ function renderDetailDrawer(){
   }
 }
 function startDetailRename(titleEl){
+  if(!sourceSupportsPiOnlyFeatures()){ showError(sourceUnsupportedReason("重命名")); return; }
   const rowErr = document.getElementById("drawer-rename-err");
   if(rowErr) rowErr.textContent = "";
   if(document.querySelector("#drawer-title.rename-input") || titleEl.tagName.toLowerCase()==="input") return;
@@ -2064,7 +2146,8 @@ async function saveDetailRename(input, prevText, name){
   const errEl = document.getElementById("drawer-rename-err");
   const sid = detailDrawerState.sessionId;
   try{
-    const res = await fetch("/api/sessions/rename",{method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({sessionId:sid, name})});
+    const qs = filterParams().toString();
+    const res = await fetch("/api/sessions/rename"+(qs?"?"+qs:""),{method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({sessionId:sid, name})});
     let body={}; try{ body = await res.json(); }catch{}
     if(!res.ok){
       if(errEl) errEl.textContent = body.detail || ("HTTP "+res.status);
@@ -2100,6 +2183,7 @@ function bindDetailDrawerInteractions(){
     if(t.tagName.toLowerCase()==="input") return;
     if(document.querySelector("#drawer-title.rename-input")) return;
     if(!detailDrawerState.open || !detailDrawerState.data) return;
+    if(!sourceSupportsPiOnlyFeatures()){ showError(sourceUnsupportedReason("重命名")); return; }
     startDetailRename(t);
   });
   const mask = $("#drawer-mask");
@@ -2119,6 +2203,7 @@ function bindDetailDrawerInteractions(){
       if(state.tab==="manage") return;
       const trigger = e.target.closest(".detail-trigger");
       if(!trigger) return;
+      if(!sourceSupportsPiOnlyFeatures()){ e.stopPropagation(); showError(sourceUnsupportedReason("会话详情")); return; }
       const sid = trigger.dataset.sid;
       if(!sid) return;
       e.stopPropagation();
