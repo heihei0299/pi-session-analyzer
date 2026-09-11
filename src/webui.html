@@ -504,6 +504,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 .source-non-pi .session-row .name:hover{background:#172023;border-color:rgba(255,255,255,.08);color:var(--enamel);box-shadow:none}
 .source-non-pi [data-tab="requests"]{cursor:not-allowed;opacity:.55}
 .source-non-pi #drawer-title{cursor:default}
+.source-non-pi #diagnostics{display:none !important}
 .detail-child-row{background:rgba(197,162,84,.14); /* FFF6D6 淡背景 */}
 .detail-child-row td{background:rgba(197,162,84,.14) !important; /* FFF6D6 淡背景 */}
 .session-parent-toggle{appearance:none;border:1px solid rgba(255,255,255,.15);background:#182225;color:var(--brass-glint);width:22px;height:22px;border-radius:6px;cursor:pointer;font:700 12px var(--font-mono);display:inline-grid;place-items:center;margin-right:6px;vertical-align:middle;flex:0 0 22px;transition:all .15s ease}
@@ -809,6 +810,11 @@ function applySourceGuards(){
     el.title=piOnly?sourceUnsupportedReason("重命名"):"点击重命名："+el.textContent;
   });
   if(piOnly && detailDrawerState.open) closeDrawer();
+  const diagnostics=$("#diagnostics");
+  if(diagnostics && piOnly){
+    diagnostics.innerHTML="";
+    diagnostics.classList.remove("show");
+  }
 }
 function applySourceCapabilities(sources){
   const available=declaredSources(sources);
@@ -896,7 +902,7 @@ function renderStatus(meta) {
   const diagnostics = $("#diagnostics");
   const warnings = Array.isArray(meta?.warnings) ? meta.warnings : [];
   if (diagnostics) {
-    if (!warnings.length) {
+    if (!warnings.length || state.source !== "pi") {
       diagnostics.innerHTML = "";
       diagnostics.classList.remove("show");
     } else {
