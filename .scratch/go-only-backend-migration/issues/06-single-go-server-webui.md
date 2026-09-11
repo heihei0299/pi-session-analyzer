@@ -2,7 +2,7 @@
 
 **What to build:** 用户启动一个 Go binary 即可使用 Pi、Codex、All 的完整受支持 WebUI；UI 只有一个人工维护源，全部 API 由 Go 提供，没有 Node server、内嵌 OpenCode 页面或双副本同步；OpenCode UI 仅存在于独立 `opencode-analyzer/` 项目。
 
-**Blocked by:** 02: 将 OpenCode 抽离为 standalone opencode-analyzer 项目; 03: Pi 全窗口切到 Go ledger + Query Engine; 04: Codex / All 切到同一个 ledger-native Query Engine; 05: 收口 Refresh / Query / Watch 生命周期.
+**Blocked by:** 01: 将 OpenCode 抽离为 standalone opencode-analyzer 项目; 03: Pi 全窗口切到 Go ledger + Query Engine; 04: Codex / All 切到同一个 ledger-native Query Engine; 05: 收口 Refresh / Query / Watch 生命周期.
 
 **Status:** ready-for-agent
 
