@@ -15,6 +15,17 @@
 - **双账本去重**：`session_usage_dedup(data_source, request_id, semantic_id, has_entry_id)`，`request_id = hash(pi-session-request-v3+kind+entry.id+timestamp)`，`semantic_id = hash(pi-session-semantic-v1+kind+entry_ts+msg_ts+provider/model/responseModel/... + canonical usage)`，同文件 `requestId` 去重（`stopReason` 优先/`output` 最大），跨文件持久账本，叠加 fork `ts<forkTs`。
 - **指纹增量**：`PiFileRevision{modifiedMs, fileSize, tailFingerprint(末4096B SHA256, pi-session-tail-v1), complete}` 编码于 `session_log_sync.last_synced_at`，`tail(oldEOF)==expected` 则 `seek`，否则全量重扫（账本防双算），`last_line_offset` 行游标保证半行不推进。
 - **会话发现（双布局，直切 cc-switch providers/pi.rs）**：`PI_CODING_AGENT_SESSION_DIR`（绝对路径才可枚举，相对路径 `400 PI_SESSION_DIR_REQUIRES_PROJECT_CONTEXT`）> `pi native defaults`（`getPiNativeSessionDir()` 读 pi 配置的 session_dir，若无则空）> `~/.pi/agent/sessions`（`--dir` 默认值）；`Flat`（根下 `*.jsonl`）vs `ProjectDirectories`（`sessions/<project>/*.jsonl` 两层）按 `layout` 枚举，不再递归兜底；`--dir` 显式时仅影响第三优先级默认根，`PI_CODING_AGENT_SESSION_DIR` 与 `~/.pi-switch` 等其他项目目录隔离。
+
+## Codex 数据域
+
+- **Codex rollout**：Codex CLI 的持久化运行记录；它不是 Pi 的“会话文件”，同一逻辑 thread 可能有多个物理 rollout。
+- **物理 rollout**：磁盘上的一份 Codex rollout 表示；plain JSONL 与 zstd 压缩表示属于同一物理记录，不应重复计数。
+- **Codex usage event**：一个有可靠 usage 的 Codex response 记录；累计 snapshot 只是状态，不是额外的 usage event。
+- **Codex response identity**：由 Codex source 与 response ID 确定的一次 usage 记录，用于跨重扫、fork/revert 和压缩切换保持幂等。
+- **Codex cost 状态**：本 effort 只确认 token usage；`unpriced` 表示没有可用美元花费，不等于花费为零。
+- **Codex 计入口径**：上游 `usage.input_tokens` 是**含缓存**的 prompt 总量，因此账本 `input` 一律记非缓存输入（`input_tokens - cached_input_tokens`，饱和减、不为负），`cacheRead = cached_input_tokens`；据此 `totalTokens = input + cacheRead + output`（ADR-0002）等于上游自报的 `usage.total_tokens`（唯一例外是 `cached > input` 的口径异常记录，此时按 0 饱和计入并告警，数值会大于上游）。`cacheWrite` / `reasoning` 独立成列且不参与 `totalTokens`（ADR-0004）。
+- **Codex 覆盖率诊断**：物理 rollout 只有 `token_count` 快照、没有 durable usage record 时不计入任何窗口，但必须产生 per-file 诊断（含未计入快照条数，结构化字段 `meta.uncountedSnapshots`）；诊断随文件 revision 存续、每次查询都会重放，游标命中跳过重扫也不例外。累计 snapshot 永远不是 Codex usage event，不参与 totals。
+
 ## 统计窗口
 
 - **totals（总窗口）**：全量计入口径消息的汇总（requests / input / output / cacheRead / cacheWrite / reasoning / totalTokens / cost / cacheRate）。

@@ -125,6 +125,7 @@ func attachMeta(sd *sessiondata.SessionData, dir string, files []*sessiondata.Se
 	}
 	meta := metaResult.Meta
 	meta.Warnings = append(meta.Warnings, diagnostics.Warnings...)
+	meta.UncountedSnapshots += diagnostics.UncountedSnapshots
 	if len(meta.Sources) == 0 && len(files) > 0 {
 		meta.Sources = []string{"codex"}
 	}

@@ -154,7 +154,8 @@ func (d *Database) createTables() error {
 			last_line_offset INTEGER NOT NULL DEFAULT 0,
 			last_synced_at INTEGER NOT NULL,
 			last_byte_offset INTEGER,
-			last_tail_fingerprint INTEGER
+			last_tail_fingerprint INTEGER,
+			diagnostics_summary TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS session_usage_dedup (
 			data_source TEXT NOT NULL,
@@ -293,6 +294,34 @@ func (d *Database) ensureColumns() error {
 	_ = rows.Close()
 	if !sourceColumns["subagent_history_start_ordinal"] {
 		if _, err := d.DB.Exec(`ALTER TABLE source_sessions ADD COLUMN subagent_history_start_ordinal INTEGER`); err != nil {
+			return err
+		}
+	}
+	rows, err = d.DB.Query(`PRAGMA table_info(session_log_sync)`)
+	if err != nil {
+		return err
+	}
+	syncColumns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		syncColumns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	// per-file 诊断摘要：游标命中的文件不再重扫，诊断必须能重放，否则覆盖率缺口只在首次查询可见。
+	if !syncColumns["diagnostics_summary"] {
+		if _, err := d.DB.Exec(`ALTER TABLE session_log_sync ADD COLUMN diagnostics_summary TEXT NOT NULL DEFAULT ''`); err != nil {
 			return err
 		}
 	}

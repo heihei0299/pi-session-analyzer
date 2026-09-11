@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseRolloutReturnsPartialResultsWithDiagnostics(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "rollout-2026-09-08T12-00-00Z-thread-1.jsonl")
+	path := filepath.Join(t.TempDir(), "rollout-2026-09-08T12-00-00-00000000-0000-7000-8000-000000000001.jsonl")
 	content := "{" + `"timestamp":"2026-09-08T12:00:00Z","type":"session_meta","payload":{"id":"t1"}}` + "\n" +
 		"not-json\n" +
 		`{"timestamp":"2026-09-08T12:00:01Z","type":"future_event","payload":{}}` + "\n" +

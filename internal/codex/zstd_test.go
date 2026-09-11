@@ -11,7 +11,7 @@ import (
 
 func TestParseRolloutReadsZstd(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "rollout-2026-09-08T12-00-00Z-thread-1.jsonl.zst")
+	path := filepath.Join(dir, "rollout-2026-09-08T12-00-00-00000000-0000-7000-8000-000000000001.jsonl.zst")
 	content := []byte(`{"timestamp":"2026-09-08T12:00:00Z","type":"session_meta","payload":{"session_id":"s1","id":"t1","cwd":"/workspace","model_provider":"openai"}}
 {"timestamp":"2026-09-08T12:00:01Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":3,"output_tokens":2}}}
 `)

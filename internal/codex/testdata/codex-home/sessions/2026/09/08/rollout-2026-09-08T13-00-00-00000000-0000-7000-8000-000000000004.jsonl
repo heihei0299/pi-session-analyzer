@@ -1,0 +1,5 @@
+{"timestamp":"2026-09-08T13:00:00Z","type":"session_meta","payload":{"session_id":"snapshot-session","id":"snapshot-thread","cwd":"/synthetic/snapshot","originator":"codex_cli_rs","cli_version":"fixture","model_provider":"openai"}}
+{"timestamp":"2026-09-08T13:00:01Z","type":"turn_context","payload":{"turn_id":"turn-snapshot-1","model":"fixture-model"}}
+{"timestamp":"2026-09-08T13:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20,"total_tokens":120},"last_token_usage":{"input_tokens":50,"cached_input_tokens":20,"output_tokens":10,"total_tokens":60}}}}
+{"timestamp":"2026-09-08T13:00:03Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200,"cached_input_tokens":80,"output_tokens":40,"total_tokens":240},"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20,"total_tokens":120}}}}
+{"timestamp":"2026-09-08T13:00:04Z","type":"world_state","payload":{"state":{}}}

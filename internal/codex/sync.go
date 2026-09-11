@@ -3,6 +3,7 @@ package codex
 import (
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -41,19 +42,22 @@ func SyncRollouts(database *db.Database, home string) (SyncResult, error) {
 			result.Diagnostics.warn("无法读取 %s: %v", file.Path, err)
 			continue
 		}
-		unchanged, err := cursorMatches(database.DB, file.Path, rev)
+		unchanged, stored, err := cursorState(database.DB, file.Path, rev)
 		if err != nil {
 			return result, err
 		}
 		if unchanged {
+			// 游标命中即不重扫，但该 revision 的 per-file 诊断必须重放：
+			// 覆盖率诊断若只在首次解析时出现，用户第二次查询就看不到漏算了。
+			mergeDiagnostics(&result.Diagnostics, &stored)
 			continue
 		}
 
-		parsed, parseDiagnostics, err := ParseRollout(file)
-		mergeDiagnostics(&result.Diagnostics, &parseDiagnostics)
+		parsed, fileDiagnostics, err := ParseRollout(file)
 		if err != nil {
 			result.Diagnostics.Skipped++
-			result.Diagnostics.warn("无法解析 %s: %v", file.Path, err)
+			fileDiagnostics.warn("无法解析 %s: %v", file.Path, err)
+			mergeDiagnostics(&result.Diagnostics, &fileDiagnostics)
 			continue
 		}
 
@@ -61,7 +65,7 @@ func SyncRollouts(database *db.Database, home string) (SyncResult, error) {
 		if err != nil {
 			return result, err
 		}
-		imported, skipped, err := syncParsedRollout(tx, file, parsed, rev, &result.Diagnostics)
+		imported, skipped, err := syncParsedRollout(tx, file, parsed, rev, &fileDiagnostics)
 		if err != nil {
 			_ = tx.Rollback()
 			return result, fmt.Errorf("同步 %s 失败: %w", file.Path, err)
@@ -71,6 +75,7 @@ func SyncRollouts(database *db.Database, home string) (SyncResult, error) {
 		}
 		result.Imported += imported
 		result.Skipped += skipped
+		mergeDiagnostics(&result.Diagnostics, &fileDiagnostics)
 	}
 	return result, nil
 }
@@ -137,7 +142,11 @@ func syncParsedRollout(tx *sql.Tx, file RolloutFile, parsed ParsedRollout, rev f
 		}
 		imported++
 	}
-	_, err := tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint) VALUES (?, ?, ?, ?, ?, ?)`, file.Path, rev.modifiedMs, rev.completeLines, time.Now().Unix(), rev.completeBytes, rev.tail)
+	summary, err := json.Marshal(diagnostics)
+	if err != nil {
+		return 0, 0, err
+	}
+	_, err = tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint, diagnostics_summary) VALUES (?, ?, ?, ?, ?, ?, ?)`, file.Path, rev.modifiedMs, rev.completeLines, time.Now().Unix(), rev.completeBytes, rev.tail, string(summary))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -206,20 +215,32 @@ func fingerprint(data []byte) int64 {
 	return result
 }
 
-func cursorMatches(database *sql.DB, path string, rev fileRevision) (bool, error) {
+// cursorState 判定文件 revision 是否与游标一致；一致时一并返回该 revision 的 per-file 诊断摘要。
+func cursorState(database *sql.DB, path string, rev fileRevision) (bool, Diagnostics, error) {
 	var modified, offset, tail sql.NullInt64
-	err := database.QueryRow(`SELECT last_modified, last_byte_offset, last_tail_fingerprint FROM session_log_sync WHERE file_path = ?`, path).Scan(&modified, &offset, &tail)
+	var summary sql.NullString
+	err := database.QueryRow(`SELECT last_modified, last_byte_offset, last_tail_fingerprint, diagnostics_summary FROM session_log_sync WHERE file_path = ?`, path).Scan(&modified, &offset, &tail, &summary)
 	if err == sql.ErrNoRows {
-		return false, nil
+		return false, Diagnostics{}, nil
 	}
 	if err != nil {
-		return false, err
+		return false, Diagnostics{}, err
 	}
-	return modified.Valid && offset.Valid && tail.Valid && modified.Int64 == rev.modifiedMs && offset.Int64 == rev.completeBytes && tail.Int64 == rev.tail && rev.logicalSize == rev.completeBytes, nil
+	matched := modified.Valid && offset.Valid && tail.Valid && modified.Int64 == rev.modifiedMs && offset.Int64 == rev.completeBytes && tail.Int64 == rev.tail && rev.logicalSize == rev.completeBytes
+	if !matched {
+		return false, Diagnostics{}, nil
+	}
+	stored := Diagnostics{}
+	if summary.Valid && strings.TrimSpace(summary.String) != "" {
+		// 摘要是诊断通道，损坏时降级为「无诊断」，不能因此中断同步。
+		_ = json.Unmarshal([]byte(summary.String), &stored)
+	}
+	return true, stored, nil
 }
 
 func mergeDiagnostics(target, source *Diagnostics) {
 	target.Warnings = append(target.Warnings, source.Warnings...)
 	target.Skipped += source.Skipped
 	target.Conflicts += source.Conflicts
+	target.UncountedSnapshots += source.UncountedSnapshots
 }

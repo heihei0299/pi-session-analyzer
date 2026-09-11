@@ -807,6 +807,9 @@ type QueryMeta struct {
 	DataRange    DataRangeValue `json:"dataRange"`
 	Sources      []string       `json:"sources,omitempty"`
 	Warnings     []string       `json:"warnings,omitempty"`
+	// UncountedSnapshots 是「只有累计快照、没有 durable usage record」的 Codex 快照条数：
+	// 结构化暴露覆盖率缺口，供 UI/对账直接读取，而不必解析告警文案。
+	UncountedSnapshots int `json:"uncountedSnapshots,omitempty"`
 }
 
 type DataRangeValue struct {

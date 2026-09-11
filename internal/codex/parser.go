@@ -43,6 +43,8 @@ type UsageEvent struct {
 	Provider   string       `json:"provider"`
 	Usage      domain.Usage `json:"usage"`
 	CostStatus string       `json:"costStatus"`
+	// CachedOverInput 标记 provider 口径异常（cached 大于 input），由调用方转成诊断。
+	CachedOverInput bool `json:"cachedOverInput,omitempty"`
 }
 
 type ParsedRollout struct {
@@ -62,6 +64,7 @@ func ParseRollout(file RolloutFile) (ParsedRollout, Diagnostics, error) {
 	var diagnostics Diagnostics
 	turnModels := make(map[string]string)
 	turnProviders := make(map[string]string)
+	tokenCountSnapshots := 0
 	lines, incomplete, readErr := readCompleteLines(reader)
 	if incomplete {
 		diagnostics.Skipped++
@@ -106,11 +109,19 @@ func ParseRollout(file RolloutFile) (ParsedRollout, Diagnostics, error) {
 				diagnostics.warn("%s:%d: token_usage_record 缺少可靠 usage 或 response_id", file.Path, line+1)
 				continue
 			}
+			if event.CachedOverInput {
+				diagnostics.warn("%s:%d: cached_input_tokens 超过 input_tokens，非缓存输入按 0 计入（provider 口径异常）", file.Path, line+1)
+			}
 			parsed.Usage = append(parsed.Usage, event)
 		case "model_reroute":
 			diagnostics.warn("%s:%d: Codex model reroute 仅作诊断，不改写 response model", file.Path, line+1)
-		case "response_item", "event_msg", "compacted", "inter_agent_communication", "retained_context", "turn_started", "turn_completed", "history_snapshot":
-			// Known non-ledger event. It can still carry diagnostics context, but never usage.
+		case "event_msg":
+			// 已知非账本事件：累计 usage 快照只是状态，不是额外的 Codex usage event。
+			if stringValue(payload["type"]) == "token_count" {
+				tokenCountSnapshots++
+			}
+		case "response_item", "compacted", "inter_agent_communication", "retained_context", "turn_started", "turn_completed", "history_snapshot", "world_state":
+			// 已知非账本事件：只作上下文，永不产生 usage。
 		default:
 			diagnostics.Skipped++
 			diagnostics.warn("%s:%d: 未知 Codex event type %q", file.Path, line+1, typeName)
@@ -118,6 +129,11 @@ func ParseRollout(file RolloutFile) (ParsedRollout, Diagnostics, error) {
 	}
 	if readErr != nil {
 		return parsed, diagnostics, readErr
+	}
+	if tokenCountSnapshots > 0 && len(parsed.Usage) == 0 {
+		// 不静默漏算：该物理 rollout 只有累计快照、没有 durable usage record，本适配不推算 token。
+		diagnostics.UncountedSnapshots += tokenCountSnapshots
+		diagnostics.warn("%s: 有 %d 条 token_count 快照但无 durable usage record，未计入统计", file.Path, tokenCountSnapshots)
 	}
 	if parsed.Meta.ThreadID == "" {
 		parsed.Meta.ThreadID = parsed.Meta.SessionID
@@ -238,6 +254,10 @@ func parseSessionMeta(payload map[string]json.RawMessage, envelopeTimestamp stri
 	return meta
 }
 
+// parseUsageEvent 把一条 Codex usage event 映射为账本口径的 usage：
+// 上游 input_tokens 是**含缓存**的 prompt 总量，因此账本 input 记非缓存输入（饱和减，不为负），
+// cacheRead 记 cached_input_tokens，从而 totalTokens（ADR-0002: input + cacheRead + output）等于上游自报的 usage.total_tokens。
+// provider 口径异常（cached 大于 input）以事件上的 CachedOverInput 标记交给调用方转成诊断。
 func parseUsageEvent(payload map[string]json.RawMessage, timestamp string) (UsageEvent, bool) {
 	usage := objectValue(payload["usage"])
 	if usage == nil {
@@ -257,6 +277,11 @@ func parseUsageEvent(payload map[string]json.RawMessage, timestamp string) (Usag
 	cacheWrite := number(usage, "cache_write_input_tokens", "cacheWriteInputTokens", "cache_creation_tokens", "cacheCreationTokens")
 	output := number(usage, "output_tokens", "outputTokens")
 	reasoning := number(usage, "reasoning_output_tokens", "reasoningOutputTokens", "reasoning_tokens", "reasoningTokens")
+	nonCachedInput := input - cacheRead
+	cachedOverInput := nonCachedInput < 0
+	if cachedOverInput {
+		nonCachedInput = 0
+	}
 	return UsageEvent{
 		ResponseID: responseID,
 		TurnID:     firstString(payload, "turn_id", "turnId"),
@@ -266,14 +291,15 @@ func parseUsageEvent(payload map[string]json.RawMessage, timestamp string) (Usag
 		Model:      firstString(payload, "model", "model_id", "modelId"),
 		Provider:   firstString(payload, "provider", "model_provider", "modelProvider"),
 		Usage: domain.Usage{
-			Input:       input,
+			Input:       nonCachedInput,
 			CacheRead:   cacheRead,
 			CacheWrite:  cacheWrite,
 			Output:      output,
 			Reasoning:   reasoning,
-			TotalTokens: input + cacheRead + output,
+			TotalTokens: nonCachedInput + cacheRead + output,
 		},
-		CostStatus: "unpriced",
+		CostStatus:      "unpriced",
+		CachedOverInput: cachedOverInput,
 	}, true
 }
 

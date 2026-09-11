@@ -16,7 +16,7 @@ func TestSyntheticFixtureMatchesRealWorldLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 3 || discoveryDiagnostics.Skipped != 1 {
+	if len(files) != 4 || discoveryDiagnostics.Skipped != 1 {
 		t.Fatalf("unexpected synthetic fixture discovery: files=%+v diagnostics=%+v", files, discoveryDiagnostics)
 	}
 	if !strings.Contains(strings.Join(discoveryDiagnostics.Warnings, "\n"), "notes.jsonl") {
@@ -26,10 +26,12 @@ func TestSyntheticFixtureMatchesRealWorldLayout(t *testing.T) {
 	plainName := "rollout-2026-09-08T12-00-00-00000000-0000-7000-8000-000000000001.jsonl"
 	revertedName := "rollout-2026-09-08T12-01-00-00000000-0000-7000-8000-000000000001_00000000-0000-7000-8000-000000000002.jsonl"
 	archiveName := "rollout-2026-09-07T12-00-00-00000000-0000-7000-8000-000000000003.jsonl"
+	snapshotOnlyName := "rollout-2026-09-08T13-00-00-00000000-0000-7000-8000-000000000004.jsonl"
 	wantPaths := map[string]string{
-		plainName:    "sessions/2026/09/08/" + plainName,
-		revertedName: "sessions/2026/09/08/" + revertedName,
-		archiveName:  "archived_sessions/2026/09/07/" + archiveName,
+		plainName:        "sessions/2026/09/08/" + plainName,
+		revertedName:     "sessions/2026/09/08/" + revertedName,
+		snapshotOnlyName: "sessions/2026/09/08/" + snapshotOnlyName,
+		archiveName:      "archived_sessions/2026/09/07/" + archiveName,
 	}
 
 	relOf := func(path string) string {
@@ -56,10 +58,10 @@ func TestSyntheticFixtureMatchesRealWorldLayout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(parsed.Usage) == 0 {
+		name := filepath.Base(file.Path)
+		if name != snapshotOnlyName && len(parsed.Usage) == 0 {
 			t.Fatalf("fixture rollout has no reliable usage: %s", file.Path)
 		}
-		name := filepath.Base(file.Path)
 		parsedByName[name] = parsed
 		diagnosticsByName[name] = diagnostics
 	}
@@ -90,6 +92,22 @@ func TestSyntheticFixtureMatchesRealWorldLayout(t *testing.T) {
 	}
 	if reverted.File.PhysicalID == plain.File.PhysicalID || reverted.Meta.SessionID != "fixture-session" || reverted.Meta.ThreadID != "fixture-thread" || reverted.Meta.HistoryBase != "fixture-history-base" || len(reverted.Usage) != 1 || reverted.Usage[0].ResponseID != "fixture-revert-response" {
 		t.Fatalf("reverted rollout identity or metadata incomplete: %+v", reverted)
+	}
+
+	// 只有累计快照、没有 durable usage record 的 rollout：不产生 usage 行，但必须报告未计入的覆盖率。
+	snapshotOnly, ok := parsedByName[snapshotOnlyName]
+	if !ok {
+		t.Fatalf("snapshot-only fixture missing: %s", snapshotOnlyName)
+	}
+	if len(snapshotOnly.Usage) != 0 {
+		t.Fatalf("cumulative snapshots must not become usage rows: %+v", snapshotOnly.Usage)
+	}
+	snapshotWarnings := strings.Join(diagnosticsByName[snapshotOnlyName].Warnings, "\n")
+	if diagnosticsByName[snapshotOnlyName].UncountedSnapshots != 2 || !strings.Contains(snapshotWarnings, "未计入") {
+		t.Fatalf("snapshot-only fixture must report uncounted coverage: %+v", diagnosticsByName[snapshotOnlyName])
+	}
+	if strings.Contains(snapshotWarnings, "未知 Codex event type") {
+		t.Fatalf("known non-ledger events must not be reported as unknown: %+v", diagnosticsByName[snapshotOnlyName])
 	}
 
 	database, err := db.Open(filepath.Join(t.TempDir(), "fixture.db"))

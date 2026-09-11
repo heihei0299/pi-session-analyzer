@@ -70,9 +70,10 @@ type RolloutFile struct {
 }
 
 type Diagnostics struct {
-	Warnings  []string `json:"warnings,omitempty"`
-	Skipped   int      `json:"skipped,omitempty"`
-	Conflicts int      `json:"conflicts,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+	Skipped            int      `json:"skipped,omitempty"`
+	Conflicts          int      `json:"conflicts,omitempty"`
+	UncountedSnapshots int      `json:"uncountedSnapshots,omitempty"`
 }
 
 func (d *Diagnostics) warn(format string, args ...any) {
