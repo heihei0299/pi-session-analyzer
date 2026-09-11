@@ -208,7 +208,14 @@ a{color:inherit}
 }
 #diagnostics{
   margin-top:8px; font:500 11px var(--font-mono); line-height:1.5; color:#FFE8B0;
-  background:rgba(197,162,84,.08); border-left:3px solid var(--brass); padding:8px 14px; border-radius:0 10px 10px 0; white-space:pre-wrap;
+  background:rgba(197,162,84,.08); border-left:3px solid var(--brass); padding:8px 14px; border-radius:0 10px 10px 0;
+}
+#diagnostics summary{
+  cursor:pointer; user-select:none; font-weight:600; outline:none; display:flex; align-items:center; justify-content:space-between;
+}
+#diagnostics summary::-webkit-details-marker{ color:var(--brass); }
+#diagnostics .diag-body{
+  margin-top:8px; max-height:180px; overflow-y:auto; white-space:pre-wrap; opacity:.92; padding-top:6px; border-top:1px solid rgba(197,162,84,.18);
 }
 #diagnostics:not(.show){display:none}
 #error-banner{
@@ -789,7 +796,8 @@ function applySourceGuards(){
   if(requestsTab){
     requestsTab.disabled=piOnly;
     requestsTab.setAttribute("aria-disabled",String(piOnly));
-    requestsTab.title=piOnly?"Codex/All 不支持 requests 查询":"请求明细";
+    requestsTab.textContent=piOnly?"请求明细 (仅限Pi)":"请求明细";
+    requestsTab.title=piOnly?"Codex/All 仅支持会话级统计，不支持单次请求明细（该功能仅覆盖 Pi 会话）":"请求明细";
   }
   document.body.classList.toggle("source-non-pi",piOnly);
   document.querySelectorAll(".detail-trigger").forEach(el=>{
@@ -888,8 +896,16 @@ function renderStatus(meta) {
   const diagnostics = $("#diagnostics");
   const warnings = Array.isArray(meta?.warnings) ? meta.warnings : [];
   if (diagnostics) {
-    diagnostics.textContent = warnings.length ? `诊断警告：\n${warnings.join("\n")}` : "";
-    diagnostics.classList.toggle("show", warnings.length > 0);
+    if (!warnings.length) {
+      diagnostics.innerHTML = "";
+      diagnostics.classList.remove("show");
+    } else {
+      diagnostics.innerHTML = `<details class="diag-details">
+        <summary><span>⚠️ 诊断提示：检测到 ${warnings.length} 条会话快照未计入统计（点击展开/收起详情）</span><span style="font-size:10px;opacity:.75;color:var(--brass)">展开 / 折叠 ▼</span></summary>
+        <div class="diag-body">${escapeHtml(warnings.join("\n"))}</div>
+      </details>`;
+      diagnostics.classList.add("show");
+    }
   }
   refreshDbMeta();
 }
