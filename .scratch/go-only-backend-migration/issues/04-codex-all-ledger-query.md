@@ -2,7 +2,7 @@
 
 **What to build:** Codex 与 All 用户查看 totals、sessions、groups、period、meta 时直接查询 normalized ledger，不再经过 ledger → SessionFileData → memory aggregate 回绕；Pi/Codex/All 使用同一统计引擎与统一 token/cost 语义。
 
-**Blocked by:** 01: 冻结 Go-only 迁移 canonical contract.
+**Blocked by:** 02: 冻结 Go-only 迁移 canonical contract.
 
 **Status:** ready-for-agent
 
