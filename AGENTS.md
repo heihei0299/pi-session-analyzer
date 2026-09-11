@@ -54,7 +54,6 @@ Never commit secrets, `.env` files, real session logs, or local databases. Use r
 - 理解/定位 → `codegraph explore`
 - 调研/原型 → `research` / `prototype`
 - 修改/实现 → 简单低风险直接执行：理解现状 → 最小修改 → 相关验证；有实际改动且验证通过时按一个用户请求执行一次 `git commit`；测试先行、TDD 或集成测试 → `tdd`；bug、失败、异常或性能问题 → `diagnose-fix`；其它中大型修改 → 先澄清范围、验收和验证方式，再按项目流程执行
-- 审查/设计 → `code-review` / `grilling` / `domain-modeling`
 - 无法归类 → 直接澄清
 
 ## 分文件
