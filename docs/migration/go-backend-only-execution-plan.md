@@ -17,11 +17,14 @@
 ## 可执行 Ticket 图
 
 ```text
-01 canonical contract       02 remove OpenCode coupling
-        |                              |
-        +----> 03 Pi Go ledger         |
-        |                              |
-        +----> 04 Codex/All ledger     |
+01 extract OpenCode       02 canonical contract
+        |
+        v
+02 canonical contract
+        |
+        +----> 03 Pi Go ledger
+        |
+        +----> 04 Codex/All ledger
                     \                /
                      \              /
                        03 + 04
@@ -42,18 +45,17 @@
 
 可立即执行：
 
-- **01** 冻结 canonical migration contract
-- **02** 从 token-analyzer 移除 OpenCode 耦合
+- **01** 将 OpenCode 抽离为独立 `opencode-analyzer/` 项目
 
-完成 01 后，03 与 04 可并行。
+完成 01 后执行 02；完成 02 后，03 与 04 可并行。
 
 ## Ticket 摘要
 
-### 01 — Canonical contract
-建立 synthetic fixtures + golden expected，冻结 Pi/Codex 已接受行为。
+### 01 — OpenCode standalone extraction
+把现有 OpenCode 能力完整迁入仓库根下独立 `opencode-analyzer/`，保留功能并建立未来可整目录拆仓的边界。
 
-### 02 — OpenCode decoupling
-移除 OpenCode RPC/credential/sync/storage/CLI/API/WebUI audit。未来如需该能力，在独立项目/插件实现。
+### 02 — Canonical contract
+建立 synthetic fixtures + golden expected，冻结 Pi/Codex 已接受行为。
 
 ### 03 — Pi Go ledger/query
 Pi 所有窗口统一走 Refresh → ledger → Query，旧文件扫描 aggregate 退出生产。
@@ -90,7 +92,7 @@ Query 只读；Refresh 负责写；Watch 只 change → refresh → query。
 - [ ] Watch 无独立 usage aggregation。
 - [ ] 单一 WebUI 源由 Go binary 提供。
 - [ ] TypeScript backend 已删除。
-- [ ] OpenCode runtime/API/UI/storage/credential 耦合已删除。
+- [ ] OpenCode 已迁入独立 `opencode-analyzer/` 项目边界，token-analyzer 与其无运行时耦合。
 - [ ] Node 不再是运行 token-analyzer 的必要条件。
 - [ ] canonical fixtures 独立保护最终 Go 行为。
 - [ ] module/repository/release/docs 与最终边界一致。
