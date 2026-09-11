@@ -651,7 +651,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
   <section id="tab-requests" class="tab-panel">
     <div class="detail-table-wrap">
       <table id="request-table">
-        <thead><tr id="request-head" data-sort="timestamp" data-dir="desc">
+        <thead><tr id="request-head">
           <th class="sortable" data-key="displayName">会话名称 <span class="arrow"></span></th>
           <th class="sortable" data-key="sessionId">会话ID <span class="arrow"></span></th>
           <th class="sortable" data-key="timestamp">时间 <span class="arrow"></span></th>
@@ -751,7 +751,7 @@ const state={preset:"today",since:null,until:null,source:"pi",sourceTouched:fals
 const opencodeState={year:new Date().getFullYear(),month:new Date().getMonth()+1,historyPage:1,historySize:20,filterModel:"",total:0,lastSync:null};
 const $=sel=>document.querySelector(sel);
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function fmtCompact(n){ if(n>=1e6) return (n/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(n>=1e4) return (n/1e3).toFixed(1).replace(/\.0$/,"")+"k"; return n.toLocaleString("en-US"); }
+function fmtCompact(n){ if(n>=1e9) return (n/1e9).toFixed(1).replace(/\.0$/,"")+"B"; if(n>=1e6) return (n/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(n>=1e4) return (n/1e3).toFixed(1).replace(/\.0$/,"")+"k"; return n.toLocaleString("en-US"); }
 const UNPRICED="费率未配置（免费/未定价）";
 function fmtCost(n){return n===0?UNPRICED:n.toLocaleString("en-US",{maximumFractionDigits:6})}
 /** All 窗口可能同时含可定价 Pi 与 unpriced Codex：保留已知金额，并标注「含 unpriced 源 / 部分可用」。 */
@@ -1122,6 +1122,13 @@ function bindCustomRange() {
   }
 }
 async function exportData(format){
+  const jsonBtn=$("#export-json"), csvBtn=$("#export-csv");
+  const origJson=jsonBtn?.textContent||"导出 JSON", origCsv=csvBtn?.textContent||"导出 CSV";
+  const setBusy=b=>{
+    if(jsonBtn){ jsonBtn.disabled=b; jsonBtn.textContent=b?"导出中…":origJson; }
+    if(csvBtn){ csvBtn.disabled=b; csvBtn.textContent=b?"导出中…":origCsv; }
+  };
+  setBusy(true);
   try{
     clearError();
     const params=filterParams();
@@ -1132,6 +1139,7 @@ async function exportData(format){
     if(format==="json"){ const blob=new Blob([JSON.stringify({totals,sessions,requests},null,2)],{type:"application/json"}); downloadBlob(blob,`token-analyzer-${stamp}.json`)}
     else{ const blob=new Blob([toCsv3(totals,sessions,requests)],{type:"text/csv"}); downloadBlob(blob,`token-analyzer-${stamp}.csv`)}
   }catch(e){showError("导出失败: "+e.message)}
+  finally{setBusy(false)}
 }
 function downloadBlob(blob,name){const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function csvSection(title,rows){ if(!rows||rows.length===0) return `# ${title}\n`; const keys=Object.keys(rows[0]); const esc=v=>/[",\n\r]/.test(String(v))?`"${String(v).replace(/"/g,'""')}"`:String(v); const lines=["# "+title, keys.map(esc).join(","), ...rows.map(r=>keys.map(k=>esc(r[k])).join(","))]; return lines.join("\n")}

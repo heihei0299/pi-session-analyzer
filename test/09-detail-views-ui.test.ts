@@ -43,9 +43,10 @@ test("S15 明细 tab 骨架标记：表头列数 / 排序标记 / 默认倒序 /
     assert.match(body, /class="sortable"/);
     assert.match(body, /class="arrow"/);
 
-    // 请求明细默认时间倒序声明
-    assert.match(body, /data-sort="timestamp"/);
-    assert.match(body, /data-dir="desc"/);
+    // 请求明细默认时间倒序声明（状态定义承载，表头移除静态死属性）
+    assert.doesNotMatch(body, /<tr id="request-head"[^>]*data-sort/);
+    assert.doesNotMatch(body, /<tr id="request-head"[^>]*data-dir/);
+    assert.match(body, /requests:\s*\{[^}]*sortKey:\s*"timestamp",\s*sortDir:\s*"desc"/);
 
     // 分页下拉含 20/50/100
     assert.match(body, /<option value="20" selected>20<\/option>/);
