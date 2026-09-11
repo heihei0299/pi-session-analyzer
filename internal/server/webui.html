@@ -751,9 +751,9 @@ const state={preset:"today",since:null,until:null,source:"pi",sourceTouched:fals
 const opencodeState={year:new Date().getFullYear(),month:new Date().getMonth()+1,historyPage:1,historySize:20,filterModel:"",total:0,lastSync:null};
 const $=sel=>document.querySelector(sel);
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function fmtCompact(n){ if(n>=1e9) return (n/1e9).toFixed(1).replace(/\.0$/,"")+"B"; if(n>=1e6) return (n/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(n>=1e4) return (n/1e3).toFixed(1).replace(/\.0$/,"")+"k"; return n.toLocaleString("en-US"); }
+function fmtCompact(n){ if(n===undefined||n===null||Number.isNaN(Number(n))) return "0"; const num=Number(n); if(num>=1e9) return (num/1e9).toFixed(1).replace(/\.0$/,"")+"B"; if(num>=1e6) return (num/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(num>=1e4) return (num/1e3).toFixed(1).replace(/\.0$/,"")+"k"; return num.toLocaleString("en-US"); }
 const UNPRICED="费率未配置（免费/未定价）";
-function fmtCost(n){return n===0?UNPRICED:n.toLocaleString("en-US",{maximumFractionDigits:6})}
+function fmtCost(n){ if(n===undefined||n===null||Number.isNaN(Number(n))) return UNPRICED; const num=Number(n); return num===0?UNPRICED:num.toLocaleString("en-US",{maximumFractionDigits:6}); }
 /** All 窗口可能同时含可定价 Pi 与 unpriced Codex：保留已知金额，并标注「含 unpriced 源 / 部分可用」。 */
 function fmtCostCell(v,r){
   const cost=Number(v??0)||0;
@@ -917,8 +917,16 @@ function updateStatusRange() {
     statusLine.style.display = updHtml ? "" : "none";
   }
 }
+function normalizeTotals(raw){
+  if(!raw) return {};
+  if(raw.totals && typeof raw.totals === "object"){
+    return { ...raw.totals, costStatus: raw.costStatus || raw.totals.costStatus, window: raw.window || "totals" };
+  }
+  return raw;
+}
 let lastTotals=null;
-function renderCards(totals){
+function renderCards(rawTotals){
+  const totals=normalizeTotals(rawTotals);
   lastTotals=totals;
   const set=(id,text,exactNum,isCost)=>{
     const el=document.getElementById(id);
@@ -1058,8 +1066,8 @@ async function refreshOverview(){
     }
     const [totals, meta, groups, sess] = await Promise.all(reqs);
     filteredSessionCount = sess ? sess.total : null;
+    if (meta) renderStatus(meta);
     renderCards(totals);
-    renderStatus(meta);
     renderGroupsData(groups);
   }catch(e){showError("加载失败: "+e.message)}
 }

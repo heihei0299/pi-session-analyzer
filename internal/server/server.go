@@ -150,6 +150,25 @@ func (s *Server) handleApiTotals(w http.ResponseWriter, r *http.Request) {
 		sendQueryError(w, err)
 		return
 	}
+	if res != nil && res.Totals != nil {
+		out := map[string]any{
+			"window":      res.Window,
+			"totals":      res.Totals,
+			"meta":        res.Meta,
+			"requests":    res.Totals.Requests,
+			"input":       res.Totals.Input,
+			"output":      res.Totals.Output,
+			"cacheRead":   res.Totals.CacheRead,
+			"cacheWrite":  res.Totals.CacheWrite,
+			"reasoning":   res.Totals.Reasoning,
+			"totalTokens": res.Totals.TotalTokens,
+			"cost":        res.Totals.Cost,
+			"cacheRate":   res.Totals.CacheRate,
+			"costStatus":  res.Totals.CostStatus,
+		}
+		sendJSON(w, http.StatusOK, out)
+		return
+	}
 	sendJSON(w, http.StatusOK, res)
 }
 
