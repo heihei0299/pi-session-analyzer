@@ -2,7 +2,7 @@
 
 **What to build:** Pi 用户通过 CLI/API/WebUI 使用 totals、sessions、requests、groups、period、detail、meta 时，Go 后端统一执行 Pi Refresh → normalized ledger → Query Engine，旧 SessionData 文件扫描聚合不再承担生产统计。
 
-**Blocked by:** 01: 冻结 Go-only 迁移 canonical contract.
+**Blocked by:** 02: 冻结 Go-only 迁移 canonical contract.
 
 **Status:** ready-for-agent
 
