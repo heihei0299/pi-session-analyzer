@@ -1,8 +1,10 @@
 package sessiondata
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
@@ -107,5 +109,48 @@ func TestPeriodAggregation(t *testing.T) {
 	kWeek, _ := sd.PeriodKey("2026-08-05T10:00:00Z", domain.PeriodWeek)
 	if kWeek != "2026-08-03" {
 		t.Errorf("expected 2026-08-03 for week, got %s", kWeek)
+	}
+}
+
+func TestEmptyQueryResultSerialization(t *testing.T) {
+	sd := NewSessionData()
+	// Test QueryFiles with empty files slice
+	res, err := sd.QueryFiles("", nil, Filter{}, View{Kind: ViewSessions, Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("QueryFiles ViewSessions failed: %v", err)
+	}
+	if res.Total != 0 {
+		t.Errorf("expected total 0, got %d", res.Total)
+	}
+	bytes, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	jsonStr := string(bytes)
+	if !strings.Contains(jsonStr, `"total":0`) {
+		t.Errorf("expected json to contain '\"total\":0', got: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, `"rows":[]`) {
+		t.Errorf("expected json to contain '\"rows\":[]', got: %s", jsonStr)
+	}
+
+	// Test ViewRequests with empty files slice
+	resReq, err := sd.QueryFiles("", nil, Filter{}, View{Kind: ViewRequests, Page: 1, Size: 10})
+	if err != nil {
+		t.Fatalf("QueryFiles ViewRequests failed: %v", err)
+	}
+	if resReq.Total != 0 {
+		t.Errorf("expected total 0, got %d", resReq.Total)
+	}
+	bytesReq, err := json.Marshal(resReq)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	jsonStrReq := string(bytesReq)
+	if !strings.Contains(jsonStrReq, `"total":0`) {
+		t.Errorf("expected json to contain '\"total\":0', got: %s", jsonStrReq)
+	}
+	if !strings.Contains(jsonStrReq, `"rows":[]`) {
+		t.Errorf("expected json to contain '\"rows\":[]', got: %s", jsonStrReq)
 	}
 }

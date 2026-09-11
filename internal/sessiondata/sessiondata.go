@@ -611,7 +611,7 @@ func (s *SessionData) TotalsFromFiles(files []*SessionFileData) domain.Totals {
 }
 
 func (s *SessionData) SessionRowsFromFiles(files []*SessionFileData) []domain.SessionRow {
-	var rows []domain.SessionRow
+	rows := make([]domain.SessionRow, 0, len(files))
 	for _, file := range files {
 		tot := domain.EmptyTotals()
 		modelSet := make(map[string]bool)
@@ -651,7 +651,7 @@ func (s *SessionData) SessionRowsFromFiles(files []*SessionFileData) []domain.Se
 }
 
 func (s *SessionData) RequestRowsFromFiles(files []*SessionFileData) []domain.RequestRow {
-	var rows []domain.RequestRow
+	rows := make([]domain.RequestRow, 0)
 	nameBySession := make(map[string]string)
 	for _, file := range files {
 		nameBySession[file.SessionId] = s.DisplayNameOf(file.FileName, file.FirstUserText)
@@ -719,7 +719,7 @@ func (s *SessionData) GroupRowsFromFiles(files []*SessionFileData, by domain.Gro
 		}
 	}
 
-	var rows []domain.GroupRow
+	rows := make([]domain.GroupRow, 0, len(keysOrder))
 	for _, k := range keysOrder {
 		g := groupMap[k]
 		domain.FinalizeTotals(&g.Totals)
@@ -782,7 +782,7 @@ func (s *SessionData) PeriodRowsFromFiles(files []*SessionFileData, p domain.Per
 	}
 
 	sort.Strings(keysOrder)
-	var rows []domain.PeriodRow
+	rows := make([]domain.PeriodRow, 0, len(keysOrder))
 	for _, k := range keysOrder {
 		g := periodMap[k]
 		domain.FinalizeTotals(&g.Totals)
@@ -796,8 +796,8 @@ type QueryResult struct {
 	Totals *domain.Totals `json:"totals,omitempty"`
 	By     domain.GroupBy `json:"by,omitempty"`
 	Period domain.Period  `json:"period,omitempty"`
-	Rows   any            `json:"rows,omitempty"`
-	Total  int            `json:"total,omitempty"`
+	Rows   any            `json:"rows"`
+	Total  int            `json:"total"`
 	Page   int            `json:"page,omitempty"`
 	Size   int            `json:"size,omitempty"`
 	Meta   *QueryMeta     `json:"meta,omitempty"`
@@ -884,6 +884,9 @@ func (s *SessionData) QueryFiles(dir string, files []*SessionFileData, f Filter,
 			}
 			pageRows = rows[start:end]
 		}
+		if pageRows == nil {
+			pageRows = make([]domain.SessionRow, 0)
+		}
 		return &QueryResult{Window: "sessions", Rows: pageRows, Total: total, Page: v.Page, Size: v.Size, Totals: &tot}, nil
 	case ViewRequests:
 		rows := s.RequestRowsFromFiles(filtered)
@@ -902,6 +905,9 @@ func (s *SessionData) QueryFiles(dir string, files []*SessionFileData, f Filter,
 				end = total
 			}
 			pageRows = rows[start:end]
+		}
+		if pageRows == nil {
+			pageRows = make([]domain.RequestRow, 0)
 		}
 		return &QueryResult{Window: "requests", Rows: pageRows, Total: total, Page: v.Page, Size: v.Size}, nil
 	}
