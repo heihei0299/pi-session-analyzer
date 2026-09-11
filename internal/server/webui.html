@@ -858,6 +858,23 @@ function renderSessionCount() {
     cntEl.textContent = String(m);
   }
 }
+async function updateFilteredSessionCount() {
+  if (!hasTimeFilter()) {
+    filteredSessionCount = null;
+    renderSessionCount();
+    return;
+  }
+  try {
+    const sp = filterParams();
+    sp.set("page", "1");
+    sp.set("size", "1");
+    const sess = await api("sessions", sp);
+    filteredSessionCount = sess ? sess.total : null;
+  } catch {
+    filteredSessionCount = null;
+  }
+  renderSessionCount();
+}
 function renderStatus(meta) {
   if (meta) lastMeta = meta;
   if (!lastMeta) return;
@@ -869,7 +886,7 @@ function renderStatus(meta) {
   if (dirEl) dirEl.textContent = lastMeta.dir;
   renderSessionCount();
   const diagnostics = $("#diagnostics");
-  const warnings = Array.isArray(meta?.warnings) ? meta.warnings : (Array.isArray(lastMeta?.warnings) ? lastMeta.warnings : []);
+  const warnings = Array.isArray(meta?.warnings) ? meta.warnings : [];
   if (diagnostics) {
     diagnostics.textContent = warnings.length ? `诊断警告：\n${warnings.join("\n")}` : "";
     diagnostics.classList.toggle("show", warnings.length > 0);
@@ -1019,10 +1036,6 @@ async function fetchGroupsData(){
   params.set("by",state.groupBy);
   return api("groups",params);
 }
-async function refreshGroups(){
-  const data=await fetchGroupsData();
-  renderGroupsData(data);
-}
 function renderTable(headEl,bodyEl,cols,rows,fmts={}){
   headEl.innerHTML=cols.map(c=>`<th data-key="${c.key}">${c.label}</th>`).join("");
   bodyEl.innerHTML=rows.map(r=>"<tr>"+cols.map(c=>{const v=r[c.key]; const f=fmts[c.key]; return `<td>${f?f(v,r):escapeHtml(v??"")}</td>`}).join("")+"</tr>").join("");
@@ -1108,6 +1121,7 @@ function applyPreset(preset) {
     since.setDate(now.getDate() - days);
     state.since = dateStr(since);
     state.until = dateStr(now);
+    filteredSessionCount = null;
   }
   updateStatusRange(); // 状态行范围随筛选即时更新（不依赖 overview 的 meta 刷新）
   refreshAll();
@@ -1127,6 +1141,7 @@ function applyCustomRange() {
   const v = customRangeValue();
   state.since = v.since;
   state.until = v.until;
+  filteredSessionCount = null;
   updateStatusRange();
   refreshAll();
 }
@@ -1422,18 +1437,7 @@ async function refreshSessionTable(){try{clearError(); await fetchRows("sessions
 async function refreshRequestTable(){
   try{
     clearError();
-    const reqs = [fetchRows("requests")];
-    if(hasTimeFilter() && filteredSessionCount === null) {
-      const sp = filterParams();
-      sp.set("page", "1");
-      sp.set("size", "1");
-      reqs.push(api("sessions", sp).catch(() => null));
-    }
-    const [, sess] = await Promise.all(reqs);
-    if(sess){
-      filteredSessionCount = sess.total;
-      renderSessionCount();
-    }
+    await Promise.all([fetchRows("requests"), updateFilteredSessionCount()]);
     renderDetailTable("requests");
   }catch(e){showError("请求明细加载失败: "+e.message)}
 }
@@ -1508,14 +1512,11 @@ async function poll(){
         renderCards(totals);
         renderGroupsData(groups);
         const meta = await api("meta");
+        if(hasTimeFilter()) await updateFilteredSessionCount();
         renderStatus(meta);
       } else if(state.tab==="sessions" || state.tab==="requests"){
         await fetchRows(state.tab);
         renderDetailTable(state.tab);
-        if(state.tab==="sessions") {
-          filteredSessionCount = detailState.sessions.total;
-          renderSessionCount();
-        }
       } else {
         await refreshAll();
       }
@@ -1547,6 +1548,8 @@ async function refreshSessionGroups(){
   try{
     clearError();
     const data=await api("sessions", filterParams());
+    filteredSessionCount = hasTimeFilter() ? (data.total ?? data.rows.length) : null;
+    renderSessionCount();
     const filterInput = $("#manage-filter-input");
     const filterVal = (filterInput?.value || "").trim().toLowerCase();
     const allRows = filterVal ? data.rows.filter(r =>
@@ -1872,7 +1875,7 @@ async function refreshOpencodeHistory(){
 }
 async function refreshOpencodeAll(){
   // 优先本地缓存毫秒级渲染：三个本地持久化数据并行拉取
-  await Promise.allSettled([refreshOpencodeCosts(), refreshOpencodeAudit(), refreshOpencodeHistory()]);
+  await Promise.allSettled([refreshOpencodeCosts(), refreshOpencodeAudit(), refreshOpencodeHistory(), updateFilteredSessionCount()]);
   // 更新最后同步时间（若 history 有数据，用最新记录时间近似）
   try{
     const hist=await fetch("/api/opencode/history?size=1&page=1").then(r=>r.json()).catch(()=>null);

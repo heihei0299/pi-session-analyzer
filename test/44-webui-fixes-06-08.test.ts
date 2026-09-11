@@ -22,34 +22,23 @@ test("T08 状态行会话数骨架与标签标记", () => {
 test("T08 renderSessionCount 逻辑：有筛选双值 N（全量 M），无筛选单值 M", () => {
   const html = readFileSync(join("src", "webui.html"), "utf8");
 
+  // 直接提取 webui.html 中的 hasTimeFilter 与 renderSessionCount 真实源码
+  const startIdx = html.indexOf("function hasTimeFilter()");
+  assert.ok(startIdx >= 0, "应能定位 hasTimeFilter");
+  const endIdx = html.indexOf("async function updateFilteredSessionCount()", startIdx);
+  assert.ok(endIdx > startIdx, "应能定位 renderSessionCount 结尾");
+  const fnSrc = html.slice(startIdx, endIdx);
+
   const contextObj = {
     state: { since: null as string | null, until: null as string | null },
     lastMeta: { sessionCount: 231 },
     filteredSessionCount: null as number | null,
     cntEl: { textContent: "—" },
     $: (sel: string) => sel === "#meta-count" ? contextObj.cntEl : null,
-    hasTimeFilter: () => false,
-    renderSessionCount: () => {},
   };
 
-  const code = `
-    hasTimeFilter = function() {
-      return Boolean(state.since || state.until);
-    };
-    renderSessionCount = function() {
-      const el = $("#meta-count");
-      if (!el || !lastMeta) return;
-      const m = lastMeta.sessionCount ?? 0;
-      if (hasTimeFilter() && filteredSessionCount !== null) {
-        el.textContent = \`\${filteredSessionCount}（全量 \${m}）\`;
-      } else {
-        el.textContent = String(m);
-      }
-    };
-  `;
-
   const context = vm.createContext(contextObj);
-  vm.runInContext(code, context);
+  vm.runInContext(fnSrc, context);
 
   // 1. 无时间筛选时：保持单值 M
   context.renderSessionCount();
