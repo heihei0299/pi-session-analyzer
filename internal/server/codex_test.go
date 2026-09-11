@@ -330,3 +330,28 @@ func TestServerSourceSwitchingCapabilitiesAndEmptyDir(t *testing.T) {
 		t.Fatalf("empty codex totals must not fail: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestServerSupportsCustomDateTimeRange(t *testing.T) {
+	piDir := t.TempDir()
+	srv := NewServer(piDir, sessiondata.NewSessionData(), Options{
+		Source: "pi",
+		DBPath: filepath.Join(t.TempDir(), "ledger.db"),
+	})
+	handler := srv.Handler()
+
+	endpoints := []string{
+		"/api/meta?since=2026-09-12T00:00&until=2026-09-12T23:59",
+		"/api/totals?since=2026-09-12T00:00&until=2026-09-12T23:59",
+		"/api/sessions?since=2026-09-12T00:00&until=2026-09-12T23:59&page=1&size=20",
+		"/api/groups?since=2026-09-12T00:00&until=2026-09-12T23:59&by=model",
+		"/api/period?since=2026-09-12T00:00&until=2026-09-12T23:59&period=day",
+	}
+
+	for _, ep := range endpoints {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, ep, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("endpoint %s returned status %d: %s", ep, w.Code, w.Body.String())
+		}
+	}
+}

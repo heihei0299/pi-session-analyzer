@@ -63,16 +63,44 @@ func ParseTimestamp(s string, endOfDay bool) (int64, error) {
 		return tCheck.UnixMilli(), nil
 	}
 
-	// 完整时间戳字符串
 	target := s
-	t, err := time.Parse(time.RFC3339Nano, target)
-	if err != nil {
-		t, err = time.Parse(time.RFC3339, target)
-		if err != nil {
-			return 0, fmt.Errorf("无效时间: %s（支持 ISO 日期或时间戳）", s)
+
+	// 1. 若有时区后缀，按指定时区解析
+	if tzSuffixRegex.MatchString(target) {
+		tzLayouts := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02T15:04:05.999999999Z07:00",
+			"2006-01-02T15:04:05Z07:00",
+			"2006-01-02T15:04Z07:00",
+			"2006-01-02T15:04Z",
+			"2006-01-02 15:04:05Z07:00",
+			"2006-01-02 15:04Z07:00",
+		}
+		for _, layout := range tzLayouts {
+			if t, err := time.Parse(layout, target); err == nil {
+				return t.UnixMilli(), nil
+			}
+		}
+		return 0, fmt.Errorf("无效时间: %s（支持 ISO 日期或时间戳）", s)
+	}
+
+	// 2. 若无时区后缀，按本地时区 (shanghaiLoc) 解释（与 JS Date.parse 本地时区语义完全对齐）
+	localLayouts := []string{
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+	}
+	for _, layout := range localLayouts {
+		if t, err := time.ParseInLocation(layout, target, shanghaiLoc); err == nil {
+			return t.UnixMilli(), nil
 		}
 	}
-	return t.UnixMilli(), nil
+
+	return 0, fmt.Errorf("无效时间: %s（支持 ISO 日期或时间戳）", s)
 }
 
 type RangeKind string

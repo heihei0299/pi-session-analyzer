@@ -40,3 +40,44 @@ func TestParseTimestampStrictValidation(t *testing.T) {
 		t.Errorf("expected 23:59:59, got %v", tEnd)
 	}
 }
+
+func TestParseTimestampDateTimeFormats(t *testing.T) {
+	// 自定义时间范围（时分下拉产生无时区 ISO 本地时间串）
+	ms, err := ParseTimestamp("2026-08-05T14:00", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedUtc := "2026-08-05T06:00:00.000Z"
+	if actual := time.UnixMilli(ms).UTC().Format("2006-01-02T15:04:05.000Z"); actual != expectedUtc {
+		t.Errorf("expected UTC %s, got %s", expectedUtc, actual)
+	}
+
+	// 2026-09-12T00:00
+	ms00, err := ParseTimestamp("2026-09-12T00:00", false)
+	if err != nil {
+		t.Fatalf("unexpected error for 2026-09-12T00:00: %v", err)
+	}
+	tLocal00 := time.UnixMilli(ms00).In(shanghaiLoc)
+	if tLocal00.Year() != 2026 || int(tLocal00.Month()) != 9 || tLocal00.Day() != 12 || tLocal00.Hour() != 0 || tLocal00.Minute() != 0 {
+		t.Errorf("expected 2026-09-12 00:00, got %v", tLocal00)
+	}
+
+	// 2026-09-12T23:59
+	ms59, err := ParseTimestamp("2026-09-12T23:59", true)
+	if err != nil {
+		t.Fatalf("unexpected error for 2026-09-12T23:59: %v", err)
+	}
+	tLocal59 := time.UnixMilli(ms59).In(shanghaiLoc)
+	if tLocal59.Year() != 2026 || int(tLocal59.Month()) != 9 || tLocal59.Day() != 12 || tLocal59.Hour() != 23 || tLocal59.Minute() != 59 {
+		t.Errorf("expected 2026-09-12 23:59, got %v", tLocal59)
+	}
+
+	// 带时区后缀原样解析
+	msZ, err := ParseTimestamp("2026-08-05T14:00Z", false)
+	if err != nil {
+		t.Fatalf("unexpected error for 2026-08-05T14:00Z: %v", err)
+	}
+	if actual := time.UnixMilli(msZ).UTC().Format("2006-01-02T15:04:05.000Z"); actual != "2026-08-05T14:00:00.000Z" {
+		t.Errorf("expected UTC 2026-08-05T14:00:00.000Z, got %s", actual)
+	}
+}

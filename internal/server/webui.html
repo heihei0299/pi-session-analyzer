@@ -556,7 +556,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
       <select id="until-minute" title="结束分钟"><option value="">分</option><option value="00">00</option><option value="15">15</option><option value="30">30</option><option value="45">45</option><option value="59">59</option></select>
     </div>
     <label style="display:inline-flex;align-items:center;gap:6px;font:500 11px var(--font-mono);color:var(--slate-2)">数据源
-      <select id="source-selector" title="数据源"></select>
+      <select id="source-selector" title="数据源"><option value="pi">Pi</option></select>
     </label>
     <span style="flex:1"></span>
     <select id="auto-refresh" title="自动刷新">
@@ -892,6 +892,12 @@ function renderStatus(meta) {
     diagnostics.classList.toggle("show", warnings.length > 0);
   }
   refreshDbMeta();
+}
+async function fetchMetaOnce() {
+  try {
+    const meta = await api("meta", new URLSearchParams({ source: state.source }));
+    renderStatus(meta);
+  } catch {}
 }
 function updateStatusRange() {
   if (!lastMeta) return;
@@ -2014,7 +2020,7 @@ function initOpencodeMonth(){
   el.value=y+"-"+m;
 }
 
-function refreshAll(){ if(state.tab==="overview") refreshOverview(); if(state.tab==="sessions") refreshSessionTable(); if(state.tab==="requests") refreshRequestTable(); if(state.tab==="manage") refreshSessionGroups(); if(state.tab==="opencode") refreshOpencodeAll(); }
+function refreshAll(){ if(!lastMeta) fetchMetaOnce(); if(state.tab==="overview") refreshOverview(); if(state.tab==="sessions") refreshSessionTable(); if(state.tab==="requests") refreshRequestTable(); if(state.tab==="manage") refreshSessionGroups(); if(state.tab==="opencode") refreshOpencodeAll(); }
 
 const detailDrawerState_unused = null; // placeholder to keep lint happy
 async function fetchDetail(sessionId){
@@ -2309,6 +2315,7 @@ function init(){
     state.groupBy=b.dataset.group; document.querySelectorAll("[data-group]").forEach(x=>x.classList.toggle("active", x===b)); refreshOverview();
   }));
   document.querySelectorAll("[data-preset]").forEach(b=>b.addEventListener("click",()=>applyPreset(b.dataset.preset)));
+  applySourceCapabilities(["pi"]);
   bindSourceSelector();
   bindCustomRange();
   $("#export-json").addEventListener("click",()=>exportData("json"));
@@ -2322,6 +2329,7 @@ function init(){
   bindOpencodeInteractions();
   initOpencodeMonth();
   refreshOpencodeAll();
+  fetchMetaOnce();
   applyPreset("today");
 }
 init();
