@@ -1,6 +1,6 @@
 VERSION ?= 2026.9.3
 BIN_DIR = dist
-BINARY_NAME = token-analyzer-go
+BINARY_NAME = token-analyzer
 
 .PHONY: all build test clean release
 

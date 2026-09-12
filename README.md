@@ -1,8 +1,8 @@
 # Token Analyzer
 
-分析 Pi 会话与 Codex rollout token 消耗的 Go-only CLI 工具（单二进制，零外部依赖）。Pi 默认读取 `~/.pi/agent/sessions/`，Codex 读取 `sessions/` 与 `archived_sessions/` 下的 plain/zstd rollout。读取全部合法会话，按统计口径 A 提取消耗数据（含 **fork 会话去重**——fork 复制的历史消息不重复计费），输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程（`--watch` 同样按 fork 去重口径）；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、**服务端分页排序**、自动刷新、导出 JSON/CSV 与会话重命名。
+分析 Pi 会话与 Codex rollout token 消耗的 Go-only CLI 工具（单二进制，零外部依赖）。Pi 默认读取 `~/.pi/agent/sessions/`，Codex 读取 `sessions/` 与 `archived_sessions/` 下的 plain/zstd rollout。读取全部合法会话，按统计口径 A 提取消耗数据（含 **fork 会话去重**——fork 复制的历史消息不重复计费），输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程（`--watch` 同样按 fork 去重口径）；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、**服务端分页排序**、基于 source revision 的自动刷新、导出 JSON/CSV 与会话重命名。
 以 GitHub Release 发布 Go 单二进制（Linux / macOS / Windows，日期式版本如 `2026.9.3`），不再提供 npm 分发。
-功能规格见 [`.scratch/token-analyzer/spec.md`](.scratch/token-analyzer/spec.md)（含实施状态）；实现拆分为 5 个 issue（[`.scratch/token-analyzer-impl/issues/`](.scratch/token-analyzer-impl/issues/)）。WebUI 功能规格见 [`.scratch/token-analyzer-webui/spec.md`](.scratch/token-analyzer-webui/spec.md)，实现拆分为 6 个 issue（[`.scratch/token-analyzer-webui-impl/issues/`](.scratch/token-analyzer-webui-impl/issues/)）。WebUI 审查问题修复见 [`.scratch/token-analyzer-webui-fixes/spec.md`](.scratch/token-analyzer-webui-fixes/spec.md)（8 个 issue）。
+Go-only 迁移与收尾计划见 [`docs/migration/go-only-post-migration-remediation-plan.md`](docs/migration/go-only-post-migration-remediation-plan.md)，审计依据见 [`docs/audit/go-only-post-migration-audit-2026-09-12.md`](docs/audit/go-only-post-migration-audit-2026-09-12.md)。领域术语与最终架构见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)。
 领域术语见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)（当前：`0001-fork-session-dedup.md`、`0002-total-tokens-gateway-alignment.md`）。
 ## 安装
 
@@ -10,7 +10,7 @@
 # 1. 直接编译并安装到 $GOPATH/bin
 go install ./cmd/token-analyzer
 
-# 2. 或使用 Makefile 构建当前平台单二进制 (产物 dist/token-analyzer-go)
+# 2. 或使用 Makefile 构建当前平台单二进制 (产物 dist/token-analyzer)
 make build
 
 # 3. 多平台交叉编译发布 (生成 Linux / macOS / Windows 产物)
@@ -41,9 +41,9 @@ token-analyzer [totals|sessions|requests] [--source pi|codex|all] [--dir <pi-dir
 
 OpenCode 云端用量同步与对账已迁入同仓独立项目 [`opencode-analyzer/`](opencode-analyzer/README.md)。token-analyzer 不再读取 OpenCode 凭据，也不再提供 OpenCode CLI、API 或 WebUI。
 
-开发时可用 `go run ./cmd/token-analyzer` 或 `./dist/token-analyzer-go` 直接运行。
+开发时可用 `go run ./cmd/token-analyzer` 或 `./dist/token-analyzer` 直接运行。
 
-- **窗口**（位置参数，默认 `totals`）：`totals` 总消耗量 / `sessions` 会话级（每会话一行）/ `requests` 单请求级（逐 assistant 消息）
+- **窗口**（位置参数，默认 `totals`）：`totals` 总消耗量 / `sessions` 会话级（每会话一行）/ `requests` 单请求级（逐条计入口径消息）
 - **数据源**：`--source pi|codex|all`（默认 `pi`）；Codex 目录优先级为 `--codex-dir > CODEX_HOME > ~/.codex`。`--dir` 始终只表示 Pi 目录。
 - **数据库**：`--db <path>` 可指定 normalized ledger；未指定时使用 `TOKEN_ANALYZER_DB`/默认缓存路径。
 - **数据目录**：`--dir <path>`（默认 `~/.pi/agent/sessions/`）
@@ -107,7 +107,7 @@ git tag v2026.9.4 && git push && git push --tags
 - **时间范围**：今天（默认） / 7天 / 30天 / 全部 / 自定义（date 日期 + 时分下拉 00:00-23:59，按本地时间解释，打开时自动预填当前筛选或数据范围），作用于总览与明细与导出；默认窗口 = 今天（本地今天 00:00-23:59:59.999）；头部「范围」胶囊随筛选即时显示，下方状态行范围提示已移除
 - **明细服务端分页排序**：会话/请求明细每页 20/50/100 行，点击列头排序——翻页/排序/改页大小重新 fetch（page/size/sortKey/sortDir），不再全量拉取（真实数据 /api/requests 26.7MB → 每页 ~20KB）；会话明细显示筛选合计（总 tokens/请求/会话数，含子代理）且子代理会话带“子代理”徽标
 - **统计口径（webui）**：时间筛选按**消息 timestamp 消息级**归属（跨天会话的凌晨请求计入当天，与明细一致）；「输入」列显示**总输入**（非缓存 input + 缓存命中 cacheRead，与 pi-switch 网关 Input 对齐）；CLI 与导出保持原始字段
-- **自动刷新**：Off / 5s / 30s / 5min（后端每请求全量重算），数据变化时状态行显示「已更新 HH:MM:SS」
+- **自动刷新**：Off / 5s / 30s / 5min（后端按 source revision 变化刷新 snapshot，GET 本身只读），数据变化时状态行显示「已更新 HH:MM:SS」
 - **导出**：JSON（`{ totals, sessions, requests }`）与 CSV（`# totals` / `# sessions` / `# requests` 三段式）下载当前筛选范围
 - **会话管理**：顶部最近会话 10 条 + 按规范化 cwd 分组展示全部会话（默认收起，组可折叠，点击标题展开），点击名称行内编辑重命名——改文件名前缀保留尾 UUID（`<显示名>_<UUID>.jsonl`），仅非活跃会话（mtime > 5min）可改，非法名 400 / 不存在 404 / 活跃与重名 409
 - **会话详情抽屉**：点击会话/请求明细的会话名称或会话 ID 滑出右侧抽屉（760px，移动端全屏，遮罩/×/Esc 关闭），展示头部（可点击标题行内重命名，同校验 400/409、成功后重刷抽屉与列表）、Token 构成条、汇总卡（总 token/请求数/花费/缓存率，合并时小字“其中主 X · 子代理 Y（N 个）”）与请求时间线（按时间升序、全量无分页、子代理行淡底 #FFF6D6 +“子代理 短 ID 8”徽标）；支持“合并子代理”开关（默认开、每次打开重置，无子代理隐藏）与时间线“暂无计入口径请求”空态；请求表容器 max-height:60vh 可滚动（极端 >200 行）；打开期间暂停自动刷新轮询
@@ -117,9 +117,9 @@ HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` 
 ## 统计口径（口径 A）
 
 - **计入口径（四载体）**：`assistant`（`type=message, role=assistant`）、`toolResult`（`role=toolResult`）、`compaction`（`type=compaction`）、`branch_summary`（`type=branch_summary`）四者，门控 `has_billable||has_cost||failed` 任一成立即计入；其余 `user` 等一律不计入
-- **fork 会话去重**：header 含 `parentSession` 的 fork 会话，其复制历史（`message.timestamp < header.timestamp`，fork 创建时间）的 usage 已在父会话统计过，source refresh 在写入 ledger 前剔除；fork 后新增消息保留（CLI/API/WebUI/Watch 一致；与 pi-switch 网关统计对齐，8/1 起累计差异 ≈0.6%——8/2、8/4 分毫不差，剩余为覆盖结构，见下「与网关对比」）
-- **请求数**：带 usage 的 assistant 消息数；全 0 usage 的失败/中止消息也计入请求数（token 为 0）
-- **总 token**：总输入 + 输出 = `input + cacheRead + output`（对齐 pi-switch 网关 total；不含 cacheWrite，ADR-0002 已 Accepted，实现见 `.scratch/token-analyzer-gateway-alignment/`）
+- **fork 会话去重**：header 含 `parentSession` 的 fork 会话，其复制历史（`message.timestamp < header.timestamp`，fork 创建时间）的 usage 已在父会话统计过，Pi source adapter 在写入 ledger 前剔除；fork 后新增消息保留（CLI/API/WebUI/Watch 一致；与 pi-switch 网关统计对齐，8/1 起累计差异 ≈0.6%——8/2、8/4 分毫不差，剩余为覆盖结构，见下「与网关对比」）
+- **请求数**：四载体中通过 billable/cost/failed 门控的计入口径消息数；全 0 usage 的失败/中止消息也计入请求数（token 为 0）
+- **总 token**：总输入 + 输出 = `input + cacheRead + output`（对齐 pi-switch 网关 total；不含 cacheWrite，见 ADR-0002 与 `CONTEXT.md`）
 - **缓存率**：`cacheRead / (input + cacheRead)`（分母不含 cacheWrite，ADR-0002）；分母为 0 记 0；聚合先求和分子分母再除
 - **花费**：直接累加 `usage.cost.total`；全 0 花费标注「费率未配置（免费/未定价）」。All 窗口保留可定价 Pi 的美元合计并标注「含 unpriced 源 / 部分可用」（CLI 表格显示 `$X*`，表尾解释 `* 含 unpriced 源`；WebUI 在金额后标注）；Codex 单源仍为 `unpriced`；JSON/CSV 的 `costStatus` 与 `cost` 组合可区分完全未定价、部分可用与真实零花费。
 - **模型归属**：请求级（每条消息的 `model` 字段）

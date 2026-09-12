@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/heihei0299/token-analyzer/internal/db"
-	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 func TestServerRenameReportsRefreshFailureAfterFilesystemRename(t *testing.T) {
@@ -34,7 +33,7 @@ func TestServerRenameReportsRefreshFailureAfterFilesystemRename(t *testing.T) {
 	}
 
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	srv := NewServer(piDir, sessiondata.NewSessionData(), Options{CodexDir: t.TempDir(), DBPath: dbPath})
+	srv := NewServer(piDir, Options{CodexDir: t.TempDir(), DBPath: dbPath})
 	mustRefreshNow(t, srv)
 	database, err := db.Open(dbPath)
 	if err != nil {

@@ -9,7 +9,7 @@
 - 将数据保存到独立 `data/opencode/`：`costs.json`、`history.json`、`history.csv`；
 - 按记录 ID 与 `lastSyncedTime` 增量同步，跨进程文件锁避免并发写入；
 - `sync` / `export` CLI；
-- 独立 HTTP API 与 WebUI，包含月度模型成本图、历史明细和本地 Pi 对账；
+- 独立 HTTP API 与 WebUI，包含月度模型成本图、历史明细和本地 Pi 对账；本地对账自带 assistant/toolResult/compaction/branch_summary 四载体、billable/cost/failed 门控、fork/request/semantic 去重与月份边界处理；
 - 本地 Pi 对账只读取 `--pi-dir` 指定的 session JSONL，不依赖 token-analyzer。
 
 ## 运行

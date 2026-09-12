@@ -99,8 +99,7 @@ func cwdKept(sessionCwd, filterCwd string) bool {
 	if filterCwd == "" {
 		return true
 	}
-	return sessiondata.DefaultSessionData.NormalizeCwd(sessionCwd) ==
-		sessiondata.DefaultSessionData.NormalizeCwd(filterCwd)
+	return sessiondata.NormalizeCwd(sessionCwd) == sessiondata.NormalizeCwd(filterCwd)
 }
 
 // hasRequestFilter 决定无匹配请求的会话是否列出（与 TS oracle 一致）：
@@ -372,7 +371,7 @@ func buildGroups(reqs []ledgerRequest, by domain.GroupBy, unpriced bool) []domai
 			row.Model = r.model
 		}
 		if byCwd {
-			k.cwd = sessiondata.DefaultSessionData.NormalizeCwd(r.cwd)
+			k.cwd = sessiondata.NormalizeCwd(r.cwd)
 			row.Cwd = k.cwd
 		}
 		g, ok := groups[k]
@@ -398,9 +397,8 @@ func buildGroups(reqs []ledgerRequest, by domain.GroupBy, unpriced bool) []domai
 func buildPeriod(reqs []ledgerRequest, p domain.Period, unpriced bool) []domain.PeriodRow {
 	groups := map[string]*domain.Totals{}
 	var order []string
-	sd := sessiondata.DefaultSessionData
 	for _, r := range reqs {
-		k, err := sd.PeriodKey(r.timestamp(), p)
+		k, err := sessiondata.PeriodKey(r.timestamp(), p)
 		if err != nil {
 			continue
 		}
@@ -428,7 +426,6 @@ func buildPeriod(reqs []ledgerRequest, p domain.Period, unpriced bool) []domain.
 
 func buildPiSessionRows(scoped []piSessionMeta, bySession map[string][]ledgerRequest, source string) []domain.SessionRow {
 	rows := make([]domain.SessionRow, 0, len(scoped))
-	sd := sessiondata.DefaultSessionData
 	for _, m := range scoped {
 		reqs := bySession[m.sessionID]
 		tot := sessionTotals(reqs)
@@ -444,7 +441,7 @@ func buildPiSessionRows(scoped []piSessionMeta, bySession map[string][]ledgerReq
 			Model:           modelLabel(models),
 			FileName:        m.fileName,
 			DisplayName:     m.displayName,
-			CwdNorm:         sd.NormalizeCwd(m.cwd),
+			CwdNorm:         sessiondata.NormalizeCwd(m.cwd),
 			IsTask:          m.isTask,
 			ParentSessionId: m.parentSessionID,
 			Source:          source,
@@ -752,8 +749,7 @@ func loadCodexMetas(database *db.Database, home string) ([]codexSessionMeta, err
 }
 
 // codexUsageSet 返回有 durable usage 行的 physical 集合。
-// 只有累计快照、没有 usage record 的 rollout 只产生 diagnostics，不进入
-// sessions/meta（与旧 ledger→SessionFileData 回绕行为一致）。
+// 只有累计快照、没有 usage record 的 rollout 只产生 diagnostics，不进入 sessions/meta。
 func codexUsageSet(database *db.Database, physicalIDs []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if len(physicalIDs) == 0 {
@@ -829,7 +825,6 @@ func loadCodexDiagnostics(database *db.Database, home string) codex.Diagnostics 
 
 func buildCodexSessionRows(scoped []codexSessionMeta, byPhysical map[string][]ledgerRequest) []domain.SessionRow {
 	rows := make([]domain.SessionRow, 0, len(scoped))
-	sd := sessiondata.DefaultSessionData
 	for _, m := range scoped {
 		reqs := byPhysical[m.physicalID]
 		tot := sessionTotals(reqs)
@@ -855,8 +850,8 @@ func buildCodexSessionRows(scoped []codexSessionMeta, byPhysical map[string][]le
 			Cwd:             cwd,
 			Model:           modelLabel(models),
 			FileName:        m.fileName,
-			DisplayName:     sd.DisplayNameOf(m.fileName, ""),
-			CwdNorm:         sd.NormalizeCwd(cwd),
+			DisplayName:     sessiondata.DisplayNameOf(m.fileName, ""),
+			CwdNorm:         sessiondata.NormalizeCwd(cwd),
 			ParentSessionId: m.parentThreadID,
 			Source:          "codex",
 		})
@@ -880,7 +875,7 @@ func buildCodexRequestRows(scoped []codexSessionMeta, byPhysical map[string][]le
 				SessionId:   m.id(),
 				Timestamp:   r.timestamp(),
 				Model:       r.model,
-				DisplayName: sessiondata.DefaultSessionData.DisplayNameOf(m.fileName, ""),
+				DisplayName: sessiondata.DisplayNameOf(m.fileName, ""),
 			})
 		}
 	}

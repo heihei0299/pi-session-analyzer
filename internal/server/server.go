@@ -18,6 +18,7 @@ import (
 
 	"github.com/heihei0299/token-analyzer/internal/db"
 	"github.com/heihei0299/token-analyzer/internal/domain"
+	"github.com/heihei0299/token-analyzer/internal/pi"
 	sourcequery "github.com/heihei0299/token-analyzer/internal/query"
 	"github.com/heihei0299/token-analyzer/internal/refresh"
 	"github.com/heihei0299/token-analyzer/internal/sessiondata"
@@ -36,8 +37,6 @@ type Options struct {
 }
 
 type Server struct {
-	dir         string
-	sessionData *sessiondata.SessionData
 	queryConfig sourcequery.Config
 	mux         *http.ServeMux
 
@@ -49,10 +48,7 @@ type Server struct {
 	lastRefreshAt  time.Time
 }
 
-func NewServer(dir string, sd *sessiondata.SessionData, options ...Options) *Server {
-	if sd == nil {
-		sd = sessiondata.DefaultSessionData
-	}
+func NewServer(dir string, options ...Options) *Server {
 	var opts Options
 	if len(options) > 0 {
 		opts = options[0]
@@ -61,8 +57,6 @@ func NewServer(dir string, sd *sessiondata.SessionData, options ...Options) *Ser
 		opts.Source = "pi"
 	}
 	s := &Server{
-		dir:         dir,
-		sessionData: sd,
 		queryConfig: sourcequery.Config{PiDir: dir, Source: opts.Source, CodexDir: opts.CodexDir, DBPath: opts.DBPath},
 		mux:         http.NewServeMux(),
 	}
@@ -528,8 +522,16 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// 查找会话文件（走 SessionData 快照缓存）
-	matchedFile, err := s.sessionData.FindSessionFile(s.dir, req.SessionId)
+	resolved, err := pi.ResolvePiSessionRoot(
+		os.Getenv("PI_CODING_AGENT_SESSION_DIR"),
+		s.queryConfig.PiDir,
+		pi.GetPiNativeSessionDir(),
+	)
+	if err != nil {
+		sendError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	matchedFile, err := pi.FindSessionFileByHeaderID(resolved.Root, resolved.Layout, req.SessionId)
 	if err != nil {
 		sendError(w, http.StatusNotFound, "Not Found", fmt.Sprintf("会话不存在: %s", req.SessionId))
 		return
@@ -567,7 +569,6 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 			sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
 			return
 		}
-		s.sessionData.InvalidateCache(s.dir)
 		if err := refresh.Refresh(refresh.Config{PiDir: s.queryConfig.PiDir, DBPath: s.queryConfig.DBPath, Source: "pi"}); err != nil {
 			sendError(w, http.StatusServiceUnavailable, "Service Unavailable", fmt.Sprintf("文件已改名但 snapshot refresh failed: %v", err))
 			return

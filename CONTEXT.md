@@ -12,7 +12,7 @@
 - **事实中心（normalized SQLite ledger）**：Pi/Codex usage 唯一事实中心；所有统计窗口只从 ledger 派生，不再有文件扫描统计旁路。
 - **查询引擎（Go Query Engine）**：totals/sessions/requests/groups/period/detail/meta 的唯一生产统计 seam（`internal/query`）；只读已提交 ledger 快照，不执行 discovery/parse/sync/游标更新，不写 DB，不理解上游原始格式。
 - **刷新（Refresh）**：source → ledger 的唯一写入路径（`internal/refresh` 编排 + `internal/pi` / `internal/codex` source adapter）；承担 source-specific discovery、parse、identity、fork 去重（ADR-0001）、双账本去重、指纹增量、diagnostics；幂等，失败保留上一成功快照并经 meta/diagnostics 暴露。
-- **会话数据类型（sessiondata）**：共享查询类型（Filter/View/QueryResult）与 cwd 归一/显示名/排序 helper；不再承担文件扫描统计。会话重命名仍需按 sessionId 定位 Pi 文件（非统计路径）。
+- **会话数据类型（sessiondata）**：仅保留共享查询 DTO（Filter/View/QueryResult/QueryMeta/详情类型）与 cwd 归一、显示名、排序、周期 helper；不承担文件扫描统计、usage parser 或缓存。会话重命名由 Pi source adapter 的 header-only locator 按 sessionId 定位文件（非统计路径）。
 - **子代理会话**：`isTask` 会话（路径含 `/tasks/`，header 含 `parentSession`，由 `parentSessionId` 指向主会话），其消耗在详情视图合并到主会话，主列表保持独立；API 字段 `isTask` 保持原名，仅 UI 文案为“子代理”。
 - **存储（SQLite 直切）**：`token-analyzer.db`（`proxy_request_logs/session_log_sync/session_usage_dedup/usage_daily_rollups/model_pricing` + `pi_sessions/source_sessions`，与 `cc-switch/schema.rs` 1:1 扩展），`SCHEMA_VERSION=2`，`WAL/foreign_keys/auto_vacuum INCREMENTAL`，路径 `TOKEN_ANALYZER_DB > --db > ~/.cache/token-analyzer/token-analyzer.db`（默认不共库，显式 `TOKEN_ANALYZER_DB=~/.cc-switch/cc-switch.db` 或 `--db` 才共库）。写路径仅 Refresh（Pi `SyncPiUsage` + Codex `SyncRollouts`，按文件事务提交）；读路径仅 Query Engine 的 ledger SQL（`proxy_request_logs ∪ rollups`），经 `OpenReadOnly + query_only` 快照读取。日 rollup 可用于 totals/period 与 model（或无维度）groups；rollup 与其贡献的 raw 行按 prune 合约相加（截断日可存在同日但互不重叠的两类行）。因缺少 session/cwd/request identity，cwd groups、sessions、requests、detail 只使用 raw ledger。
 - **双账本去重**：`session_usage_dedup(data_source, request_id, semantic_id, has_entry_id)`，`request_id = hash(pi-session-request-v3+kind+entry.id+timestamp)`，`semantic_id = hash(pi-session-semantic-v1+kind+entry_ts+msg_ts+provider/model/responseModel/... + canonical usage)`，同文件 `requestId` 去重（`stopReason` 优先/`output` 最大），跨文件持久账本，叠加 fork `ts<forkTs`。
@@ -55,7 +55,7 @@
 - **fork 会话**：header 含 `parentSession`（父会话文件绝对路径）的会话，由 pi 的 fork 功能创建，复制父会话历史消息（保留原 timestamp 与 usage）。
 - **复制历史**：fork 会话中 `message.timestamp < header.timestamp`（fork 创建时间）的消息——其 usage 已在父会话统计过，**fork 本身未消耗这些 token**。
 - **forkTs**：fork 创建时间 = fork 会话 header.timestamp，去重切分边界。
-- **fork 去重**：analyzeFile 数据层剔除复制历史，fork 后新增消息（ts ≥ forkTs）保留；CLI/webui 一致（数据读取层）。嵌套 fork 链按各层自身 forkTs 自动正确。
+- **fork 去重**：Pi source adapter 数据层剔除复制历史，fork 后新增消息（ts ≥ forkTs）保留；CLI/webui 一致（数据读取层）。嵌套 fork 链按各层自身 forkTs 自动正确。
 
 ## 字段语义
 
@@ -80,5 +80,5 @@
 ## OpenCode 产品边界
 
 - **OpenCode Analyzer**：独立于 token-analyzer 的同仓产品，归档 OpenCode 云端用量并与本地 Pi 消耗对账；OpenCode 不是 token-analyzer 的 usage source，也不属于 All。
-- **OpenCode 对账**：OpenCode 官方扣费与本地 Pi 消耗的比较，仅属于 OpenCode Analyzer；token-analyzer 不处理 OpenCode credential 或对账数据。
+- **OpenCode 对账**：OpenCode 官方扣费与本地 Pi 消耗的比较，仅属于 OpenCode Analyzer；其 standalone `piaudit` 自有四载体、门控、fork/request/semantic 去重与月份边界实现，不 import token-analyzer；token-analyzer 不处理 OpenCode credential 或对账数据。
 

@@ -148,8 +148,7 @@ func extractFirstUserTextPiFile(path string) string {
 	return ""
 }
 
-// displayNameOfPiFile 直接复用 SessionData.DisplayNameOf（与 TS oracle 的
-// pi-sync → defaultSessionData.displayNameOf 一致，不另起第二份规则）。
+// displayNameOfPiFile 直接复用共享显示名规则，不另起第二份实现。
 func displayNameOfPiFile(fileName, firstUserText string) string {
-	return sessiondata.DefaultSessionData.DisplayNameOf(fileName, firstUserText)
+	return sessiondata.DisplayNameOf(fileName, firstUserText)
 }

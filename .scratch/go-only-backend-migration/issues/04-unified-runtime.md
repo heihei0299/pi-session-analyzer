@@ -4,7 +4,7 @@
 
 **Blocked by:** 03: Pi / Codex / All 全部切到统一 Go ledger + Query Engine.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Query 不执行 discovery、parse、sync、游标推进或 DB 写入。
 - [ ] Go server 启动时完成明确的初次 Pi/Codex refresh，再对外提供 snapshot 查询。
@@ -21,3 +21,9 @@
 - [ ] WebUI 自动刷新只读取 snapshot，不因每个前端请求触发 source sync。
 - [ ] token-analyzer WebUI/API 不包含 OpenCode 专用交互或路由；OpenCode UI/API 仅属于独立 `opencode-analyzer/`。
 - [ ] 没有 Node runtime、没有 `opencode-analyzer/` 目录的环境中，Go binary 仍能独立运行完整 token-analyzer。
+
+## Answer
+
+- 已完成 deterministic sort、source revision fingerprint、server/CLI watch failure retry，以及 rename 后 Refresh + `QueryDetail` 快照验证；GET 继续只读 snapshot。
+- 关键提交：`379430e`（R3），R4/R5 收尾随本次提交完成。
+- 已执行 root runtime/server/CLI 回归与完整 root suite；R4/R5 收尾遵循用户要求不再启动本机编译、测试或 typecheck。

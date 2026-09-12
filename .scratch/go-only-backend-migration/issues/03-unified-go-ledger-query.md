@@ -4,7 +4,7 @@
 
 **Blocked by:** 02: 冻结 Go-only 迁移 canonical contract.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Pi refresh 覆盖 assistant、toolResult、compaction、branch_summary 与 billable/cost/failed 门控。
 - [ ] Pi 的 fork、requestId/semanticId 双账本、append、partial line、truncate、rewrite、指纹增量满足 canonical contract。
@@ -20,3 +20,9 @@
 - [ ] CLI 与 HTTP 对相同 Query Request 映射到同一 domain result。
 - [ ] 完成后旧 Pi SessionData 文件扫描/内存 aggregation 与 Codex SessionFileData 回绕都不再是生产统计路径。
 - [ ] Pi、Codex、All 全部通过 02 的 canonical golden acceptance。
+
+## Answer
+
+- 已完成统一 `Refresh → normalized SQLite ledger → Go Query Engine` 数据流；Pi ledger 原子事务、跨 Refresh replacement、raw + rollup 查询、严格 discovery 与 Codex path scope 已落地。
+- 关键提交：`929f4ea`（R1/R2）、`379430e`（R3），R4/R5 收尾随本次提交完成。
+- 已执行 root 包级回归覆盖 canonical Pi/Codex、transaction rollback、replacement、rollup、discovery、path containment、watch 与 rename；R4/R5 收尾遵循用户要求不再启动本机编译/测试。

@@ -99,7 +99,7 @@ func main() {
 	// Serve 模式：初次 Refresh 完成后才对外提供 snapshot 查询，
 	// 之后 watcher 以 change → refresh → query 驱动，GET 只读快照。
 	if window == "serve" {
-		srv := server.NewServer(*dir, nil, server.Options{Source: *source, CodexDir: *codexDir, DBPath: *dbPath})
+		srv := server.NewServer(*dir, server.Options{Source: *source, CodexDir: *codexDir, DBPath: *dbPath})
 		if err := srv.RefreshNow(); err != nil {
 			fmt.Fprintf(os.Stderr, "初次同步失败（将提供既有快照并经 meta 暴露）: %v\n", err)
 		}

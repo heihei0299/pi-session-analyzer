@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/heihei0299/token-analyzer/internal/db"
-	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 func mustRefreshNow(t *testing.T, srv *Server) {
@@ -77,7 +76,7 @@ func TestServerGetsDoNotAdvanceLedger(t *testing.T) {
 	}
 	codexHome := t.TempDir()
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	srv := NewServer(piDir, sessiondata.NewSessionData(), Options{Source: "all", CodexDir: codexHome, DBPath: dbPath})
+	srv := NewServer(piDir, Options{Source: "all", CodexDir: codexHome, DBPath: dbPath})
 	mustRefreshNow(t, srv)
 	handler := srv.Handler()
 
@@ -146,7 +145,7 @@ func TestServerRefreshFailureKeepsSnapshotAndExposesError(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	srv := NewServer(piDir, sessiondata.NewSessionData(), Options{Source: "all", CodexDir: notDir, DBPath: dbPath})
+	srv := NewServer(piDir, Options{Source: "all", CodexDir: notDir, DBPath: dbPath})
 	if err := srv.RefreshNow(); err == nil {
 		t.Fatal("refresh against a non-directory codex home must fail")
 	}
@@ -198,7 +197,7 @@ func TestServerWatchRetriesFailedRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	srv := NewServer(piDir, sessiondata.NewSessionData(), Options{Source: "all", CodexDir: t.TempDir(), DBPath: dbPath})
+	srv := NewServer(piDir, Options{Source: "all", CodexDir: t.TempDir(), DBPath: dbPath})
 	mustRefreshNow(t, srv)
 
 	database, err := db.Open(dbPath)

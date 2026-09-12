@@ -12,11 +12,13 @@
 
 - **Go 是唯一生产后端**：删除 `src/`、`test/*.test.ts`、`test/helpers.ts`、`test/parity_test.go`、`package.json`、`package-lock.json`、`tsconfig*.json` 与 npm `publish.yml`；运行 CLI/API/WebUI 不需要 Node/npm。
 - **统计唯一性**：normalized SQLite ledger 为唯一事实中心；`internal/query` 为 totals/sessions/requests/groups/period/detail/meta 唯一生产统计 seam；Query 只读快照（`OpenReadOnly + query_only`），不做 discovery/parse/sync/写库。
+- **职责收口**：`sessiondata` 只提供查询 DTO 与共享显示名/cwd/周期/排序 helper；Pi 重命名通过 `internal/pi` header-only locator 定位文件，不再触发旧 JSONL usage parser 或文件缓存。
 - **Refresh/Watch 语义**：Refresh（`internal/refresh` + Pi/Codex adapter）为唯一写入路径，串行化，失败保快照并经 meta 暴露；Watch 只做 change → refresh → query，无独立 token/cost 聚合。
 - **WebUI 单一源码**：`internal/server/webui.html` 为唯一人工维护源（Go embed 直引），无 copy/sync；`meta.sources` 恒为 `["pi","codex"]`。
 - **契约**：`testdata/canonical` + Go golden tests 为长期回归（替代跨 runtime parity）；fixtures 全为合成数据。
 - **命名统一**：module/repository/import/release 统一为当前项目名 `token-analyzer`（`go.mod: github.com/heihei0299/token-analyzer`）；旧拼写 `pi-session-anylize` 为 breaking change 直接修正；`opencode-analyzer/` 保持独立 module `github.com/heihei0299/opencode-analyzer`，可整目录迁出。
-- **发版**：只发 Go 二进制（`release.yml` + `make release`），不再区分 Go/npm edition，不再发 npm 包。
+- **发版**：只发 Go 二进制（`release.yml` + `make release`），普通构建产物为 `dist/token-analyzer`，平台 release artifact 保留平台后缀；不再区分 Go/npm edition，不再发 npm 包。
+- **OpenCode 边界**：`opencode-analyzer/internal/piaudit` 自己维护本地 Pi audit 语义和 synthetic fixture；该目录可整目录迁出，token-analyzer 不依赖其 runtime/API/UI/storage/credential。
 
 ## 后果
 
