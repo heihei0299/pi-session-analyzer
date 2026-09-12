@@ -11,14 +11,14 @@
 - [x] standalone audit contract 增加 regression：两条记录 canonical fields 相同、仅 irrelevant metadata 不同，最终只能计一次。
 - [x] standalone identity regression 覆盖 canonical message 字段变化、额外 usage 字段变化、usage map/key 顺序稳定，以及 request ID final replacement。
 - [x] 继续覆盖 assistant / toolResult / compaction / branch_summary、billable/cost/failed gate、fork copied-history 去重、requestId replacement、月份/时间范围与 totalTokens 语义。
-- [x] OpenCode fixture 保持自包含，不通过相对路径复用 token-analyzer testdata，确保未来整目录拆仓时测试仍可直接运行。
+- [x] OpenCode 运行时 fixture 保持自包含；root 与 standalone identity contract 仅共享中性的 `testdata/pi-identity-contract.json` 输入/期望，不共享实现或 runtime 依赖。
 - [x] 主仓 CI 增加独立 `opencode-analyzer` job/step，在该 module 内执行 `GOMAXPROCS=2 go test -p 1 ./...`；root `go test ./...` 不能作为 standalone module 已验证的替代。
 - [x] CI 失败应能明确区分 token-analyzer 与 opencode-analyzer，避免一个独立项目的测试结果被主模块输出掩盖。
 - [x] 复查 `.scratch/go-only-backend-migration/issues/03-*`、`04-*`、`05-*`：已验证的 acceptance 项改为 `[x]`；无法证明的项不得因 `Status: resolved` 被伪装为完成。
 - [x] 修复 `AGENTS.md` 中 `\仅当关键歧义...` 的文本错误。
 - [x] README 的 Pi cost 描述与真实实现一致：上报 `usage.cost.total` 优先，缺失时允许 `model_pricing` fallback；两者都不可用才是零/未定价语义。
 - [x] 删除或更新已失效的迁移/审计说明，避免 README 把历史 remediation 文档描述成当前执行入口。
-- [x] 最终确认 `opencode-analyzer/` 可整目录迁出：自身 module、tests、README、storage/API/UI 不依赖 token-analyzer runtime 或私有源码。
+- [x] 最终确认 `opencode-analyzer/` 的 module、tests、README、storage/API/UI 不依赖 token-analyzer runtime 或私有源码；shared identity contract 只提供中性测试数据与期望，不共享实现。
 
 ## Answer
 

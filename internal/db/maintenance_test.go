@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -153,6 +154,34 @@ func TestRollupAndPrunePreservesSharedDatabaseRows(t *testing.T) {
 	}
 }
 
+func TestMaintenanceOwnershipPredicate(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	query := fmt.Sprintf(`SELECT CASE WHEN (%s) THEN 1 ELSE 0 END FROM (SELECT ? AS app_type, ? AS data_source)`, maintenanceOwnershipPredicate)
+	for _, test := range []struct {
+		appType, dataSource string
+		owned               bool
+	}{
+		{"pi", "pi_session", true},
+		{"codex", "codex", true},
+		{"pi", "proxy", false},
+		{"codex", "proxy", false},
+		{"proxy", "proxy", false},
+	} {
+		var got int
+		if err := database.DB.QueryRow(query, test.appType, test.dataSource).Scan(&got); err != nil {
+			t.Fatalf("evaluate ownership predicate for %s/%s: %v", test.appType, test.dataSource, err)
+		}
+		if (got == 1) != test.owned {
+			t.Errorf("ownership for %s/%s = %v, want %v", test.appType, test.dataSource, got == 1, test.owned)
+		}
+	}
+}
+
 func TestRollupAndPruneRollsBackOnRollupFailure(t *testing.T) {
 	database, err := Open(filepath.Join(t.TempDir(), "ledger.db"))
 	if err != nil {
@@ -160,7 +189,11 @@ func TestRollupAndPruneRollsBackOnRollupFailure(t *testing.T) {
 	}
 	defer database.Close()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	insertMaintenanceUsage(t, database, "old", time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC), 200, "model-a", 10, 5, 0, 0, "0.10", 100)
+	old := time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC)
+	insertMaintenanceRow(t, database, "old-pi", old, "pi", "pi_session", 200, "pi-model", 10, 5, 1, 2, "0.10", 100)
+	insertMaintenanceRow(t, database, "old-codex", old, "codex", "codex", 200, "codex-model", 20, 6, 2, 3, "0.20", 200)
+	insertMaintenanceRow(t, database, "old-generic", old, "proxy", "proxy", 200, "generic-model", 30, 7, 3, 4, "0.30", 300)
+	insertMaintenanceRow(t, database, "old-other", old, "other", "other", 200, "other-model", 40, 8, 4, 5, "0.40", 400)
 	if _, err := database.DB.Exec(`CREATE TRIGGER fail_rollup BEFORE INSERT ON usage_daily_rollups BEGIN SELECT RAISE(ABORT, 'injected rollup failure'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +210,19 @@ func TestRollupAndPruneRollsBackOnRollupFailure(t *testing.T) {
 	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM usage_daily_rollups`).Scan(&rollupCount); err != nil {
 		t.Fatal(err)
 	}
-	if rawCount != 1 || rollupCount != 0 {
-		t.Fatalf("failed maintenance must keep raw and leave no rollup: raw=%d rollups=%d", rawCount, rollupCount)
+	if rawCount != 4 || rollupCount != 0 {
+		t.Fatalf("failed maintenance must keep all raw rows and leave no rollup: raw=%d rollups=%d", rawCount, rollupCount)
+	}
+	for _, row := range []struct {
+		id, appType, dataSource, model string
+		input, output                  int
+		cost                           string
+	}{
+		{"old-pi", "pi", "pi_session", "pi-model", 10, 5, "0.10"},
+		{"old-codex", "codex", "codex", "codex-model", 20, 6, "0.20"},
+		{"old-generic", "proxy", "proxy", "generic-model", 30, 7, "0.30"},
+		{"old-other", "other", "other", "other-model", 40, 8, "0.40"},
+	} {
+		assertMaintenanceRow(t, database, row.id, row.appType, row.dataSource, row.model, row.input, row.output, row.cost)
 	}
 }
