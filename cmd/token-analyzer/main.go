@@ -140,18 +140,21 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("开始监控会话目录: %s (轮询间隔: %dms)...\n", *dir, *interval)
-		printWatchTotals := func() {
+		printWatchTotals := func() error {
 			tot, err := watchTotalsOnce(*dir, *codexDir, *dbPath, filter)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "watch 失败（保留上次快照）: %v\n", err)
-				return
+				return err
 			}
 			now := time.Now().Format("15:04:05")
 			fmt.Printf("[%s] 请求数: %d | 总 Token: %.0f | 花费: $%.4f\n",
 				now, tot.Requests, tot.TotalTokens, tot.Cost)
+			return nil
 		}
-		printWatchTotals()
-		last, _ := refresh.PiFingerprint(*dir)
+		last := ""
+		if err := printWatchTotals(); err == nil {
+			last, _ = refresh.PiFingerprint(*dir)
+		}
 		ticker := time.NewTicker(time.Duration(*interval) * time.Millisecond)
 		defer ticker.Stop()
 
@@ -160,8 +163,9 @@ func main() {
 			if err != nil || cur == last {
 				continue
 			}
-			last = cur
-			printWatchTotals()
+			if err := printWatchTotals(); err == nil {
+				last = cur
+			}
 		}
 		return
 	}

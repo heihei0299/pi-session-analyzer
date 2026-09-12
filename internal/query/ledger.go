@@ -685,7 +685,7 @@ func queryPiDetail(database *db.Database, sessionID string) (*sessiondata.Sessio
 			})
 		}
 	}
-	sort.Slice(requests, func(i, j int) bool { return requests[i].Timestamp < requests[j].Timestamp })
+	sessiondata.SortRequestRows(requests, "timestamp", false)
 	if requests == nil {
 		requests = make([]domain.RequestRow, 0)
 	}

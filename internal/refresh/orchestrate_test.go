@@ -73,13 +73,18 @@ func TestTokenAnalyzerDbEnvIsHonored(t *testing.T) {
 }
 
 func TestFingerprintChangesOnWrite(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
 	piDir := t.TempDir()
 	codexDir := t.TempDir()
 	before, err := Fingerprint(piDir, codexDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(piDir, "s.jsonl")
+	path := filepath.Join(piDir, "project", "s.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -96,5 +101,39 @@ func TestFingerprintChangesOnWrite(t *testing.T) {
 	}
 	if after != again {
 		t.Fatal("fingerprint must be stable without changes")
+	}
+}
+
+func TestPiFingerprintDetectsSameSizeRewriteWithRestoredMtime(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+	piDir := t.TempDir()
+	path := filepath.Join(piDir, "project", "s.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{\"a\":1}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := PiFingerprint(piDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stat, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{\"b\":1}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, stat.ModTime(), stat.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := PiFingerprint(piDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("same-size rewrite with restored mtime must change the Pi fingerprint")
 	}
 }

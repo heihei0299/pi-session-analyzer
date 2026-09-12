@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/heihei0299/token-analyzer/internal/db"
 	"github.com/heihei0299/token-analyzer/internal/sessiondata"
@@ -179,5 +180,82 @@ func TestServerRefreshFailureKeepsSnapshotAndExposesError(t *testing.T) {
 	}
 	if again := ledgerDump(t, dbPath); again != dump {
 		t.Fatalf("post-failure GETs must not touch the ledger")
+	}
+}
+
+func TestServerWatchRetriesFailedRefresh(t *testing.T) {
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+	piDir := t.TempDir()
+	piFile := filepath.Join(piDir, "project", "s1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(piFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(piFile, []byte(`{"type":"session","id":"s1","timestamp":"2026-09-10T00:00:00Z","cwd":"/w"}
+{"type":"message","id":"a1","timestamp":"2026-09-10T01:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":2}},"stopReason":"stop"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "ledger.db")
+	srv := NewServer(piDir, sessiondata.NewSessionData(), Options{Source: "all", CodexDir: t.TempDir(), DBPath: dbPath})
+	mustRefreshNow(t, srv)
+
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.DB.Exec(`CREATE TRIGGER fail_watch_refresh BEFORE INSERT ON session_log_sync BEGIN SELECT RAISE(ABORT, 'injected watch refresh failure'); END`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	stop := srv.StartWatch(10 * time.Millisecond)
+	defer stop()
+
+	file, err := os.OpenFile(piFile, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"type":"message","id":"a2","timestamp":"2026-09-10T02:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":3,"output":4}},"stopReason":"stop"}` + "\n"); err != nil {
+		file.Close()
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, errorsBySource := srv.lastRefresh()
+		if errorsBySource["pi"] != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			database.Close()
+			t.Fatal("watch did not observe the injected refresh failure")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := database.DB.Exec(`DROP TRIGGER fail_watch_refresh`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		code, body := getBody(t, srv.Handler(), "/api/totals?source=pi")
+		if code == http.StatusOK && strings.Contains(body, `"requests":2`) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("watch did not retry the failed refresh: status=%d body=%s", code, body)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

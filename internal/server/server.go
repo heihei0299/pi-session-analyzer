@@ -310,13 +310,13 @@ func (s *Server) StartWatch(interval time.Duration) (stop func()) {
 		interval = 2 * time.Second
 	}
 	done := make(chan struct{})
+	last, _ := refresh.Fingerprint(s.queryConfig.PiDir, s.queryConfig.CodexDir)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		last, _ := refresh.Fingerprint(s.queryConfig.PiDir, s.queryConfig.CodexDir)
 		for {
 			select {
 			case <-done:
@@ -326,8 +326,9 @@ func (s *Server) StartWatch(interval time.Duration) (stop func()) {
 				if err != nil || cur == last {
 					continue
 				}
-				last = cur
-				_ = s.RefreshNow()
+				if err := s.RefreshNow(); err == nil {
+					last = cur
+				}
 			}
 		}
 	}()
@@ -567,6 +568,14 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		s.sessionData.InvalidateCache(s.dir)
+		if err := refresh.Refresh(refresh.Config{PiDir: s.queryConfig.PiDir, DBPath: s.queryConfig.DBPath, Source: "pi"}); err != nil {
+			sendError(w, http.StatusServiceUnavailable, "Service Unavailable", fmt.Sprintf("文件已改名但 snapshot refresh failed: %v", err))
+			return
+		}
+		if _, err := sourcequery.QueryDetail(s.queryConfig, req.SessionId); err != nil {
+			sendError(w, http.StatusServiceUnavailable, "Service Unavailable", fmt.Sprintf("文件已改名但 snapshot refresh failed: snapshot verification: %v", err))
+			return
+		}
 	}
 
 	sendJSON(w, http.StatusOK, map[string]any{

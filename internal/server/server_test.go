@@ -80,6 +80,16 @@ func TestServerEndpoints(t *testing.T) {
 	if _, err := os.Stat(expectedNewPath); err != nil {
 		t.Fatalf("renamed file does not exist: %s", expectedNewPath)
 	}
+	wDetail := httptest.NewRecorder()
+	handler.ServeHTTP(wDetail, httptest.NewRequest("GET", "/api/sessions/uuid123/detail", nil))
+	if wDetail.Code != http.StatusOK || !strings.Contains(wDetail.Body.String(), `"displayName":"NewName"`) {
+		t.Fatalf("detail must see the renamed displayName immediately: status=%d body=%s", wDetail.Code, wDetail.Body.String())
+	}
+	wSessions := httptest.NewRecorder()
+	handler.ServeHTTP(wSessions, httptest.NewRequest("GET", "/api/sessions", nil))
+	if wSessions.Code != http.StatusOK || !strings.Contains(wSessions.Body.String(), `"displayName":"NewName"`) {
+		t.Fatalf("sessions must see the renamed displayName immediately: status=%d body=%s", wSessions.Code, wSessions.Body.String())
+	}
 
 	// 4. OpenCode 已抽离，token-analyzer 不再注册其 API。
 	reqOpenCode := httptest.NewRequest("GET", "/api/opencode/costs?year=2026&month=8", nil)

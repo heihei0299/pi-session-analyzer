@@ -2,12 +2,8 @@ package refresh
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 
@@ -49,16 +45,16 @@ func PiFingerprint(piDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fingerprintRoots(resolved.Root)
+	return pi.Fingerprint(resolved.Root, resolved.Layout)
 }
 
 // CodexFingerprint 只覆盖 Codex home。
 func CodexFingerprint(codexDir string) (string, error) {
-	return fingerprintRoots(codex.ResolveHome(codexDir))
+	return codex.Fingerprint(codex.ResolveHome(codexDir))
 }
 
-// Fingerprint 给定 Pi/Codex 根的可变指纹：排序后的（路径、大小、mtime）哈希。
-// Watch 与 server watcher 只凭它判断“变了”，解析规则仍只在 adapter 内。
+// Fingerprint 给定 Pi/Codex 根的 source revision 哈希：包含 adapter 的文件内容尾指纹、
+// 完整性、大小与 mtime。Watch 与 server watcher 只凭它判断“变了”，解析规则仍只在 adapter 内。
 func Fingerprint(piDir, codexDir string) (string, error) {
 	piFp, err := PiFingerprint(piDir)
 	if err != nil {
@@ -72,36 +68,5 @@ func Fingerprint(piDir, codexDir string) (string, error) {
 	h.Write([]byte(piFp))
 	h.Write([]byte{0})
 	h.Write([]byte(codexFp))
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func fingerprintRoots(roots ...string) (string, error) {
-	h := sha256.New()
-	feed := func(root string) {
-		_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil || entry.IsDir() {
-				return nil
-			}
-			fi, err := entry.Info()
-			if err != nil {
-				return nil
-			}
-			var buf [8]byte
-			binary.BigEndian.PutUint64(buf[:], uint64(fi.Size()))
-			h.Write([]byte(path))
-			h.Write([]byte{0})
-			h.Write(buf[:])
-			binary.BigEndian.PutUint64(buf[:], uint64(fi.ModTime().UnixMilli()))
-			h.Write(buf[:])
-			h.Write([]byte{0})
-			return nil
-		})
-	}
-	sort.Strings(roots)
-	for _, root := range roots {
-		h.Write([]byte(root))
-		h.Write([]byte{0})
-		feed(root)
-	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

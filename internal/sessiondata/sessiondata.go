@@ -495,31 +495,81 @@ func (s *SessionData) PeriodKey(timestamp string, p domain.Period) (string, erro
 	return "", fmt.Errorf("unknown period: %s", p)
 }
 
-func compareTotalsMetric(a, b domain.Totals, key string) (bool, bool) {
+func compareInt(a, b int) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+func compareFloat(a, b float64) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+func compareLexical(a, b string) int {
+	if a < b {
+		return -1
+	}
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+func compareBool(a, b bool) int {
+	if !a && b {
+		return -1
+	}
+	if a && !b {
+		return 1
+	}
+	return 0
+}
+
+func compareTotalsMetric(a, b domain.Totals, key string) (int, bool) {
 	switch key {
 	case "requests":
-		return a.Requests < b.Requests, true
+		return compareInt(a.Requests, b.Requests), true
 	case "input":
-		return a.Input < b.Input, true
+		return compareFloat(a.Input, b.Input), true
 	case "output":
-		return a.Output < b.Output, true
+		return compareFloat(a.Output, b.Output), true
 	case "cache":
-		return (a.CacheRead + a.CacheWrite) < (b.CacheRead + b.CacheWrite), true
+		return compareFloat(a.CacheRead+a.CacheWrite, b.CacheRead+b.CacheWrite), true
 	case "cacheRead":
-		return a.CacheRead < b.CacheRead, true
+		return compareFloat(a.CacheRead, b.CacheRead), true
 	case "cacheWrite":
-		return a.CacheWrite < b.CacheWrite, true
+		return compareFloat(a.CacheWrite, b.CacheWrite), true
 	case "reasoning":
-		return a.Reasoning < b.Reasoning, true
+		return compareFloat(a.Reasoning, b.Reasoning), true
 	case "totalTokens":
-		return a.TotalTokens < b.TotalTokens, true
+		return compareFloat(a.TotalTokens, b.TotalTokens), true
 	case "cost":
-		return a.Cost < b.Cost, true
+		return compareFloat(a.Cost, b.Cost), true
 	case "cacheRate":
-		return a.CacheRate < b.CacheRate, true
+		return compareFloat(a.CacheRate, b.CacheRate), true
 	default:
-		return false, false
+		return 0, false
 	}
+}
+
+func sortBefore(cmp int, desc bool) bool {
+	if cmp == 0 {
+		return false
+	}
+	if desc {
+		return cmp > 0
+	}
+	return cmp < 0
 }
 
 // SortSessionRows 复用生产排序语义，供 ledger-backed 查询在内存行上排序。
@@ -532,35 +582,100 @@ func SortRequestRows(rows []domain.RequestRow, key string, desc bool) {
 	sortRequests(rows, key, desc)
 }
 
+func compareSessionField(a, b domain.SessionRow, key string) int {
+	switch key {
+	case "sessionId":
+		return compareLexical(a.SessionId, b.SessionId)
+	case "displayName":
+		return compareLexical(a.DisplayName, b.DisplayName)
+	case "cwd":
+		return compareLexical(a.Cwd, b.Cwd)
+	case "model":
+		return compareLexical(a.Model, b.Model)
+	case "timestamp":
+		return compareLexical(a.Timestamp, b.Timestamp)
+	default:
+		return compareLexical(a.Timestamp, b.Timestamp)
+	}
+}
+
+func compareSessionStable(a, b domain.SessionRow) int {
+	for _, pair := range [][2]string{
+		{a.SessionId, b.SessionId},
+		{a.Source, b.Source},
+		{a.FileName, b.FileName},
+		{a.DisplayName, b.DisplayName},
+		{a.Cwd, b.Cwd},
+		{a.CwdNorm, b.CwdNorm},
+		{a.Model, b.Model},
+		{a.ParentSessionId, b.ParentSessionId},
+	} {
+		if cmp := compareLexical(pair[0], pair[1]); cmp != 0 {
+			return cmp
+		}
+	}
+	if cmp := compareBool(a.IsTask, b.IsTask); cmp != 0 {
+		return cmp
+	}
+	for _, metric := range []string{"requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"} {
+		if cmp, ok := compareTotalsMetric(a.Totals, b.Totals, metric); ok && cmp != 0 {
+			return cmp
+		}
+	}
+	return 0
+}
+
+func compareRequestField(a, b domain.RequestRow, key string) int {
+	switch key {
+	case "sessionId":
+		return compareLexical(a.SessionId, b.SessionId)
+	case "displayName":
+		return compareLexical(a.DisplayName, b.DisplayName)
+	case "model":
+		return compareLexical(a.Model, b.Model)
+	case "timestamp":
+		return compareLexical(a.Timestamp, b.Timestamp)
+	default:
+		return compareLexical(a.Timestamp, b.Timestamp)
+	}
+}
+
+func compareRequestStable(a, b domain.RequestRow) int {
+	for _, pair := range [][2]string{
+		{a.SessionId, b.SessionId},
+		{a.Source, b.Source},
+		{a.SourceSessionId, b.SourceSessionId},
+		{a.Timestamp, b.Timestamp},
+		{a.Model, b.Model},
+		{a.DisplayName, b.DisplayName},
+	} {
+		if cmp := compareLexical(pair[0], pair[1]); cmp != 0 {
+			return cmp
+		}
+	}
+	for _, metric := range []string{"requests", "input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens", "cost", "cacheRate"} {
+		if cmp, ok := compareTotalsMetric(a.Totals, b.Totals, metric); ok && cmp != 0 {
+			return cmp
+		}
+	}
+	return 0
+}
+
 func sortSessions(rows []domain.SessionRow, key string, desc bool) {
 	sort.Slice(rows, func(i, j int) bool {
 		a := rows[i]
 		b := rows[j]
-		if less, ok := compareTotalsMetric(a.Totals, b.Totals, key); ok {
-			if desc {
-				return !less
-			}
-			return less
+		cmp, ok := compareTotalsMetric(a.Totals, b.Totals, key)
+		if !ok || cmp == 0 {
+			cmp = compareSessionField(a, b, key)
 		}
-		var less bool
-		switch key {
-		case "sessionId":
-			less = a.SessionId < b.SessionId
-		case "displayName":
-			less = a.DisplayName < b.DisplayName
-		case "cwd":
-			less = a.Cwd < b.Cwd
-		case "model":
-			less = a.Model < b.Model
-		case "timestamp":
-			less = a.Timestamp < b.Timestamp
-		default:
-			less = a.Timestamp < b.Timestamp
+		if cmp == 0 {
+			cmp = compareLexical(a.Timestamp, b.Timestamp)
 		}
-		if desc {
-			return !less
+		if cmp == 0 {
+			cmp = compareSessionStable(a, b)
 		}
-		return less
+		return sortBefore(cmp, desc)
 	})
 }
 
@@ -568,29 +683,17 @@ func sortRequests(rows []domain.RequestRow, key string, desc bool) {
 	sort.Slice(rows, func(i, j int) bool {
 		a := rows[i]
 		b := rows[j]
-		if less, ok := compareTotalsMetric(a.Totals, b.Totals, key); ok {
-			if desc {
-				return !less
-			}
-			return less
+		cmp, ok := compareTotalsMetric(a.Totals, b.Totals, key)
+		if !ok || cmp == 0 {
+			cmp = compareRequestField(a, b, key)
 		}
-		var less bool
-		switch key {
-		case "sessionId":
-			less = a.SessionId < b.SessionId
-		case "displayName":
-			less = a.DisplayName < b.DisplayName
-		case "model":
-			less = a.Model < b.Model
-		case "timestamp":
-			less = a.Timestamp < b.Timestamp
-		default:
-			less = a.Timestamp < b.Timestamp
+		if cmp == 0 {
+			cmp = compareLexical(a.Timestamp, b.Timestamp)
 		}
-		if desc {
-			return !less
+		if cmp == 0 {
+			cmp = compareRequestStable(a, b)
 		}
-		return less
+		return sortBefore(cmp, desc)
 	})
 }
 
@@ -613,4 +716,3 @@ type SessionDetailResult struct {
 }
 
 var ErrSessionNotFound = fmt.Errorf("session not found")
-
