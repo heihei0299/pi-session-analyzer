@@ -5,7 +5,6 @@
 * 原型 / PoC → `prototype`
 * 简单修改 → 直接实现
 * TDD / 集成测试 → `tdd`
-* bug / 异常 / 性能 → `diagnose-fix`
 * 代码审查 → `code-review`
 * 设计质询 → `grilling`
 * 领域建模 → `domain-modeling`
