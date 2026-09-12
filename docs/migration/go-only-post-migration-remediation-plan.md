@@ -5,6 +5,8 @@
 **目标:** 修复审计发现，同时保持当前 Go-only / standalone OpenCode 架构，不重新引入 TS 或跨项目耦合。  
 **原则:** 先正确性，再 runtime 一致性，再产品边界/清理，最后 contract 收口。
 
+> 本文是历史修复执行计划；当前实现与验收状态以 `.scratch/go-only-backend-migration/issues/06-*`、`07-*`、代码和 CI 结果为准。
+
 ---
 
 # 1. 执行总览

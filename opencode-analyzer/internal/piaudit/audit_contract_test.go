@@ -19,8 +19,8 @@ func TestTotalsForRangeUsesStandalonePiContract(t *testing.T) {
 {"type":"branch_summary","id":"branch-1","timestamp":"2026-09-11T02:00:00Z","usage":{"input":4,"output":2,"cacheWrite":1}}
 {"type":"message","id":"failed-1","timestamp":"2026-09-11T03:00:00Z","message":{"role":"assistant","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"cost":{"total":0}},"stopReason":"error"}}
 {"type":"message","id":"aborted-1","timestamp":"2026-09-11T03:30:00Z","message":{"role":"assistant","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"cost":{"total":0}},"stopReason":"aborted"}}
-{"type":"message","timestamp":"2026-09-11T04:00:00Z","message":{"role":"assistant","model":"m1","usage":{"input":5,"output":1},"stopReason":"stop"}}
-{"type":"message","timestamp":"2026-09-11T04:00:00Z","message":{"role":"assistant","model":"m1","usage":{"input":5,"output":1},"stopReason":"stop"}}
+{"type":"message","timestamp":"2026-09-11T04:00:00Z","message":{"role":"assistant","model":"m1","usage":{"input":5,"output":1},"stopReason":"stop","irrelevant":"first"}}
+{"type":"message","timestamp":"2026-09-11T04:00:00Z","message":{"role":"assistant","model":"m1","usage":{"input":5,"output":1},"stopReason":"stop","irrelevant":"second"}}
 {"type":"message","id":"outside-month","timestamp":"2026-10-02T00:00:00Z","message":{"role":"assistant","usage":{"input":100,"output":100},"stopReason":"stop"}}
 `
 	if err := os.WriteFile(mainPath, []byte(main), 0o644); err != nil {

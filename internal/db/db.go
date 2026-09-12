@@ -185,6 +185,7 @@ func (d *Database) createTables() error {
 			last_synced_at INTEGER NOT NULL,
 			last_byte_offset INTEGER,
 			last_tail_fingerprint INTEGER,
+			sync_semantics_version INTEGER NOT NULL DEFAULT 0,
 			diagnostics_summary TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS session_usage_dedup (
@@ -208,6 +209,7 @@ func (d *Database) createTables() error {
 			output_tokens INTEGER NOT NULL DEFAULT 0,
 			cache_read_tokens INTEGER NOT NULL DEFAULT 0,
 			cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+			reasoning_tokens INTEGER NOT NULL DEFAULT 0,
 			input_token_semantics INTEGER NOT NULL DEFAULT 0,
 			total_cost_usd TEXT NOT NULL DEFAULT '0',
 			avg_latency_ms INTEGER NOT NULL DEFAULT 0,
@@ -328,6 +330,33 @@ func (d *Database) ensureColumns() error {
 			return err
 		}
 	}
+	rows, err = d.DB.Query(`PRAGMA table_info(usage_daily_rollups)`)
+	if err != nil {
+		return err
+	}
+	rollupColumns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		rollupColumns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	if !rollupColumns["reasoning_tokens"] {
+		if _, err := d.DB.Exec(`ALTER TABLE usage_daily_rollups ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
 	rows, err = d.DB.Query(`PRAGMA table_info(session_log_sync)`)
 	if err != nil {
 		return err
@@ -353,6 +382,11 @@ func (d *Database) ensureColumns() error {
 	// per-file 诊断摘要：游标命中的文件不再重扫，诊断必须能重放，否则覆盖率缺口只在首次查询可见。
 	if !syncColumns["diagnostics_summary"] {
 		if _, err := d.DB.Exec(`ALTER TABLE session_log_sync ADD COLUMN diagnostics_summary TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if !syncColumns["sync_semantics_version"] {
+		if _, err := d.DB.Exec(`ALTER TABLE session_log_sync ADD COLUMN sync_semantics_version INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return err
 		}
 	}

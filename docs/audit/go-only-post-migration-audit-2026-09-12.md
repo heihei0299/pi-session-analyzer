@@ -6,6 +6,8 @@
 **审计方式:** 静态 code review；未在本轮重新执行 build/test/lint/typecheck  
 **规范来源:** `.scratch/go-only-backend-migration/spec.md`、01–05 tickets、`CONTEXT.md`、ADR-0001..0005、`AGENTS.md`
 
+> 本文是 2026-09-12 修复前的历史基线审计，不代表当前实现或发布结论；当前验收以 06/07 ticket、代码与 CI 结果为准。
+
 ---
 
 ## 1. 结论

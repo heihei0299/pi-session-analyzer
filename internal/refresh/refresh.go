@@ -7,6 +7,7 @@ package refresh
 
 import (
 	"sync"
+	"time"
 
 	"github.com/heihei0299/token-analyzer/internal/codex"
 	"github.com/heihei0299/token-analyzer/internal/db"
@@ -56,5 +57,5 @@ func refreshLocked(cfg Config) error {
 			return err
 		}
 	}
-	return nil
+	return db.RollupAndPrune(database, time.Now(), db.DefaultRollupRetentionDays)
 }

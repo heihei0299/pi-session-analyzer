@@ -50,7 +50,7 @@ func PiFingerprint(piDir string) (string, error) {
 
 // CodexFingerprint 只覆盖 Codex home。
 func CodexFingerprint(codexDir string) (string, error) {
-	return codex.Fingerprint(codex.ResolveHome(codexDir))
+	return codex.CheapFingerprint(codex.ResolveHome(codexDir))
 }
 
 // Fingerprint 给定 Pi/Codex 根的 source revision 哈希：包含 adapter 的文件内容尾指纹、

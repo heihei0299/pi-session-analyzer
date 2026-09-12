@@ -182,6 +182,55 @@ func TestServerRefreshFailureKeepsSnapshotAndExposesError(t *testing.T) {
 	}
 }
 
+func TestServerWatchUsesOnlyConfiguredSource(t *testing.T) {
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+	piDir := t.TempDir()
+	piFile := filepath.Join(piDir, "project", "s1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(piFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(piFile, []byte(`{"type":"session","id":"s1","timestamp":"2026-09-10T00:00:00Z","cwd":"/w"}
+{"type":"message","id":"a1","timestamp":"2026-09-10T01:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":2}},"stopReason":"stop"}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	notDir := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(notDir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "ledger.db")
+	srv := NewServer(piDir, Options{Source: "pi", CodexDir: notDir, DBPath: dbPath})
+	if err := srv.RefreshNow(); err == nil {
+		t.Fatal("initial refresh should report the invalid unused Codex source")
+	}
+	stop := srv.StartWatch(10 * time.Millisecond)
+	defer stop()
+	file, err := os.OpenFile(piFile, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(`{"type":"message","id":"a2","timestamp":"2026-09-10T02:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":3,"output":4}},"stopReason":"stop"}` + "\n"); err != nil {
+		file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		code, body := getBody(t, srv.Handler(), "/api/totals?source=pi")
+		if code == http.StatusOK && strings.Contains(body, `"requests":2`) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Pi watch should not depend on Codex fingerprint/refresh: status=%d body=%s", code, body)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestServerWatchRetriesFailedRefresh(t *testing.T) {
 	t.Setenv("TOKEN_ANALYZER_DB", "")
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")

@@ -132,16 +132,16 @@ func main() {
 		TimeRange: tr,
 	}
 
-	// Watch 实时监控模式：change → refresh → query，与普通查询同一快照源。
+	// Watch 实时监控模式：change → source refresh → query，与普通查询同一快照源。
 	// source 解析/去重/费用等规则只在 adapter 内实现，这里不累加。
 	if *watchMode {
-		if *source != "pi" {
-			fmt.Fprintln(os.Stderr, "错误: --watch 目前只支持 --source pi")
+		if *source != "pi" && *source != "codex" && *source != "all" {
+			fmt.Fprintln(os.Stderr, "错误: --watch 的 --source 只支持 pi|codex|all")
 			os.Exit(1)
 		}
-		fmt.Printf("开始监控会话目录: %s (轮询间隔: %dms)...\n", *dir, *interval)
+		fmt.Printf("开始监控数据源: %s (轮询间隔: %dms)...\n", *source, *interval)
 		printWatchTotals := func() error {
-			tot, err := watchTotalsOnce(*dir, *codexDir, *dbPath, filter)
+			tot, err := queryWatchTotals(*dir, *codexDir, *dbPath, filter)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "watch 失败（保留上次快照）: %v\n", err)
 				return err
@@ -151,20 +151,50 @@ func main() {
 				now, tot.Requests, tot.TotalTokens, tot.Cost)
 			return nil
 		}
-		last := ""
-		if err := printWatchTotals(); err == nil {
-			last, _ = refresh.PiFingerprint(*dir)
+		refreshSource := func(source string) error {
+			return refresh.Refresh(refresh.Config{PiDir: *dir, CodexDir: *codexDir, DBPath: *dbPath, Source: source})
+		}
+		lastPi, lastCodex := "", ""
+		if err := refreshSource(*source); err == nil {
+			if *source == "pi" || *source == "all" {
+				lastPi, _ = refresh.PiFingerprint(*dir)
+			}
+			if *source == "codex" || *source == "all" {
+				lastCodex, _ = refresh.CodexFingerprint(*codexDir)
+			}
+			_ = printWatchTotals()
+		} else {
+			fmt.Fprintf(os.Stderr, "watch 失败（保留上次快照）: %v\n", err)
 		}
 		ticker := time.NewTicker(time.Duration(*interval) * time.Millisecond)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			cur, err := refresh.PiFingerprint(*dir)
-			if err != nil || cur == last {
-				continue
+			refreshed := false
+			if *source == "pi" || *source == "all" {
+				cur, err := refresh.PiFingerprint(*dir)
+				if err == nil && cur != lastPi {
+					if err := refreshSource("pi"); err != nil {
+						fmt.Fprintf(os.Stderr, "watch pi 失败（保留上次快照）: %v\n", err)
+					} else {
+						lastPi = cur
+						refreshed = true
+					}
+				}
 			}
-			if err := printWatchTotals(); err == nil {
-				last = cur
+			if *source == "codex" || *source == "all" {
+				cur, err := refresh.CodexFingerprint(*codexDir)
+				if err == nil && cur != lastCodex {
+					if err := refreshSource("codex"); err != nil {
+						fmt.Fprintf(os.Stderr, "watch codex 失败（保留上次快照）: %v\n", err)
+					} else {
+						lastCodex = cur
+						refreshed = true
+					}
+				}
+			}
+			if refreshed {
+				_ = printWatchTotals()
 			}
 		}
 		return
@@ -241,10 +271,22 @@ func main() {
 // 与普通查询走同一 Refresh + Query 映射，故 watch totals 与同一时刻
 // 普通 Query totals 天然一致；source 规则只在 adapter 内实现，这里不累加。
 func watchTotalsOnce(piDir, codexDir, dbPath string, filter sessiondata.Filter) (*domain.Totals, error) {
-	if err := refresh.Refresh(refresh.Config{PiDir: piDir, CodexDir: codexDir, DBPath: dbPath, Source: "pi"}); err != nil {
+	source := filter.Source
+	if source == "" {
+		source = "pi"
+	}
+	if err := refresh.Refresh(refresh.Config{PiDir: piDir, CodexDir: codexDir, DBPath: dbPath, Source: source}); err != nil {
 		return nil, err
 	}
-	res, err := query.Query(query.Config{PiDir: piDir, CodexDir: codexDir, DBPath: dbPath, Source: "pi"}, filter, sessiondata.View{Kind: sessiondata.ViewTotals})
+	return queryWatchTotals(piDir, codexDir, dbPath, filter)
+}
+
+func queryWatchTotals(piDir, codexDir, dbPath string, filter sessiondata.Filter) (*domain.Totals, error) {
+	source := filter.Source
+	if source == "" {
+		source = "pi"
+	}
+	res, err := query.Query(query.Config{PiDir: piDir, CodexDir: codexDir, DBPath: dbPath, Source: source}, filter, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		return nil, err
 	}

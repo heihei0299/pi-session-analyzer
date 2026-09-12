@@ -60,6 +60,7 @@ type QueryMeta struct {
 	DataRange          DataRangeValue `json:"dataRange"`
 	Sources            []string       `json:"sources,omitempty"`
 	Warnings           []string       `json:"warnings,omitempty"`
+	CoverageStatus     string         `json:"coverageStatus,omitempty"`
 	UncountedSnapshots int            `json:"uncountedSnapshots,omitempty"`
 }
 

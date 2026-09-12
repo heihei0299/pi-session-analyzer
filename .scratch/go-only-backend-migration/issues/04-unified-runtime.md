@@ -6,21 +6,21 @@
 
 **Status:** resolved
 
-- [ ] Query 不执行 discovery、parse、sync、游标推进或 DB 写入。
-- [ ] Go server 启动时完成明确的初次 Pi/Codex refresh，再对外提供 snapshot 查询。
-- [ ] 后续 refresh 走统一 orchestration，并发 refresh 被合并或串行化，多个 GET 不放大为重复同步。
-- [ ] refresh 失败保留上一成功 snapshot，并通过 diagnostics/meta 暴露错误。
-- [ ] 连续 GET 不改变 ledger 内容或同步游标。
-- [ ] Watch 改为 change → refresh → query，不再直接累加 usage/cost/totals。
-- [ ] append、partial line、truncate、rewrite、fork、cache、pricing 等 source 规则只存在于 source adapter，不在 Watch 重复实现。
-- [ ] Watch totals 与同一时刻普通 Query totals 完全一致。
-- [ ] Go binary 无需 Node server 即可提供全部 Pi/Codex 生产 HTTP API 和 WebUI。
-- [ ] WebUI 只保留一个人工维护源码，不再依赖两份 HTML 的 copy/sync。
-- [ ] source selector 只声明 Pi/Codex/All 的真实 capability。
-- [ ] Pi detail/subagent/rename 保持现有行为；Codex/All 不支持的 requests/detail/rename 明确禁用并解释原因。
-- [ ] WebUI 自动刷新只读取 snapshot，不因每个前端请求触发 source sync。
-- [ ] token-analyzer WebUI/API 不包含 OpenCode 专用交互或路由；OpenCode UI/API 仅属于独立 `opencode-analyzer/`。
-- [ ] 没有 Node runtime、没有 `opencode-analyzer/` 目录的环境中，Go binary 仍能独立运行完整 token-analyzer。
+- [x] Query 不执行 discovery、parse、sync、游标推进或 DB 写入。
+- [x] Go server 启动时完成明确的初次 Pi/Codex refresh，再对外提供 snapshot 查询。
+- [x] 后续 refresh 走统一 orchestration，并发 refresh 被合并或串行化，多个 GET 不放大为重复同步。
+- [x] refresh 失败保留上一成功 snapshot，并通过 diagnostics/meta 暴露错误。
+- [x] 连续 GET 不改变 ledger 内容或同步游标。
+- [x] Watch 改为 change → refresh → query，不再直接累加 usage/cost/totals。
+- [x] append、partial line、truncate、rewrite、fork、cache、pricing 等 source 规则只存在于 source adapter，不在 Watch 重复实现。
+- [x] Watch totals 与同一时刻普通 Query totals 完全一致。
+- [x] Go binary 无需 Node server 即可提供全部 Pi/Codex 生产 HTTP API 和 WebUI。
+- [x] WebUI 只保留一个人工维护源码，不再依赖两份 HTML 的 copy/sync。
+- [x] source selector 只声明 Pi/Codex/All 的真实 capability。
+- [x] Pi detail/subagent/rename 保持现有行为；Codex/All 不支持的 requests/detail/rename 明确禁用并解释原因。
+- [x] WebUI 自动刷新只读取 snapshot，不因每个前端请求触发 source sync。
+- [x] token-analyzer WebUI/API 不包含 OpenCode 专用交互或路由；OpenCode UI/API 仅属于独立 `opencode-analyzer/`。
+- [x] 没有 Node runtime、没有 `opencode-analyzer/` 目录的环境中，Go binary 仍能独立运行完整 token-analyzer。
 
 ## Answer
 

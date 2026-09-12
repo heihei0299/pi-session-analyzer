@@ -91,6 +91,8 @@ func tailFingerprintAtGo(path string, offset int64) (uint32, error) {
 	return tailFingerprintGo(buf), nil
 }
 
+const PiSyncSemanticsVersion = 2
+
 type SyncResult struct {
 	Imported int
 	Skipped  int
@@ -108,12 +110,12 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		var cursorTail uint32
 		var hasCursor bool
 		var canSeek bool
-		var nByte, nTail, nLine sql.NullInt64
-		err = database.DB.QueryRow(`SELECT last_byte_offset, last_tail_fingerprint, last_line_offset FROM session_log_sync WHERE file_path = ?`, file).Scan(&nByte, &nTail, &nLine)
+		var nByte, nTail, nLine, nSemantics sql.NullInt64
+		err = database.DB.QueryRow(`SELECT last_byte_offset, last_tail_fingerprint, last_line_offset, sync_semantics_version FROM session_log_sync WHERE file_path = ?`, file).Scan(&nByte, &nTail, &nLine, &nSemantics)
 		if err != nil && err != sql.ErrNoRows {
 			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("读取 %s 游标失败: %w", file, err)
 		}
-		if err == nil && nByte.Valid && nTail.Valid {
+		if err == nil && nByte.Valid && nTail.Valid && nSemantics.Valid && nSemantics.Int64 == PiSyncSemanticsVersion {
 			cursorLastByte = nByte.Int64
 			cursorTail = uint32(nTail.Int64)
 			if nLine.Valid {
@@ -443,7 +445,7 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				return rollback(err)
 			}
 		}
-		if _, err = tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint) VALUES (?, ?, ?, ?, ?, ?)`, file, rev.ModifiedMs, newCommittedLines, rev.ModifiedMs/1000, newCommittedByte, int64(newTail)); err != nil {
+		if _, err = tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint, sync_semantics_version) VALUES (?, ?, ?, ?, ?, ?, ?)`, file, rev.ModifiedMs, newCommittedLines, rev.ModifiedMs/1000, newCommittedByte, int64(newTail), PiSyncSemanticsVersion); err != nil {
 			return rollback(err)
 		}
 		if err := tx.Commit(); err != nil {

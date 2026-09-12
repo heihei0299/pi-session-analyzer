@@ -260,6 +260,45 @@ func TestPiSyncRollsBackCursorFailureAndRetries(t *testing.T) {
 	}
 }
 
+func TestPiSyncRescansLegacyCursorAndRepairsLedger(t *testing.T) {
+	dir := t.TempDir()
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	header := `{"type":"session","id":"legacy-session","timestamp":"2026-07-31T01:55:30.577Z","cwd":"/tmp"}`
+	entry := `{"type":"message","id":"legacy-request","timestamp":"2026-07-31T01:58:29.810Z","message":{"role":"assistant","provider":"p","model":"m","usage":{"input":10,"output":10}}}`
+	path := writePiFile(dir, "s.jsonl", header+"\n"+entry+"\n")
+	if _, err := SyncPiUsage(database, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.DB.Exec(`UPDATE proxy_request_logs SET output_tokens = 1 WHERE request_id LIKE 'pi_session:%'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.DB.Exec(`UPDATE session_log_sync SET sync_semantics_version = 1 WHERE file_path = ?`, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncPiUsage(database, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	var output, count int
+	if err := database.DB.QueryRow(`SELECT output_tokens, COUNT(*) FROM proxy_request_logs`).Scan(&output, &count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || output != 10 {
+		t.Fatalf("legacy cursor must trigger a repair rescan: count=%d output=%d", count, output)
+	}
+	var version int
+	if err := database.DB.QueryRow(`SELECT sync_semantics_version FROM session_log_sync WHERE file_path = ?`, path).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version == 1 {
+		t.Fatal("successful repair must write the current sync semantics version")
+	}
+}
+
 func TestPiSyncReplacesRequestAcrossRefreshes(t *testing.T) {
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))

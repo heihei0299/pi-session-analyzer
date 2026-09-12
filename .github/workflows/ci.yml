@@ -32,6 +32,13 @@ jobs:
         run: |
           go test -p 1 ./...
 
+      - name: Run Standalone OpenCode Tests
+        working-directory: opencode-analyzer
+        env:
+          GOMAXPROCS: "2"
+        run: |
+          go test -p 1 ./...
+
       - name: Verify Cross-Platform Compilation
         run: |
           make release

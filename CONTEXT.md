@@ -15,8 +15,9 @@
 - **会话数据类型（sessiondata）**：仅保留共享查询 DTO（Filter/View/QueryResult/QueryMeta/详情类型）与 cwd 归一、显示名、排序、周期 helper；不承担文件扫描统计、usage parser 或缓存。会话重命名由 Pi source adapter 的 header-only locator 按 sessionId 定位文件（非统计路径）。
 - **子代理会话**：`isTask` 会话（路径含 `/tasks/`，header 含 `parentSession`，由 `parentSessionId` 指向主会话），其消耗在详情视图合并到主会话，主列表保持独立；API 字段 `isTask` 保持原名，仅 UI 文案为“子代理”。
 - **存储（SQLite 直切）**：`token-analyzer.db`（`proxy_request_logs/session_log_sync/session_usage_dedup/usage_daily_rollups/model_pricing` + `pi_sessions/source_sessions`，与 `cc-switch/schema.rs` 1:1 扩展），`SCHEMA_VERSION=2`，`WAL/foreign_keys/auto_vacuum INCREMENTAL`，路径 `TOKEN_ANALYZER_DB > --db > ~/.cache/token-analyzer/token-analyzer.db`（默认不共库，显式 `TOKEN_ANALYZER_DB=~/.cc-switch/cc-switch.db` 或 `--db` 才共库）。写路径仅 Refresh（Pi `SyncPiUsage` + Codex `SyncRollouts`，按文件事务提交）；读路径仅 Query Engine 的 ledger SQL（`proxy_request_logs ∪ rollups`），经 `OpenReadOnly + query_only` 快照读取。日 rollup 可用于 totals/period 与 model（或无维度）groups；rollup 与其贡献的 raw 行按 prune 合约相加（截断日可存在同日但互不重叠的两类行）。因缺少 session/cwd/request identity，cwd groups、sessions、requests、detail 只使用 raw ledger。
+- **Rollup maintenance**：每次成功 Refresh 后按 30 天保留窗口，以本地自然日将过期 raw usage 原子聚合到 `usage_daily_rollups`，再删除 raw 并执行 `incremental_vacuum`；失败回滚，不留下半状态。partial-day MessageTimeRange 只合并完整中间日，边界日历史 raw 已 prune 时通过 `coverageStatus=partial` 与 warning 明示不可精确恢复。
 - **双账本去重**：`session_usage_dedup(data_source, request_id, semantic_id, has_entry_id)`，`request_id = hash(pi-session-request-v3+kind+entry.id+timestamp)`，`semantic_id = hash(pi-session-semantic-v1+kind+entry_ts+msg_ts+provider/model/responseModel/... + canonical usage)`，同文件 `requestId` 去重（`stopReason` 优先/`output` 最大），跨文件持久账本，叠加 fork `ts<forkTs`。
-- **指纹增量**：`PiFileRevision{modifiedMs, fileSize, tailFingerprint(末4096B SHA256, pi-session-tail-v1), complete}` 编码于 `session_log_sync.last_synced_at`，`tail(oldEOF)==expected` 则 `seek`，否则全量重扫（账本防双算），`last_line_offset` 行游标保证半行不推进。
+- **指纹增量**：`PiFileRevision{modifiedMs, fileSize, tailFingerprint(末4096B SHA256, pi-session-tail-v1), complete}` 编码于 `session_log_sync.last_synced_at`，`tail(oldEOF)==expected` 则 `seek`，否则全量重扫（账本防双算），`last_line_offset` 行游标保证半行不推进；`sync_semantics_version` 识别旧 Pi cursor 并触发一次安全重扫自愈。Watch 使用 source-specific revision：Pi 复用 adapter revision，Codex 先用 path/size/mtime/轻量 tail 检测，候选变化后才完整读取/解压。
 - **会话发现（双布局，直切 cc-switch providers/pi.rs）**：`PI_CODING_AGENT_SESSION_DIR`（绝对路径才可枚举，相对路径 `400 PI_SESSION_DIR_REQUIRES_PROJECT_CONTEXT`）> `pi native defaults`（`getPiNativeSessionDir()` 读 pi 配置的 session_dir，若无则空）> `~/.pi/agent/sessions`（`--dir` 默认值）；`Flat`（根下 `*.jsonl`）vs `ProjectDirectories`（`sessions/<project>/*.jsonl` 两层）按 `layout` 枚举，不再递归兜底；`--dir` 显式时仅影响第三优先级默认根，`PI_CODING_AGENT_SESSION_DIR` 与 `~/.pi-switch` 等其他项目目录隔离。
 
 ## Codex 数据域
@@ -73,7 +74,7 @@
 
 - **Go 是唯一生产后端语言**：TypeScript CLI/API/server/db/session/watch 等生产实现与迁移期 parity oracle 均已删除；运行 CLI/API/WebUI 不需要 Node/npm。
 - **Query 与 Refresh 分离**：Query 只读快照；server 启动先做初次 Refresh 再对外服务；后续 refresh 走统一串行编排，多个 GET 不放大为重复同步；连续 GET 不改变 ledger 内容或同步游标。
-- **Watch 新语义**：只做 change → refresh → query，不再直接累加 usage/cost/totals；实时 totals 与同一时刻普通 query 完全一致；append/partial/truncate/rewrite/fork/cache/pricing 等规则只存在于 source adapter。
+- **Watch 新语义**：只做 source-specific change → source Refresh → query，不再直接累加 usage/cost/totals；Pi 变化只刷新 Pi，Codex 变化只刷新 Codex，失败保留 acknowledged revision 并在下一轮重试；实时 totals 与同一时刻普通 query 完全一致；append/partial/truncate/rewrite/fork/cache/pricing 等规则只存在于 source adapter。
 - **WebUI 单一源码**：唯一人工维护源为 `internal/server/webui.html`（Go embed 直引），无 copy/sync；Go binary 自带完整 WebUI。
 - **canonical 契约**：`testdata/canonical` synthetic fixtures + golden expected 为长期行为契约（Pi/Codex 字段级断言，cost 容差 1e-9，排序稳定 tie-breaker）；不再依赖跨 runtime parity。
 

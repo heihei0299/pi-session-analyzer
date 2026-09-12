@@ -9,7 +9,7 @@
 * 设计质询 → `grilling`
 * 领域建模 → `domain-modeling`
 * 无法归类 → `ask-matt`
-\仅当关键歧义会改变结果时询问用户。
+仅当关键歧义会改变结果时询问用户。
 ## CodeGraph
 仓库内代码理解首先使用：
 ```bash

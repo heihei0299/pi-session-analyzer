@@ -175,18 +175,26 @@ type piAuditIdentity struct {
 }
 
 func makePiAuditIdentity(entry map[string]any, kind string, usage, message map[string]any) piAuditIdentity {
-	semanticPayload := struct {
-		Kind           string         `json:"kind"`
-		EntryTimestamp any            `json:"entryTimestamp"`
-		Message        map[string]any `json:"message,omitempty"`
-		Summary        any            `json:"summary,omitempty"`
-		Usage          map[string]any `json:"usage"`
-	}{
-		Kind:           kind,
-		EntryTimestamp: entry["timestamp"],
-		Message:        message,
-		Summary:        entry["summary"],
-		Usage:          usage,
+	semanticPayload := map[string]any{
+		"kind":  kind,
+		"usage": canonicalUsage(usage),
+	}
+	if timestamp, ok := entry["timestamp"].(string); ok && timestamp != "" {
+		semanticPayload["entry_timestamp"] = timestamp
+	}
+	if message != nil {
+		if timestamp, ok := message["timestamp"]; ok {
+			semanticPayload["message_timestamp"] = timestamp
+		}
+		messageFields := make(map[string]any)
+		for _, key := range []string{"provider", "model", "responseModel", "responseId", "api", "toolCallId", "toolName", "stopReason", "errorMessage", "content"} {
+			if value, ok := message[key]; ok {
+				messageFields[key] = value
+			}
+		}
+		semanticPayload["message"] = messageFields
+	} else if summary, ok := entry["summary"]; ok {
+		semanticPayload["summary"] = summary
 	}
 	semanticID := "pi_session_semantic:" + digest("pi-session-semantic-v1", semanticPayload)
 	entryID := stringValue(entry["id"])
@@ -199,6 +207,21 @@ func makePiAuditIdentity(entry map[string]any, kind string, usage, message map[s
 		Timestamp any    `json:"timestamp"`
 	}{kind, entryID, entry["timestamp"]})
 	return piAuditIdentity{requestID: requestID, semanticID: semanticID, hasEntryID: true}
+}
+
+func canonicalUsage(usage map[string]any) map[string]any {
+	out := make(map[string]any)
+	for _, key := range []string{"input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens"} {
+		if value, ok := usage[key]; ok {
+			out[key] = value
+		}
+	}
+	if cost, ok := usage["cost"].(map[string]any); ok {
+		if total, ok := cost["total"]; ok {
+			out["cost"] = map[string]any{"total": total}
+		}
+	}
+	return out
 }
 
 func digest(label string, value any) string {

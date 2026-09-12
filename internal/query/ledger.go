@@ -209,18 +209,39 @@ func rollupsAllowed(f sessiondata.Filter, v sessiondata.View) bool {
 	}
 }
 
-func rollupDateBounds(f sessiondata.Filter) (since, until string) {
-	toDate := func(seconds int64) string {
-		return time.Unix(seconds, 0).In(time.Local).Format("2006-01-02")
+type rollupDateWindow struct {
+	since        string
+	until        string
+	sincePartial bool
+	untilPartial bool
+}
+
+func rollupDateWindowFor(f sessiondata.Filter) rollupDateWindow {
+	var window rollupDateWindow
+	tr := f.TimeRange
+	if tr == nil || tr.Kind != timerange.KindMessage {
+		return window
 	}
-	messageSince, messageUntil := messageBounds(f)
-	if messageSince != nil {
-		since = toDate(*messageSince)
+	toDate := func(ms int64) string {
+		return time.UnixMilli(ms).In(time.Local).Format("2006-01-02")
 	}
-	if messageUntil != nil {
-		until = toDate(*messageUntil)
+	isStartOfDay := func(ms int64) bool {
+		value := time.UnixMilli(ms).In(time.Local)
+		return value.Hour() == 0 && value.Minute() == 0 && value.Second() == 0 && value.Nanosecond() == 0
 	}
-	return since, until
+	isEndOfDay := func(ms int64) bool {
+		value := time.UnixMilli(ms).In(time.Local).Add(time.Millisecond)
+		return value.Hour() == 0 && value.Minute() == 0 && value.Second() == 0 && value.Nanosecond() == 0
+	}
+	if tr.SinceMs != nil {
+		window.since = toDate(*tr.SinceMs)
+		window.sincePartial = !isStartOfDay(*tr.SinceMs)
+	}
+	if tr.UntilMs != nil {
+		window.until = toDate(*tr.UntilMs)
+		window.untilPartial = !isEndOfDay(*tr.UntilMs)
+	}
+	return window
 }
 
 func rollupTimestamp(date string) (string, int64, bool) {
@@ -231,6 +252,27 @@ func rollupTimestamp(date string) (string, int64, bool) {
 		return "", 0, false
 	}
 	return date + "T00:00:00Z", t.Unix(), true
+}
+
+// rollupReasoningExpression keeps read-only Query compatible with databases
+// created before reasoning_tokens was added to usage_daily_rollups.
+func rollupReasoningExpression(database *db.Database) string {
+	rows, err := database.DB.Query(`PRAGMA table_info(usage_daily_rollups)`)
+	if err != nil {
+		return "0"
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt interface{}
+		var pk int
+		if rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk) == nil && name == "reasoning_tokens" {
+			return "reasoning_tokens"
+		}
+	}
+	return "0"
 }
 
 // loadRollups loads persisted daily aggregates. A valid rollup is additive with
@@ -246,18 +288,25 @@ func loadRollups(database *db.Database, appType string, f sessiondata.Filter) ([
 		conds = append(conds, "model = ?")
 		args = append(args, f.Model)
 	}
-	if since, until := rollupDateBounds(f); since != "" {
-		conds = append(conds, "date >= ?")
-		args = append(args, since)
-		if until != "" {
-			conds = append(conds, "date <= ?")
-			args = append(args, until)
+	window := rollupDateWindowFor(f)
+	if window.since != "" {
+		op := ">="
+		if window.sincePartial {
+			op = ">"
 		}
-	} else if until != "" {
-		conds = append(conds, "date <= ?")
-		args = append(args, until)
+		conds = append(conds, "date "+op+" ?")
+		args = append(args, window.since)
 	}
-	rows, err := database.DB.Query(`SELECT date, request_count, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, CAST(COALESCE(total_cost_usd, '0') AS REAL) FROM usage_daily_rollups WHERE `+strings.Join(conds, " AND ")+` ORDER BY date, model`, args...)
+	if window.until != "" {
+		op := "<="
+		if window.untilPartial {
+			op = "<"
+		}
+		conds = append(conds, "date "+op+" ?")
+		args = append(args, window.until)
+	}
+	reasoningExpr := rollupReasoningExpression(database)
+	rows, err := database.DB.Query(`SELECT date, request_count, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, `+reasoningExpr+`, CAST(COALESCE(total_cost_usd, '0') AS REAL) FROM usage_daily_rollups WHERE `+strings.Join(conds, " AND ")+` ORDER BY date, model`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -266,8 +315,8 @@ func loadRollups(database *db.Database, appType string, f sessiondata.Filter) ([
 	for rows.Next() {
 		var date, model string
 		var requestCount int64
-		var input, output, cacheRead, cacheWrite, cost float64
-		if err := rows.Scan(&date, &requestCount, &model, &input, &output, &cacheRead, &cacheWrite, &cost); err != nil {
+		var input, output, cacheRead, cacheWrite, reasoning, cost float64
+		if err := rows.Scan(&date, &requestCount, &model, &input, &output, &cacheRead, &cacheWrite, &reasoning, &cost); err != nil {
 			return nil, err
 		}
 		tsText, createdAt, ok := rollupTimestamp(date)
@@ -282,11 +331,58 @@ func loadRollups(database *db.Database, appType string, f sessiondata.Filter) ([
 			output:       output,
 			cacheRead:    cacheRead,
 			cacheWrite:   cacheWrite,
+			reasoning:    reasoning,
 			cost:         cost,
 			requestCount: int(requestCount),
 		})
 	}
 	return out, rows.Err()
+}
+
+const partialRollupCoverageWarning = "MessageTimeRange 含小时/分钟级边界；边界日 daily rollup 未计入，历史 raw 已 prune 时结果为 partial coverage"
+
+func hasPartialRollupCoverage(database *db.Database, appType string, f sessiondata.Filter) (bool, error) {
+	// ponytail: any boundary-day rollup is conservatively partial; exact
+	// coverage needs per-event timestamps in the rollup schema.
+	window := rollupDateWindowFor(f)
+	if !window.sincePartial && !window.untilPartial {
+		return false, nil
+	}
+	dates := make([]string, 0, 2)
+	if window.sincePartial {
+		dates = append(dates, window.since)
+	}
+	if window.untilPartial && window.until != window.since {
+		dates = append(dates, window.until)
+	}
+	if len(dates) == 0 {
+		return false, nil
+	}
+	conds := []string{"app_type = ?"}
+	args := []any{appType}
+	if f.Model != "" {
+		conds = append(conds, "model = ?")
+		args = append(args, f.Model)
+	}
+	placeholders := make([]string, len(dates))
+	for i, date := range dates {
+		placeholders[i] = "?"
+		args = append(args, date)
+	}
+	conds = append(conds, "date IN ("+strings.Join(placeholders, ",")+")")
+	var exists int
+	if err := database.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM usage_daily_rollups WHERE `+strings.Join(conds, " AND ")+` LIMIT 1)`, args...).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists == 1, nil
+}
+
+func markPartialRollupCoverage(result *sessiondata.QueryResult) {
+	if result.Meta == nil {
+		result.Meta = &sessiondata.QueryMeta{Sources: SupportedSources()}
+	}
+	result.Meta.CoverageStatus = "partial"
+	result.Meta.Warnings = append(result.Meta.Warnings, partialRollupCoverageWarning)
 }
 
 // ---------- Pi ----------
@@ -473,12 +569,17 @@ func queryPi(database *db.Database, dir string, f sessiondata.Filter, v sessiond
 		return nil, err
 	}
 	queryReqs := reqs
+	partialCoverage := false
 	if rollupsAllowed(f, v) {
 		rollups, err := loadRollups(database, "pi", f)
 		if err != nil {
 			return nil, err
 		}
 		queryReqs = append(queryReqs, rollups...)
+		partialCoverage, err = hasPartialRollupCoverage(database, "pi", f)
+		if err != nil {
+			return nil, err
+		}
 	}
 	bySession := groupBySession(reqs, func(r ledgerRequest) string { return r.sessionID })
 	if hasRequestFilter(f) {
@@ -493,11 +594,23 @@ func queryPi(database *db.Database, dir string, f sessiondata.Filter, v sessiond
 	switch v.Kind {
 	case sessiondata.ViewTotals:
 		tot := sessionTotals(queryReqs)
-		return &sessiondata.QueryResult{Window: "totals", Totals: &tot}, nil
+		result := &sessiondata.QueryResult{Window: "totals", Totals: &tot}
+		if partialCoverage {
+			markPartialRollupCoverage(result)
+		}
+		return result, nil
 	case sessiondata.ViewGroups:
-		return &sessiondata.QueryResult{Window: "totals", By: v.By, Rows: buildGroups(queryReqs, v.By, false)}, nil
+		result := &sessiondata.QueryResult{Window: "totals", By: v.By, Rows: buildGroups(queryReqs, v.By, false)}
+		if partialCoverage {
+			markPartialRollupCoverage(result)
+		}
+		return result, nil
 	case sessiondata.ViewPeriod:
-		return &sessiondata.QueryResult{Window: "totals", Period: v.Period, Rows: buildPeriod(queryReqs, v.Period, false)}, nil
+		result := &sessiondata.QueryResult{Window: "totals", Period: v.Period, Rows: buildPeriod(queryReqs, v.Period, false)}
+		if partialCoverage {
+			markPartialRollupCoverage(result)
+		}
+		return result, nil
 	case sessiondata.ViewSessions:
 		rows := buildPiSessionRows(scoped, bySession, "")
 		tot := domain.EmptyTotals()
@@ -902,12 +1015,17 @@ func queryCodex(database *db.Database, home string, f sessiondata.Filter, v sess
 		return nil, err
 	}
 	queryReqs := reqs
+	partialCoverage := false
 	if rollupsAllowed(f, v) {
 		rollups, err := loadRollups(database, "codex", f)
 		if err != nil {
 			return nil, err
 		}
 		queryReqs = append(queryReqs, rollups...)
+		partialCoverage, err = hasPartialRollupCoverage(database, "codex", f)
+		if err != nil {
+			return nil, err
+		}
 	}
 	byPhysical := groupBySession(reqs, func(r ledgerRequest) string { return r.physicalID })
 	if hasRequestFilter(f) {
@@ -934,16 +1052,25 @@ func queryCodex(database *db.Database, home string, f sessiondata.Filter, v sess
 		markUnpriced(&tot)
 		res := &sessiondata.QueryResult{Window: "totals", Totals: &tot}
 		attachCodexDiagnostics(res, home, metas, diagnostics)
+		if partialCoverage {
+			markPartialRollupCoverage(res)
+		}
 		return res, nil
 	case sessiondata.ViewGroups:
 		rows := buildGroups(queryReqs, v.By, contributed)
 		res := &sessiondata.QueryResult{Window: "totals", By: v.By, Rows: rows}
 		attachCodexDiagnostics(res, home, metas, diagnostics)
+		if partialCoverage {
+			markPartialRollupCoverage(res)
+		}
 		return res, nil
 	case sessiondata.ViewPeriod:
 		rows := buildPeriod(queryReqs, v.Period, contributed)
 		res := &sessiondata.QueryResult{Window: "totals", Period: v.Period, Rows: rows}
 		attachCodexDiagnostics(res, home, metas, diagnostics)
+		if partialCoverage {
+			markPartialRollupCoverage(res)
+		}
 		return res, nil
 	case sessiondata.ViewSessions:
 		rows := buildCodexSessionRows(scoped, byPhysical)
@@ -1029,12 +1156,17 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 		return nil, err
 	}
 	piQueryReqs := piReqs
+	piPartialCoverage := false
 	if rollupsAllowed(f, v) {
 		rollups, err := loadRollups(database, "pi", f)
 		if err != nil {
 			return nil, err
 		}
 		piQueryReqs = append(piQueryReqs, rollups...)
+		piPartialCoverage, err = hasPartialRollupCoverage(database, "pi", f)
+		if err != nil {
+			return nil, err
+		}
 	}
 	piBySession := groupBySession(piReqs, func(r ledgerRequest) string { return r.sessionID })
 	if hasRequestFilter(f) {
@@ -1052,12 +1184,17 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 		return nil, err
 	}
 	codexQueryReqs := codexReqs
+	codexPartialCoverage := false
 	if rollupsAllowed(f, v) {
 		rollups, err := loadRollups(database, "codex", f)
 		if err != nil {
 			return nil, err
 		}
 		codexQueryReqs = append(codexQueryReqs, rollups...)
+		codexPartialCoverage, err = hasPartialRollupCoverage(database, "codex", f)
+		if err != nil {
+			return nil, err
+		}
 	}
 	codexByPhysical := groupBySession(codexReqs, func(r ledgerRequest) string { return r.physicalID })
 	if hasRequestFilter(f) {
@@ -1083,16 +1220,25 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 		}
 		res := &sessiondata.QueryResult{Window: "totals", Totals: &tot}
 		res.Meta = allMetaOf(cfg.PiDir, piMetas, codexMetas, diagnostics)
+		if piPartialCoverage || codexPartialCoverage {
+			markPartialRollupCoverage(res)
+		}
 		return res, nil
 	case sessiondata.ViewGroups:
 		rows := mergeGroupRows(buildGroups(piQueryReqs, v.By, false), buildGroups(codexQueryReqs, v.By, true))
 		res := &sessiondata.QueryResult{Window: "totals", By: v.By, Rows: rows}
 		res.Meta = allMetaOf(cfg.PiDir, piMetas, codexMetas, diagnostics)
+		if piPartialCoverage || codexPartialCoverage {
+			markPartialRollupCoverage(res)
+		}
 		return res, nil
 	case sessiondata.ViewPeriod:
 		rows := mergePeriodRows(buildPeriod(piQueryReqs, v.Period, false), buildPeriod(codexQueryReqs, v.Period, true))
 		res := &sessiondata.QueryResult{Window: "totals", Period: v.Period, Rows: rows}
 		res.Meta = allMetaOf(cfg.PiDir, piMetas, codexMetas, diagnostics)
+		if piPartialCoverage || codexPartialCoverage {
+			markPartialRollupCoverage(res)
+		}
 		return res, nil
 	case sessiondata.ViewSessions:
 		piRows := buildPiSessionRows(piScoped, piBySession, "pi")

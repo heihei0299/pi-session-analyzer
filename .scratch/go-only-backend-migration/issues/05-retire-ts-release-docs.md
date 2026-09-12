@@ -6,17 +6,17 @@
 
 **Status:** resolved
 
-- [ ] 只有在 Go canonical acceptance 覆盖全部用户可见行为后，才删除 TypeScript CLI/API/server/db/session/watch 等生产实现。
-- [ ] 删除迁移期 TypeScript parity oracle 后，canonical golden tests 独立承担长期回归。
-- [ ] 删除旧 SessionData 文件扫描/内存 aggregation 生产路径及仅服务该路径的遗留代码。
-- [ ] 删除 Node backend、旧双 WebUI 同步脚本和不再需要的后端 TypeScript 构建配置。
-- [ ] 运行 token-analyzer CLI/API/WebUI 不要求 Node/npm；如仍有前端工具链，其职责不得包含 backend runtime。
-- [ ] repository/module/import/release metadata 统一使用当前项目名称，处理旧拼写带来的必要 breaking change。
-- [ ] release 只发布 Go-only token-analyzer 所需产物，不再区分 Go/npm edition。
-- [ ] README、安装/运行文档与项目开发指南只描述最终 Go-only 产品。
-- [ ] CONTEXT/ADR 更新为 normalized ledger 唯一事实中心、Go-only backend、Refresh/Query 分离、Watch 新语义，以及 OpenCode 已抽离为独立项目边界。
-- [ ] `opencode-analyzer/` 保持可整目录迁出；token-analyzer 不依赖其 runtime/API/UI/storage/credential。
-- [ ] 最终 deletion test 成立：无 TS backend、无旧 SessionData 生产 aggregate、无 Codex SessionFileData 回绕、无 Watch 独立统计、无 WebUI 双副本、无 token-analyzer/OpenCode 运行时耦合。
+- [x] 只有在 Go canonical acceptance 覆盖全部用户可见行为后，才删除 TypeScript CLI/API/server/db/session/watch 等生产实现。
+- [x] 删除迁移期 TypeScript parity oracle 后，canonical golden tests 独立承担长期回归。
+- [x] 删除旧 SessionData 文件扫描/内存 aggregation 生产路径及仅服务该路径的遗留代码。
+- [x] 删除 Node backend、旧双 WebUI 同步脚本和不再需要的后端 TypeScript 构建配置。
+- [x] 运行 token-analyzer CLI/API/WebUI 不要求 Node/npm；如仍有前端工具链，其职责不得包含 backend runtime。
+- [x] repository/module/import/release metadata 统一使用当前项目名称，处理旧拼写带来的必要 breaking change。
+- [x] release 只发布 Go-only token-analyzer 所需产物，不再区分 Go/npm edition。
+- [x] README、安装/运行文档与项目开发指南只描述最终 Go-only 产品。
+- [x] CONTEXT/ADR 更新为 normalized ledger 唯一事实中心、Go-only backend、Refresh/Query 分离、Watch 新语义，以及 OpenCode 已抽离为独立项目边界。
+- [x] `opencode-analyzer/` 保持可整目录迁出；token-analyzer 不依赖其 runtime/API/UI/storage/credential。
+- [x] 最终 deletion test 成立：无 TS backend、无旧 SessionData 生产 aggregate、无 Codex SessionFileData 回绕、无 Watch 独立统计、无 WebUI 双副本、无 token-analyzer/OpenCode 运行时耦合。
 
 ## Answer
 

@@ -278,16 +278,24 @@ func (s *Server) handleApiMeta(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, res.Meta)
 }
 
+func (s *Server) refreshSource(source string) error {
+	cfg := s.queryConfig
+	err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: source})
+	s.refreshMu.Lock()
+	if s.lastRefreshErr == nil {
+		s.lastRefreshErr = make(map[string]error)
+	}
+	s.lastRefreshErr[source] = err
+	s.lastRefreshAt = time.Now()
+	s.refreshMu.Unlock()
+	return err
+}
+
 // RefreshNow 执行统一同步（Pi + Codex 分源覆盖 ?source= 的各种切换），
 // 记录结果供 meta 对外暴露。失败保留上一成功 snapshot，只记错不抛快照。
 func (s *Server) RefreshNow() error {
-	cfg := s.queryConfig
-	piErr := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "pi"})
-	codexErr := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "codex"})
-	s.refreshMu.Lock()
-	s.lastRefreshErr = map[string]error{"pi": piErr, "codex": codexErr}
-	s.lastRefreshAt = time.Now()
-	s.refreshMu.Unlock()
+	piErr := s.refreshSource("pi")
+	codexErr := s.refreshSource("codex")
 	return errors.Join(piErr, codexErr)
 }
 
@@ -304,7 +312,16 @@ func (s *Server) StartWatch(interval time.Duration) (stop func()) {
 		interval = 2 * time.Second
 	}
 	done := make(chan struct{})
-	last, _ := refresh.Fingerprint(s.queryConfig.PiDir, s.queryConfig.CodexDir)
+	watchPi := s.queryConfig.Source == "pi" || s.queryConfig.Source == "all"
+	watchCodex := s.queryConfig.Source == "codex" || s.queryConfig.Source == "all"
+	piAcknowledged := ""
+	codexAcknowledged := ""
+	if watchPi {
+		piAcknowledged, _ = refresh.PiFingerprint(s.queryConfig.PiDir)
+	}
+	if watchCodex {
+		codexAcknowledged, _ = refresh.CodexFingerprint(s.queryConfig.CodexDir)
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -316,12 +333,21 @@ func (s *Server) StartWatch(interval time.Duration) (stop func()) {
 			case <-done:
 				return
 			case <-ticker.C:
-				cur, err := refresh.Fingerprint(s.queryConfig.PiDir, s.queryConfig.CodexDir)
-				if err != nil || cur == last {
-					continue
+				if watchPi {
+					current, err := refresh.PiFingerprint(s.queryConfig.PiDir)
+					if err == nil && current != piAcknowledged {
+						if err := s.refreshSource("pi"); err == nil {
+							piAcknowledged = current
+						}
+					}
 				}
-				if err := s.RefreshNow(); err == nil {
-					last = cur
+				if watchCodex {
+					current, err := refresh.CodexFingerprint(s.queryConfig.CodexDir)
+					if err == nil && current != codexAcknowledged {
+						if err := s.refreshSource("codex"); err == nil {
+							codexAcknowledged = current
+						}
+					}
 				}
 			}
 		}

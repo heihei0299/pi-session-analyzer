@@ -2,8 +2,8 @@
 
 分析 Pi 会话与 Codex rollout token 消耗的 Go-only CLI 工具（单二进制，零外部依赖）。Pi 默认读取 `~/.pi/agent/sessions/`，Codex 读取 `sessions/` 与 `archived_sessions/` 下的 plain/zstd rollout。读取全部合法会话，按统计口径 A 提取消耗数据（含 **fork 会话去重**——fork 复制的历史消息不重复计费），输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程（`--watch` 同样按 fork 去重口径）；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、**服务端分页排序**、基于 source revision 的自动刷新、导出 JSON/CSV 与会话重命名。
 以 GitHub Release 发布 Go 单二进制（Linux / macOS / Windows，日期式版本如 `2026.9.3`），不再提供 npm 分发。
-Go-only 迁移与收尾计划见 [`docs/migration/go-only-post-migration-remediation-plan.md`](docs/migration/go-only-post-migration-remediation-plan.md)，审计依据见 [`docs/audit/go-only-post-migration-audit-2026-09-12.md`](docs/audit/go-only-post-migration-audit-2026-09-12.md)。领域术语与最终架构见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)。
-领域术语见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)（当前：`0001-fork-session-dedup.md`、`0002-total-tokens-gateway-alignment.md`）。
+领域术语与最终架构见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)。历史迁移计划与审计记录仅作背景参考，不是当前执行入口。
+
 ## 安装
 
 ```bash
@@ -121,7 +121,7 @@ HTTP API（`/api/*`，裸 JSON，与 CLI 结构化输出同字段）：`totals` 
 - **请求数**：四载体中通过 billable/cost/failed 门控的计入口径消息数；全 0 usage 的失败/中止消息也计入请求数（token 为 0）
 - **总 token**：总输入 + 输出 = `input + cacheRead + output`（对齐 pi-switch 网关 total；不含 cacheWrite，见 ADR-0002 与 `CONTEXT.md`）
 - **缓存率**：`cacheRead / (input + cacheRead)`（分母不含 cacheWrite，ADR-0002）；分母为 0 记 0；聚合先求和分子分母再除
-- **花费**：直接累加 `usage.cost.total`；全 0 花费标注「费率未配置（免费/未定价）」。All 窗口保留可定价 Pi 的美元合计并标注「含 unpriced 源 / 部分可用」（CLI 表格显示 `$X*`，表尾解释 `* 含 unpriced 源`；WebUI 在金额后标注）；Codex 单源仍为 `unpriced`；JSON/CSV 的 `costStatus` 与 `cost` 组合可区分完全未定价、部分可用与真实零花费。
+- **花费**：上报的 `usage.cost.total` 优先；缺失或非正时按 `model_pricing` 回算，二者都不可用才为 0 并标注「费率未配置（免费/未定价）」。All 窗口保留可定价 Pi 的美元合计并标注「含 unpriced 源 / 部分可用」（CLI 表格显示 `$X*`，表尾解释 `* 含 unpriced 源`；WebUI 在金额后标注）；Codex 单源仍为 `unpriced`；JSON/CSV 的 `costStatus` 与 `cost` 组合可区分完全未定价、部分可用与真实零花费。
 - **模型归属**：请求级（每条消息的 `model` 字段）
 - **cwd 归属**：会话 header `cwd` 为权威键，规范化（绝对路径、去尾斜杠、符号链接解析）；目录名有损编码不参与归属
 - **时间归属**：CLI `--since`/`--until` 时间筛选按会话 header timestamp 闭区间（含端点）；period 汇总（CLI 与 webui）按每条 usage event 的消息 timestamp 归属，跨天 rollout 会拆分到实际使用日；webui 其余全端点（`totals`/`sessions`/`requests`/`groups`）也按消息 timestamp 消息级（总览与会话明细求和一致）
