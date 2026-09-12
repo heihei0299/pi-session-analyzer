@@ -147,6 +147,24 @@ func DiscoverRollouts(home string) ([]RolloutFile, Diagnostics, error) {
 	return files, diagnostics, nil
 }
 
+// PathWithin reports whether candidate is root itself or is contained below root.
+// filepath.Rel avoids treating a sibling such as /home/u/.codex-old as part of /home/u/.codex.
+func PathWithin(root, candidate string) bool {
+	rootAbs, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return false
+	}
+	candidateAbs, err := filepath.Abs(filepath.Clean(candidate))
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, candidateAbs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
 func ResolveHome(explicit string) string {
 	if strings.TrimSpace(explicit) != "" {
 		return strings.TrimSpace(explicit)

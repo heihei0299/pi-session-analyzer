@@ -21,7 +21,10 @@ func TestServerEndpoints(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// 创建一个会话文件（修改时间设置为 10 分钟前，避免触发活跃保护）
-	sessionFile := filepath.Join(tmpDir, "MySession_uuid123.jsonl")
+	sessionFile := filepath.Join(tmpDir, "project", "MySession_uuid123.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionFile), 0o755); err != nil {
+		t.Fatalf("failed to create Pi project directory: %v", err)
+	}
 	content := `{"type":"session","id":"uuid123","timestamp":"2026-08-01T10:00:00Z","cwd":"/my/project"}
 {"type":"message","timestamp":"2026-08-01T10:05:00Z","message":{"role":"assistant","model":"gpt-4","usage":{"input":100,"output":50,"cacheRead":20,"cost":{"total":0.01}}}}
 `
@@ -73,7 +76,7 @@ func TestServerEndpoints(t *testing.T) {
 		t.Fatalf("expected 200 for rename, got %d: %s", wRename.Code, wRename.Body.String())
 	}
 
-	expectedNewPath := filepath.Join(tmpDir, "NewName_uuid123.jsonl")
+	expectedNewPath := filepath.Join(tmpDir, "project", "NewName_uuid123.jsonl")
 	if _, err := os.Stat(expectedNewPath); err != nil {
 		t.Fatalf("renamed file does not exist: %s", expectedNewPath)
 	}

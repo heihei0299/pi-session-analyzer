@@ -8,8 +8,8 @@ package query
 // internal/refresh (pi) and internal/codex.SyncRollouts, and must run
 // before Query in production (server/CLI call refresh.Refresh first).
 //
-// Only codex.ResolveHome (path resolution) and codex.Diagnostics (stored
-// summary shape) are reused from the adapter; no adapter file I/O runs here.
+// Only codex path resolution/containment and codex.Diagnostics (stored summary
+// shape) are reused from the adapter; no adapter file I/O runs here.
 
 import (
 	"database/sql"
@@ -24,20 +24,21 @@ import (
 	"github.com/heihei0299/token-analyzer/internal/timerange"
 )
 
-// ledgerRequest 是一条已提交的 normalized usage 记录（消息级语义）。
+// ledgerRequest 是一条已提交的 normalized usage 记录（raw 消息或 daily rollup）。
 type ledgerRequest struct {
-	model      string
-	sessionID  string
-	physicalID string
-	createdAt  int64
-	tsText     string
-	cwd        string
-	input      float64
-	output     float64
-	cacheRead  float64
-	cacheWrite float64
-	reasoning  float64
-	cost       float64
+	model        string
+	sessionID    string
+	physicalID   string
+	requestCount int
+	createdAt    int64
+	tsText       string
+	cwd          string
+	input        float64
+	output       float64
+	cacheRead    float64
+	cacheWrite   float64
+	reasoning    float64
+	cost         float64
 }
 
 func (r ledgerRequest) timestamp() string {
@@ -125,7 +126,7 @@ func modelLabel(models map[string]bool) string {
 }
 
 func sumInto(t *domain.Totals, r ledgerRequest) {
-	t.Requests++
+	t.Requests += r.requestCount
 	t.Input += r.input
 	t.Output += r.output
 	t.CacheRead += r.cacheRead
@@ -144,6 +145,7 @@ func scanRequests(rows *sql.Rows) ([]ledgerRequest, error) {
 			&r.input, &r.output, &r.cacheRead, &r.cacheWrite, &r.reasoning, &r.cost); err != nil {
 			return nil, err
 		}
+		r.requestCount = 1
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -190,6 +192,102 @@ func loadRequests(database *db.Database, appType, dataSource string, sessionIDs 
 	}
 	defer rows.Close()
 	return scanRequests(rows)
+}
+
+// rollupsAllowed describes the information that a daily rollup can safely answer.
+// Rollups have no session or cwd identity, so those scopes remain raw-ledger only.
+func rollupsAllowed(f sessiondata.Filter, v sessiondata.View) bool {
+	if f.Cwd != "" || (f.TimeRange != nil && f.TimeRange.Kind == timerange.KindSession) {
+		return false
+	}
+	switch v.Kind {
+	case sessiondata.ViewTotals, sessiondata.ViewPeriod:
+		return true
+	case sessiondata.ViewGroups:
+		return v.By == "" || v.By == domain.GroupByModel
+	default:
+		return false
+	}
+}
+
+func rollupDateBounds(f sessiondata.Filter) (since, until string) {
+	toDate := func(seconds int64) string {
+		return time.Unix(seconds, 0).In(time.Local).Format("2006-01-02")
+	}
+	messageSince, messageUntil := messageBounds(f)
+	if messageSince != nil {
+		since = toDate(*messageSince)
+	}
+	if messageUntil != nil {
+		until = toDate(*messageUntil)
+	}
+	return since, until
+}
+
+func rollupTimestamp(date string) (string, int64, bool) {
+	// date is a local-calendar key; use UTC midnight only as a stable timestamp
+	// because PeriodKey normalizes timestamps to UTC before extracting its key.
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return "", 0, false
+	}
+	return date + "T00:00:00Z", t.Unix(), true
+}
+
+// loadRollups loads persisted daily aggregates. A valid rollup is additive with
+// raw rows: the prune writer removes the contributing raw rows (a cutoff can
+// leave disjoint raw and rollup rows on the same calendar day).
+func loadRollups(database *db.Database, appType string, f sessiondata.Filter) ([]ledgerRequest, error) {
+	if f.Cwd != "" || (f.TimeRange != nil && f.TimeRange.Kind == timerange.KindSession) {
+		return nil, nil
+	}
+	conds := []string{"app_type = ?"}
+	args := []any{appType}
+	if f.Model != "" {
+		conds = append(conds, "model = ?")
+		args = append(args, f.Model)
+	}
+	if since, until := rollupDateBounds(f); since != "" {
+		conds = append(conds, "date >= ?")
+		args = append(args, since)
+		if until != "" {
+			conds = append(conds, "date <= ?")
+			args = append(args, until)
+		}
+	} else if until != "" {
+		conds = append(conds, "date <= ?")
+		args = append(args, until)
+	}
+	rows, err := database.DB.Query(`SELECT date, request_count, model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, CAST(COALESCE(total_cost_usd, '0') AS REAL) FROM usage_daily_rollups WHERE `+strings.Join(conds, " AND ")+` ORDER BY date, model`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ledgerRequest
+	for rows.Next() {
+		var date, model string
+		var requestCount int64
+		var input, output, cacheRead, cacheWrite, cost float64
+		if err := rows.Scan(&date, &requestCount, &model, &input, &output, &cacheRead, &cacheWrite, &cost); err != nil {
+			return nil, err
+		}
+		tsText, createdAt, ok := rollupTimestamp(date)
+		if !ok {
+			continue
+		}
+		out = append(out, ledgerRequest{
+			model:        model,
+			createdAt:    createdAt,
+			tsText:       tsText,
+			input:        input,
+			output:       output,
+			cacheRead:    cacheRead,
+			cacheWrite:   cacheWrite,
+			cost:         cost,
+			requestCount: int(requestCount),
+		})
+	}
+	return out, rows.Err()
 }
 
 // ---------- Pi ----------
@@ -377,6 +475,14 @@ func queryPi(database *db.Database, dir string, f sessiondata.Filter, v sessiond
 	if err != nil {
 		return nil, err
 	}
+	queryReqs := reqs
+	if rollupsAllowed(f, v) {
+		rollups, err := loadRollups(database, "pi", f)
+		if err != nil {
+			return nil, err
+		}
+		queryReqs = append(queryReqs, rollups...)
+	}
 	bySession := groupBySession(reqs, func(r ledgerRequest) string { return r.sessionID })
 	if hasRequestFilter(f) {
 		kept := scoped[:0]
@@ -389,12 +495,12 @@ func queryPi(database *db.Database, dir string, f sessiondata.Filter, v sessiond
 	}
 	switch v.Kind {
 	case sessiondata.ViewTotals:
-		tot := sessionTotals(reqs)
+		tot := sessionTotals(queryReqs)
 		return &sessiondata.QueryResult{Window: "totals", Totals: &tot}, nil
 	case sessiondata.ViewGroups:
-		return &sessiondata.QueryResult{Window: "totals", By: v.By, Rows: buildGroups(reqs, v.By, false)}, nil
+		return &sessiondata.QueryResult{Window: "totals", By: v.By, Rows: buildGroups(queryReqs, v.By, false)}, nil
 	case sessiondata.ViewPeriod:
-		return &sessiondata.QueryResult{Window: "totals", Period: v.Period, Rows: buildPeriod(reqs, v.Period, false)}, nil
+		return &sessiondata.QueryResult{Window: "totals", Period: v.Period, Rows: buildPeriod(queryReqs, v.Period, false)}, nil
 	case sessiondata.ViewSessions:
 		rows := buildPiSessionRows(scoped, bySession, "")
 		tot := domain.EmptyTotals()
@@ -633,7 +739,7 @@ func loadCodexMetas(database *db.Database, home string) ([]codexSessionMeta, err
 			return nil, err
 		}
 		// 作用域归属当前 home：换目录查询不复用旧账本行。
-		if !strings.HasPrefix(m.filePath, home) {
+		if !codex.PathWithin(home, m.filePath) {
 			continue
 		}
 		out = append(out, m)
@@ -800,6 +906,14 @@ func queryCodex(database *db.Database, home string, f sessiondata.Filter, v sess
 	if err != nil {
 		return nil, err
 	}
+	queryReqs := reqs
+	if rollupsAllowed(f, v) {
+		rollups, err := loadRollups(database, "codex", f)
+		if err != nil {
+			return nil, err
+		}
+		queryReqs = append(queryReqs, rollups...)
+	}
 	byPhysical := groupBySession(reqs, func(r ledgerRequest) string { return r.physicalID })
 	if hasRequestFilter(f) {
 		kept := scoped[:0]
@@ -810,7 +924,7 @@ func queryCodex(database *db.Database, home string, f sessiondata.Filter, v sess
 		}
 		scoped = kept
 	}
-	contributed := len(reqs) > 0
+	contributed := len(queryReqs) > 0
 	if !contributed && f.TimeRange != nil && f.TimeRange.Kind == timerange.KindSession && len(scoped) > 0 {
 		contributed = true
 	}
@@ -821,18 +935,18 @@ func queryCodex(database *db.Database, home string, f sessiondata.Filter, v sess
 	}
 	switch v.Kind {
 	case sessiondata.ViewTotals:
-		tot := sessionTotals(reqs)
+		tot := sessionTotals(queryReqs)
 		markUnpriced(&tot)
 		res := &sessiondata.QueryResult{Window: "totals", Totals: &tot}
 		attachCodexDiagnostics(res, home, metas, diagnostics)
 		return res, nil
 	case sessiondata.ViewGroups:
-		rows := buildGroups(reqs, v.By, contributed)
+		rows := buildGroups(queryReqs, v.By, contributed)
 		res := &sessiondata.QueryResult{Window: "totals", By: v.By, Rows: rows}
 		attachCodexDiagnostics(res, home, metas, diagnostics)
 		return res, nil
 	case sessiondata.ViewPeriod:
-		rows := buildPeriod(reqs, v.Period, contributed)
+		rows := buildPeriod(queryReqs, v.Period, contributed)
 		res := &sessiondata.QueryResult{Window: "totals", Period: v.Period, Rows: rows}
 		attachCodexDiagnostics(res, home, metas, diagnostics)
 		return res, nil
@@ -919,6 +1033,14 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 	if err != nil {
 		return nil, err
 	}
+	piQueryReqs := piReqs
+	if rollupsAllowed(f, v) {
+		rollups, err := loadRollups(database, "pi", f)
+		if err != nil {
+			return nil, err
+		}
+		piQueryReqs = append(piQueryReqs, rollups...)
+	}
 	piBySession := groupBySession(piReqs, func(r ledgerRequest) string { return r.sessionID })
 	if hasRequestFilter(f) {
 		kept := piScoped[:0]
@@ -934,6 +1056,14 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 	if err != nil {
 		return nil, err
 	}
+	codexQueryReqs := codexReqs
+	if rollupsAllowed(f, v) {
+		rollups, err := loadRollups(database, "codex", f)
+		if err != nil {
+			return nil, err
+		}
+		codexQueryReqs = append(codexQueryReqs, rollups...)
+	}
 	codexByPhysical := groupBySession(codexReqs, func(r ledgerRequest) string { return r.physicalID })
 	if hasRequestFilter(f) {
 		kept := codexScoped[:0]
@@ -944,11 +1074,11 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 		}
 		codexScoped = kept
 	}
-	codexContributed := len(codexReqs) > 0
+	codexContributed := len(codexQueryReqs) > 0
 	switch v.Kind {
 	case sessiondata.ViewTotals:
-		tot := sessionTotals(piReqs)
-		for _, r := range codexReqs {
+		tot := sessionTotals(piQueryReqs)
+		for _, r := range codexQueryReqs {
 			sumInto(&tot, r)
 		}
 		domain.FinalizeTotals(&tot)
@@ -960,12 +1090,12 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 		res.Meta = allMetaOf(cfg.PiDir, piMetas, codexMetas, diagnostics)
 		return res, nil
 	case sessiondata.ViewGroups:
-		rows := mergeGroupRows(buildGroups(piReqs, v.By, false), buildGroups(codexReqs, v.By, true))
+		rows := mergeGroupRows(buildGroups(piQueryReqs, v.By, false), buildGroups(codexQueryReqs, v.By, true))
 		res := &sessiondata.QueryResult{Window: "totals", By: v.By, Rows: rows}
 		res.Meta = allMetaOf(cfg.PiDir, piMetas, codexMetas, diagnostics)
 		return res, nil
 	case sessiondata.ViewPeriod:
-		rows := mergePeriodRows(buildPeriod(piReqs, v.Period, false), buildPeriod(codexReqs, v.Period, true))
+		rows := mergePeriodRows(buildPeriod(piQueryReqs, v.Period, false), buildPeriod(codexQueryReqs, v.Period, true))
 		res := &sessiondata.QueryResult{Window: "totals", Period: v.Period, Rows: rows}
 		res.Meta = allMetaOf(cfg.PiDir, piMetas, codexMetas, diagnostics)
 		return res, nil

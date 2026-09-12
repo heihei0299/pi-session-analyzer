@@ -139,7 +139,10 @@ func TestServerCodexBaselineFixtureExposesUpstreamSemanticsAndDiagnostics(t *tes
 // 会话详情与重命名只覆盖 Pi 会话：Codex/All 必须明确 unsupported，既不 404，也不写进 Pi 目录。
 func TestServerRejectsDetailAndRenameForNonPiSources(t *testing.T) {
 	piDir := t.TempDir()
-	piFile := filepath.Join(piDir, "PiSession_uuid1.jsonl")
+	piFile := filepath.Join(piDir, "project", "PiSession_uuid1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(piFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	content := `{"type":"session","id":"uuid1","timestamp":"2026-08-01T10:00:00Z","cwd":"/pi/project"}
 {"type":"message","timestamp":"2026-08-01T10:05:00Z","message":{"role":"assistant","model":"m1","usage":{"input":10,"output":5}}}
 `
@@ -175,7 +178,7 @@ func TestServerRejectsDetailAndRenameForNonPiSources(t *testing.T) {
 		if _, err := os.Stat(piFile); err != nil {
 			t.Fatalf("source=%s rename must not touch Pi files: %v", source, err)
 		}
-		if _, err := os.Stat(filepath.Join(piDir, "should-not-be-written.jsonl")); err == nil {
+		if _, err := os.Stat(filepath.Join(piDir, "project", "should-not-be-written.jsonl")); err == nil {
 			t.Fatalf("source=%s rename must not create Pi files", source)
 		}
 	}
@@ -224,7 +227,11 @@ func TestServerRejectsDetailAndRenameForNonPiSources(t *testing.T) {
 // 服务端出口必须让 source 切换、能力声明、拒绝路径和空目录诊断全部可观察。
 func TestServerSourceSwitchingCapabilitiesAndEmptyDir(t *testing.T) {
 	piDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(piDir, "pi_s1.jsonl"), []byte(`{"type":"session","id":"pi-1","timestamp":"2026-09-08T12:00:00Z","cwd":"/pi"}
+	piProject := filepath.Join(piDir, "project")
+	if err := os.MkdirAll(piProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(piProject, "pi_s1.jsonl"), []byte(`{"type":"session","id":"pi-1","timestamp":"2026-09-08T12:00:00Z","cwd":"/pi"}
 {"type":"message","timestamp":"2026-09-08T12:00:01Z","message":{"role":"assistant","model":"pi-model","usage":{"input":2,"output":3}}}
 `), 0o644); err != nil {
 		t.Fatal(err)

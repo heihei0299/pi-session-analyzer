@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/heihei0299/token-analyzer/internal/domain"
@@ -50,7 +51,10 @@ func TestJSONOutputDataIncludesMetaForGroupedAndPeriodResults(t *testing.T) {
 // 这里追加写入后分别经 watchTotalsOnce 与 Refresh+Query 取数并逐字段比对。
 func TestWatchTotalsMatchQueryTotals(t *testing.T) {
 	piDir := t.TempDir()
-	piFile := piDir + "/w.jsonl"
+	piFile := filepath.Join(piDir, "project", "w.jsonl")
+	if err := os.MkdirAll(filepath.Dir(piFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	content := "{\"type\":\"session\",\"id\":\"w\",\"timestamp\":\"2026-09-10T00:00:00Z\",\"cwd\":\"/w\"}\n" +
 		"{\"type\":\"message\",\"id\":\"a1\",\"timestamp\":\"2026-09-10T01:00:00Z\",\"message\":{\"role\":\"assistant\",\"model\":\"m\",\"usage\":{\"input\":4,\"output\":5}},\"stopReason\":\"stop\"}\n"
 	if err := os.WriteFile(piFile, []byte(content), 0o644); err != nil {

@@ -158,6 +158,7 @@ func (d *Database) createTables() error {
 			first_token_ms INTEGER,
 			duration_ms INTEGER,
 			status_code INTEGER NOT NULL,
+			stop_reason TEXT NOT NULL DEFAULT '',
 			error_message TEXT,
 			session_id TEXT,
 			provider_type TEXT,
@@ -284,6 +285,7 @@ func (d *Database) ensureColumns() error {
 	}
 	add := []struct{ col, ddl string }{
 		{"kind", `kind TEXT NOT NULL DEFAULT 'assistant'`},
+		{"stop_reason", `stop_reason TEXT NOT NULL DEFAULT ''`},
 		{"reasoning_tokens", `reasoning_tokens INTEGER NOT NULL DEFAULT 0`},
 		{"cwd", `cwd TEXT NOT NULL DEFAULT ''`},
 		{"timestamp_text", `timestamp_text TEXT NOT NULL DEFAULT ''`},

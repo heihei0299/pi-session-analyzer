@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -109,6 +110,9 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		var canSeek bool
 		var nByte, nTail, nLine sql.NullInt64
 		err = database.DB.QueryRow(`SELECT last_byte_offset, last_tail_fingerprint, last_line_offset FROM session_log_sync WHERE file_path = ?`, file).Scan(&nByte, &nTail, &nLine)
+		if err != nil && err != sql.ErrNoRows {
+			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("读取 %s 游标失败: %w", file, err)
+		}
 		if err == nil && nByte.Valid && nTail.Valid {
 			cursorLastByte = nByte.Int64
 			cursorTail = uint32(nTail.Int64)
@@ -353,27 +357,70 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			}
 		}
 		pricingByModel := loadModelPricing(database)
-		_, _ = database.DB.Exec(`BEGIN`)
+		tx, err := database.DB.Begin()
+		if err != nil {
+			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("开始同步 %s 事务失败: %w", file, err)
+		}
+		fileImported, fileSkipped := 0, 0
+		rollback := func(cause error) (SyncResult, error) {
+			_ = tx.Rollback()
+			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("同步 %s 失败: %w", file, cause)
+		}
 		for reqID, rec := range seen {
 			identity := identities[reqID]
-			var exists int
-			err := database.DB.QueryRow(`SELECT 1 FROM session_usage_dedup WHERE data_source = ? AND request_id = ?`, "pi_session", reqID).Scan(&exists)
+			var existingStop sql.NullString
+			var existingOutput int64
+			err := tx.QueryRow(`SELECT stop_reason, output_tokens FROM proxy_request_logs WHERE request_id = ? AND data_source = ?`, reqID, "pi_session").Scan(&existingStop, &existingOutput)
 			if err == nil {
-				skipped++
-				continue
-			}
-			if !identity.HasEntryID {
-				err = database.DB.QueryRow(`SELECT 1 FROM session_usage_dedup WHERE data_source = ? AND semantic_id = ?`, "pi_session", identity.SemanticID).Scan(&exists)
-				if err == nil {
-					skipped++
+				existing := &PiRecord{StopReason: existingStop.String, Output: float64(existingOutput)}
+				if !shouldReplacePiRecord(existing, rec) {
+					fileSkipped++
 					continue
 				}
+				cost := costForPiRecord(rec, pricingByModel[rec.Model])
+				_, err = tx.Exec(`UPDATE proxy_request_logs SET provider_id = ?, app_type = ?, model = ?, request_model = ?, pricing_model = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_creation_tokens = ?, input_token_semantics = ?, total_cost_usd = ?, latency_ms = ?, status_code = ?, stop_reason = ?, error_message = ?, session_id = ?, provider_type = ?, is_streaming = ?, cost_multiplier = ?, created_at = ?, data_source = ?, kind = ?, reasoning_tokens = ?, cwd = ?, timestamp_text = ? WHERE request_id = ? AND data_source = ?`,
+					rec.Provider, "pi", rec.Model, rec.RequestModel, rec.Model, int64(rec.Input), int64(rec.Output), int64(rec.CacheRead), int64(rec.CacheWrite), 0, formatFloat(cost), 0, rec.StatusCode, rec.StopReason, nullableString(rec.ErrorMessage), rec.SessionID, "pi_session", 1, "1.0", rec.CreatedAt, "pi_session", string(rec.Kind), int64(rec.Reasoning), headerCwd, tsTextByID[reqID], reqID, "pi_session")
+				if err != nil {
+					return rollback(err)
+				}
+				if _, err = tx.Exec(`INSERT OR REPLACE INTO session_usage_dedup (data_source, request_id, semantic_id, has_entry_id) VALUES (?, ?, ?, ?)`, "pi_session", reqID, identity.SemanticID, boolToInt(identity.HasEntryID)); err != nil {
+					return rollback(err)
+				}
+				fileImported++
+				continue
 			}
-			_, _ = database.DB.Exec(`INSERT OR IGNORE INTO session_usage_dedup (data_source, request_id, semantic_id, has_entry_id) VALUES (?, ?, ?, ?)`, "pi_session", reqID, identity.SemanticID, boolToInt(identity.HasEntryID))
+			if err != sql.ErrNoRows {
+				return rollback(err)
+			}
+
+			var exists int
+			err = tx.QueryRow(`SELECT 1 FROM session_usage_dedup WHERE data_source = ? AND request_id = ?`, "pi_session", reqID).Scan(&exists)
+			if err == nil {
+				fileSkipped++
+				continue
+			}
+			if err != sql.ErrNoRows {
+				return rollback(err)
+			}
+			if !identity.HasEntryID {
+				err = tx.QueryRow(`SELECT 1 FROM session_usage_dedup WHERE data_source = ? AND semantic_id = ?`, "pi_session", identity.SemanticID).Scan(&exists)
+				if err == nil {
+					fileSkipped++
+					continue
+				}
+				if err != sql.ErrNoRows {
+					return rollback(err)
+				}
+			}
+			if _, err = tx.Exec(`INSERT INTO session_usage_dedup (data_source, request_id, semantic_id, has_entry_id) VALUES (?, ?, ?, ?)`, "pi_session", reqID, identity.SemanticID, boolToInt(identity.HasEntryID)); err != nil {
+				return rollback(err)
+			}
 			cost := costForPiRecord(rec, pricingByModel[rec.Model])
-			_, _ = database.DB.Exec(`INSERT OR IGNORE INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, input_token_semantics, total_cost_usd, latency_ms, status_code, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source, kind, reasoning_tokens, cwd, timestamp_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				reqID, rec.Provider, "pi", rec.Model, rec.RequestModel, rec.Model, int64(rec.Input), int64(rec.Output), int64(rec.CacheRead), int64(rec.CacheWrite), 0, formatFloat(cost), 0, rec.StatusCode, nullableString(rec.ErrorMessage), rec.SessionID, "pi_session", 1, "1.0", rec.CreatedAt, "pi_session", string(rec.Kind), int64(rec.Reasoning), headerCwd, tsTextByID[reqID])
-			imported++
+			if _, err = tx.Exec(`INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, input_token_semantics, total_cost_usd, latency_ms, status_code, stop_reason, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source, kind, reasoning_tokens, cwd, timestamp_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				reqID, rec.Provider, "pi", rec.Model, rec.RequestModel, rec.Model, int64(rec.Input), int64(rec.Output), int64(rec.CacheRead), int64(rec.CacheWrite), 0, formatFloat(cost), 0, rec.StatusCode, rec.StopReason, nullableString(rec.ErrorMessage), rec.SessionID, "pi_session", 1, "1.0", rec.CreatedAt, "pi_session", string(rec.Kind), int64(rec.Reasoning), headerCwd, tsTextByID[reqID]); err != nil {
+				return rollback(err)
+			}
+			fileImported++
 		}
 		parentStr := ""
 		if parentSessionID != nil {
@@ -388,12 +435,23 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			isTask = 1
 		}
 		displayName := displayNameOfPiFile(fileBase, extractFirstUserTextPiFile(file))
-		_, _ = database.DB.Exec(`INSERT OR REPLACE INTO pi_sessions (session_id, header_ts, cwd, file_name, display_name, is_task, parent_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, sessionID, headerTs, headerCwd, fileBase, displayName, isTask, parentStr)
-		if parentStr == "" {
-			_, _ = database.DB.Exec(`UPDATE pi_sessions SET parent_session_id = NULL WHERE session_id = ? AND parent_session_id = ''`, sessionID)
+		if _, err = tx.Exec(`INSERT OR REPLACE INTO pi_sessions (session_id, header_ts, cwd, file_name, display_name, is_task, parent_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, sessionID, headerTs, headerCwd, fileBase, displayName, isTask, parentStr); err != nil {
+			return rollback(err)
 		}
-		_, _ = database.DB.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint) VALUES (?, ?, ?, ?, ?, ?)`, file, rev.ModifiedMs, newCommittedLines, rev.ModifiedMs/1000, newCommittedByte, int64(newTail))
-		_, _ = database.DB.Exec(`COMMIT`)
+		if parentStr == "" {
+			if _, err = tx.Exec(`UPDATE pi_sessions SET parent_session_id = NULL WHERE session_id = ? AND parent_session_id = ''`, sessionID); err != nil {
+				return rollback(err)
+			}
+		}
+		if _, err = tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint) VALUES (?, ?, ?, ?, ?, ?)`, file, rev.ModifiedMs, newCommittedLines, rev.ModifiedMs/1000, newCommittedByte, int64(newTail)); err != nil {
+			return rollback(err)
+		}
+		if err := tx.Commit(); err != nil {
+			_ = tx.Rollback()
+			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("提交 %s 失败: %w", file, err)
+		}
+		imported += fileImported
+		skipped += fileSkipped
 	}
 	return SyncResult{Imported: imported, Skipped: skipped}, nil
 }

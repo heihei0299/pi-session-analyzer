@@ -107,7 +107,7 @@ func LoadDiagnostics(database *db.Database, home string) Diagnostics {
 		if strings.TrimSpace(summary) == "" {
 			continue
 		}
-		if path != DiscoverySummaryPath(home) && !strings.HasPrefix(path, home) {
+		if path != DiscoverySummaryPath(home) && !PathWithin(home, path) {
 			continue
 		}
 		var d Diagnostics

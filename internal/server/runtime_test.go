@@ -65,7 +65,10 @@ func getBody(t *testing.T, handler http.Handler, target string) (int, string) {
 // 连续 GET 只读快照：不推进游标、不改账本；新写入要等下一次 Refresh 才可见。
 func TestServerGetsDoNotAdvanceLedger(t *testing.T) {
 	piDir := t.TempDir()
-	piFile := filepath.Join(piDir, "s1.jsonl")
+	piFile := filepath.Join(piDir, "project", "s1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(piFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(piFile, []byte(`{"type":"session","id":"s1","timestamp":"2026-09-10T00:00:00Z","cwd":"/w"}
 {"type":"message","id":"a1","timestamp":"2026-09-10T01:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":2}},"stopReason":"stop"}
 `), 0o644); err != nil {
@@ -128,7 +131,11 @@ func TestServerGetsDoNotAdvanceLedger(t *testing.T) {
 // Refresh 失败保留上一成功 snapshot，并经 meta/db-meta 暴露错误。
 func TestServerRefreshFailureKeepsSnapshotAndExposesError(t *testing.T) {
 	piDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(piDir, "s1.jsonl"), []byte(`{"type":"session","id":"s1","timestamp":"2026-09-10T00:00:00Z","cwd":"/w"}
+	piFile := filepath.Join(piDir, "project", "s1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(piFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(piFile, []byte(`{"type":"session","id":"s1","timestamp":"2026-09-10T00:00:00Z","cwd":"/w"}
 {"type":"message","id":"a1","timestamp":"2026-09-10T01:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":2}},"stopReason":"stop"}
 `), 0o644); err != nil {
 		t.Fatal(err)

@@ -9,7 +9,11 @@ import (
 
 func TestRefreshSerializesConcurrentCalls(t *testing.T) {
 	piDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(piDir, "s.jsonl"), []byte("{\"type\":\"session\",\"id\":\"s\",\"timestamp\":\"2026-09-10T00:00:00Z\",\"cwd\":\"/w\"}\n{\"type\":\"message\",\"id\":\"a1\",\"timestamp\":\"2026-09-10T01:00:00Z\",\"message\":{\"role\":\"assistant\",\"model\":\"m\",\"usage\":{\"input\":1,\"output\":1},\"stopReason\":\"stop\"}}\n"), 0o644); err != nil {
+	piProject := filepath.Join(piDir, "project")
+	if err := os.MkdirAll(piProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(piProject, "s.jsonl"), []byte("{\"type\":\"session\",\"id\":\"s\",\"timestamp\":\"2026-09-10T00:00:00Z\",\"cwd\":\"/w\"}\n{\"type\":\"message\",\"id\":\"a1\",\"timestamp\":\"2026-09-10T01:00:00Z\",\"message\":{\"role\":\"assistant\",\"model\":\"m\",\"usage\":{\"input\":1,\"output\":1},\"stopReason\":\"stop\"}}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{PiDir: piDir, DBPath: filepath.Join(t.TempDir(), "ledger.db"), Source: "pi"}
@@ -52,7 +56,11 @@ func TestTokenAnalyzerDbEnvIsHonored(t *testing.T) {
 	envDB := filepath.Join(t.TempDir(), "env-ledger.db")
 	t.Setenv("TOKEN_ANALYZER_DB", envDB)
 	piDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(piDir, "s.jsonl"), []byte("{\"type\":\"session\",\"id\":\"s\",\"timestamp\":\"2026-09-10T00:00:00Z\",\"cwd\":\"/w\"}\n"), 0o644); err != nil {
+	piProject := filepath.Join(piDir, "project")
+	if err := os.MkdirAll(piProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(piProject, "s.jsonl"), []byte("{\"type\":\"session\",\"id\":\"s\",\"timestamp\":\"2026-09-10T00:00:00Z\",\"cwd\":\"/w\"}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// DBPath 为空时走 TOKEN_ANALYZER_DB（与 TS oracle 一致），且不建默认库。

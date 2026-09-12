@@ -32,7 +32,11 @@ func TestQueryCodexAndAllSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	piDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(piDir, "pi_s1.jsonl"), []byte(`{"type":"session","id":"pi-1","timestamp":"2026-09-08T12:00:00Z","cwd":"/pi"}
+	piProject := filepath.Join(piDir, "project")
+	if err := os.MkdirAll(piProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(piProject, "pi_s1.jsonl"), []byte(`{"type":"session","id":"pi-1","timestamp":"2026-09-08T12:00:00Z","cwd":"/pi"}
 {"type":"message","timestamp":"2026-09-08T12:00:01Z","message":{"role":"assistant","model":"pi-model","usage":{"input":2,"output":3}}}
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -155,7 +159,11 @@ func TestQueryCodexRealShapedFixtureBaseline(t *testing.T) {
 	}
 
 	piDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(piDir, "pi_s1.jsonl"), []byte(`{"type":"session","id":"pi-1","timestamp":"2026-09-08T12:00:00Z","cwd":"/pi"}
+	piProject := filepath.Join(piDir, "project")
+	if err := os.MkdirAll(piProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(piProject, "pi_s1.jsonl"), []byte(`{"type":"session","id":"pi-1","timestamp":"2026-09-08T12:00:00Z","cwd":"/pi"}
 {"type":"message","timestamp":"2026-09-08T12:00:01Z","message":{"role":"assistant","model":"pi-model","usage":{"input":2,"output":3}}}
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -207,7 +215,11 @@ func TestQueryCodexCoverageDiagnosticsSurviveRepeatedQueries(t *testing.T) {
 // 同时用 costStatus=unpriced 标注合计里含未定价源。
 func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) {
 	piDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(piDir, "pi_period.jsonl"), []byte(`{"type":"session","id":"pi-period","timestamp":"2026-09-09T12:00:00Z","cwd":"/pi"}
+	piProject := filepath.Join(piDir, "project")
+	if err := os.MkdirAll(piProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(piProject, "pi_period.jsonl"), []byte(`{"type":"session","id":"pi-period","timestamp":"2026-09-09T12:00:00Z","cwd":"/pi"}
 {"type":"message","timestamp":"2026-09-09T12:00:01Z","message":{"role":"assistant","model":"pi-model","usage":{"input":2,"output":3,"cost":{"total":0.25}}}}
 `), 0o644); err != nil {
 		t.Fatal(err)

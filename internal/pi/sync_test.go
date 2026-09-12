@@ -166,3 +166,154 @@ func mustReadFile(t *testing.T, path string) []byte {
 	}
 	return data
 }
+
+func TestPiSyncRollsBackUsageFailureAndRetries(t *testing.T) {
+	dir := t.TempDir()
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	header := `{"type":"session","id":"rollback-usage","timestamp":"2026-07-31T01:55:30.577Z","cwd":"/tmp"}`
+	entry := `{"type":"message","id":"usage-failure","timestamp":"2026-07-31T01:58:29.810Z","message":{"role":"assistant","provider":"p","model":"m","usage":{"input":10,"output":5},"stopReason":"stop"}}`
+	path := writePiFile(dir, "s.jsonl", header+"\n"+entry+"\n")
+	if _, err := database.DB.Exec(`CREATE TRIGGER fail_pi_usage BEFORE INSERT ON proxy_request_logs BEGIN SELECT RAISE(ABORT, 'injected usage failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncPiUsage(database, []string{path}); err == nil {
+		t.Fatal("usage failure must be returned")
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM proxy_request_logs`,
+		`SELECT COUNT(*) FROM session_usage_dedup`,
+		`SELECT COUNT(*) FROM pi_sessions`,
+		`SELECT COUNT(*) FROM session_log_sync`,
+	} {
+		var count int
+		if err := database.DB.QueryRow(query).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("failed transaction left rows for %q: %d", query, count)
+		}
+	}
+	if _, err := database.DB.Exec(`DROP TRIGGER fail_pi_usage`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := SyncPiUsage(database, []string{path})
+	if err != nil {
+		t.Fatalf("retry should succeed: %v", err)
+	}
+	if result.Imported != 1 {
+		t.Fatalf("retry should import exactly one record: %+v", result)
+	}
+}
+
+func TestPiSyncRollsBackCursorFailureAndRetries(t *testing.T) {
+	dir := t.TempDir()
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	header := `{"type":"session","id":"rollback-cursor","timestamp":"2026-07-31T01:55:30.577Z","cwd":"/tmp"}`
+	entry := `{"type":"message","id":"cursor-failure","timestamp":"2026-07-31T01:58:29.810Z","message":{"role":"assistant","provider":"p","model":"m","usage":{"input":10,"output":5},"stopReason":"stop"}}`
+	path := writePiFile(dir, "s.jsonl", header+"\n"+entry+"\n")
+	if _, err := database.DB.Exec(`CREATE TRIGGER fail_pi_cursor BEFORE INSERT ON session_log_sync BEGIN SELECT RAISE(ABORT, 'injected cursor failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncPiUsage(database, []string{path}); err == nil {
+		t.Fatal("cursor failure must be returned")
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM proxy_request_logs`,
+		`SELECT COUNT(*) FROM session_usage_dedup`,
+		`SELECT COUNT(*) FROM pi_sessions`,
+		`SELECT COUNT(*) FROM session_log_sync`,
+	} {
+		var count int
+		if err := database.DB.QueryRow(query).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("cursor failure left rows for %q: %d", query, count)
+		}
+	}
+	if _, err := database.DB.Exec(`DROP TRIGGER fail_pi_cursor`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := SyncPiUsage(database, []string{path})
+	if err != nil {
+		t.Fatalf("retry should succeed: %v", err)
+	}
+	if result.Imported != 1 {
+		t.Fatalf("retry should import exactly one record: %+v", result)
+	}
+	var count int
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM proxy_request_logs`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("retry should leave one usage row, got %d", count)
+	}
+}
+
+func TestPiSyncReplacesRequestAcrossRefreshes(t *testing.T) {
+	dir := t.TempDir()
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	header := `{"type":"session","id":"replace-session","timestamp":"2026-07-31T01:55:30.577Z","cwd":"/tmp"}`
+	partial := `{"type":"message","id":"replace-request","timestamp":"2026-07-31T01:58:29.810Z","message":{"role":"assistant","provider":"p","model":"m","usage":{"input":10,"output":10}}}`
+	final := `{"type":"message","id":"replace-request","timestamp":"2026-07-31T01:58:29.810Z","message":{"role":"assistant","provider":"p","model":"m","usage":{"input":10,"output":20},"stopReason":"stop"}}`
+	path := writePiFile(dir, "s.jsonl", header+"\n"+partial+"\n")
+	first, err := SyncPiUsage(database, []string{path})
+	if err != nil || first.Imported != 1 {
+		t.Fatalf("initial sync should import one partial record: %+v %v", first, err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(final + "\n"); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := SyncPiUsage(database, []string{path})
+	if err != nil {
+		t.Fatalf("replacement sync failed: %v", err)
+	}
+	if second.Imported != 1 {
+		t.Fatalf("replacement should count as one imported update: %+v", second)
+	}
+	var count, output int
+	var stopReason string
+	if err := database.DB.QueryRow(`SELECT COUNT(*), COALESCE(MAX(output_tokens), 0), COALESCE(MAX(stop_reason), '') FROM proxy_request_logs`).Scan(&count, &output, &stopReason); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || output != 20 || stopReason != "stop" {
+		t.Fatalf("ledger should contain the final request once: count=%d output=%d stop=%q", count, output, stopReason)
+	}
+	var dedupCount int
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM session_usage_dedup`).Scan(&dedupCount); err != nil {
+		t.Fatal(err)
+	}
+	if dedupCount != 1 {
+		t.Fatalf("replacement must not duplicate dedup rows: %d", dedupCount)
+	}
+	third, err := SyncPiUsage(database, []string{path})
+	if err != nil {
+		t.Fatalf("repeated replacement sync failed: %v", err)
+	}
+	if third.Imported != 0 {
+		t.Fatalf("repeated refresh should be idempotent: %+v", third)
+	}
+}

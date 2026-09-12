@@ -127,6 +127,28 @@ func TestDiscoverRolloutsRolloutNameGrammar(t *testing.T) {
 }
 
 // 目录存在但没有任何 rollout 根目录时，用户必须看到警告而不是一个静默的空窗口。
+func TestPathWithinUsesPathComponents(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".codex")
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "root", path: root, want: true},
+		{name: "child", path: filepath.Join(root, "sessions", "rollout.jsonl"), want: true},
+		{name: "sibling prefix", path: root + "-old", want: false},
+		{name: "parent", path: filepath.Join(root, ".."), want: false},
+		{name: "sibling", path: filepath.Join(filepath.Dir(root), "other"), want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PathWithin(root, tc.path); got != tc.want {
+				t.Fatalf("PathWithin(%q, %q) = %v, want %v", root, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDiscoverRolloutsWarnsWhenRolloutRootsAreMissing(t *testing.T) {
 	home := t.TempDir()
 	files, diagnostics, err := DiscoverRollouts(home)
