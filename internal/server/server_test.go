@@ -32,7 +32,8 @@ func TestServerEndpoints(t *testing.T) {
 	_ = os.Chtimes(sessionFile, tenMinAgo, tenMinAgo)
 
 	sd := sessiondata.NewSessionData()
-	srv := NewServer(tmpDir, sd)
+	// 测试库隔离：Refresh 会写 ledger，不能落到默认 ~/.cache。
+	srv := NewServer(tmpDir, sd, Options{DBPath: filepath.Join(tmpDir, "test-ledger.db")})
 	handler := srv.Handler()
 
 	// 1. 验证 GET / 返回内嵌 HTML

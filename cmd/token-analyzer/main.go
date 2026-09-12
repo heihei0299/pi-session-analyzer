@@ -11,6 +11,7 @@ import (
 
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
 	"github.com/heihei0299/pi-session-anylize/internal/query"
+	"github.com/heihei0299/pi-session-anylize/internal/refresh"
 	"github.com/heihei0299/pi-session-anylize/internal/render"
 	"github.com/heihei0299/pi-session-anylize/internal/serialize"
 	"github.com/heihei0299/pi-session-anylize/internal/server"
@@ -96,11 +97,9 @@ func main() {
 
 	_ = fs.Parse(args)
 
-	sd := sessiondata.DefaultSessionData
-
 	// Serve 模式
 	if window == "serve" {
-		srv := server.NewServer(*dir, sd, server.Options{Source: *source, CodexDir: *codexDir, DBPath: *dbPath})
+		srv := server.NewServer(*dir, nil, server.Options{Source: *source, CodexDir: *codexDir, DBPath: *dbPath})
 		addr := fmt.Sprintf("%s:%d", *host, *port)
 		fmt.Printf("Token Analyzer WebUI 已启动: http://%s/\n数据目录: %s\n", addr, *dir)
 		if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
@@ -172,7 +171,11 @@ func main() {
 		}
 	}
 
-	res, err := query.Query(sd, query.Config{PiDir: *dir, CodexDir: *codexDir, DBPath: *dbPath, Source: *source}, filter, view)
+	if err := refresh.Refresh(refresh.Config{PiDir: *dir, CodexDir: *codexDir, DBPath: *dbPath, Source: *source}); err != nil {
+		fmt.Fprintf(os.Stderr, "同步失败: %v\n", err)
+		os.Exit(1)
+	}
+	res, err := query.Query(query.Config{PiDir: *dir, CodexDir: *codexDir, DBPath: *dbPath, Source: *source}, filter, view)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "查询失败: %v\n", err)
 		os.Exit(1)

@@ -12,6 +12,7 @@ import (
 	"github.com/heihei0299/pi-session-anylize/internal/codex"
 	"github.com/heihei0299/pi-session-anylize/internal/db"
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
+	"github.com/heihei0299/pi-session-anylize/internal/refresh"
 	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
 )
 
@@ -47,16 +48,18 @@ func TestCanonicalCodexQueryContract(t *testing.T) {
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 		Source:   "codex",
 	}
-	sd := sessiondata.NewSessionData()
+	if err := refresh.Refresh(refresh.Config{CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "codex"}); err != nil {
+		t.Fatal(err)
+	}
 	snapshot := canonicalCodexSnapshot{}
 
-	totals, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	totals, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot.Totals = *totals.Totals
 
-	sessions, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
+	sessions, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,20 +75,20 @@ func TestCanonicalCodexQueryContract(t *testing.T) {
 		return left < right
 	})
 
-	groups, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewGroups, By: domain.GroupByModel})
+	groups, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewGroups, By: domain.GroupByModel})
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot.Groups = groups.Rows.([]domain.GroupRow)
 	sort.Slice(snapshot.Groups, func(i, j int) bool { return snapshot.Groups[i].Model < snapshot.Groups[j].Model })
 
-	period, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewPeriod, Period: domain.PeriodDay})
+	period, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewPeriod, Period: domain.PeriodDay})
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot.Period = period.Rows.([]domain.PeriodRow)
 
-	meta, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewMeta})
+	meta, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewMeta})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +103,7 @@ func TestCanonicalCodexQueryContract(t *testing.T) {
 		}
 	}
 
-	_, unsupported := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewRequests})
+	_, unsupported := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewRequests})
 	if !errors.Is(unsupported, ErrRequestsUnsupported) {
 		t.Fatalf("requests contract changed: %v", unsupported)
 	}

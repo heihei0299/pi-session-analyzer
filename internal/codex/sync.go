@@ -34,6 +34,7 @@ func SyncRollouts(database *db.Database, home string) (SyncResult, error) {
 	if err != nil {
 		return SyncResult{}, err
 	}
+	discoveryOnly := diagnostics
 	result := SyncResult{Diagnostics: diagnostics}
 	for _, file := range files {
 		rev, err := rolloutRevision(file.Path)
@@ -77,7 +78,53 @@ func SyncRollouts(database *db.Database, home string) (SyncResult, error) {
 		result.Skipped += skipped
 		mergeDiagnostics(&result.Diagnostics, &fileDiagnostics)
 	}
+	// Home 级 discovery 诊断落盘：Query 只读 ledger 不做 discovery，
+	// meta 警告（非 canonical 文件、缺失目录等）靠该行在纯 ledger 查询中重放。
+	persistDiscoveryDiagnostics(database, home, &discoveryOnly)
 	return result, nil
+}
+
+// DiscoverySummaryPath 是 home 级 discovery 诊断在 session_log_sync 中的键，
+// 永不与真实 rollout 文件路径冲突。Query 只读 ledger，靠该行重放 discovery 诊断。
+func DiscoverySummaryPath(home string) string {
+	return filepath.Join(home, ".token-analyzer-discovery")
+}
+
+// LoadDiagnostics 重放 home 作用域内的全部诊断（discovery 行 + 各文件行），
+// 供 ledger-only 查询拼 meta。表结构与摘要形态归 adapter 所有，query 只调这一处。
+func LoadDiagnostics(database *db.Database, home string) Diagnostics {
+	var out Diagnostics
+	rows, err := database.DB.Query(`SELECT file_path, diagnostics_summary FROM session_log_sync`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var path, summary string
+		if err := rows.Scan(&path, &summary); err != nil {
+			continue
+		}
+		if strings.TrimSpace(summary) == "" {
+			continue
+		}
+		if path != DiscoverySummaryPath(home) && !strings.HasPrefix(path, home) {
+			continue
+		}
+		var d Diagnostics
+		if err := json.Unmarshal([]byte(summary), &d); err != nil {
+			continue
+		}
+		mergeDiagnostics(&out, &d)
+	}
+	return out
+}
+
+func persistDiscoveryDiagnostics(database *db.Database, home string, diagnostics *Diagnostics) {
+	summary, err := json.Marshal(diagnostics)
+	if err != nil {
+		return
+	}
+	_, _ = database.DB.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint, diagnostics_summary) VALUES (?, 0, 0, ?, 0, 0, ?)`, DiscoverySummaryPath(home), time.Now().Unix(), string(summary))
 }
 
 func syncParsedRollout(tx *sql.Tx, file RolloutFile, parsed ParsedRollout, rev fileRevision, diagnostics *Diagnostics) (int, int, error) {

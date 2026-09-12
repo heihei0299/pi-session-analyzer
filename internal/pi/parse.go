@@ -16,6 +16,7 @@ const (
 )
 
 type PiRecord struct {
+	StopReason   string
 	Kind         PiKind
 	Input        float64
 	Output       float64
@@ -225,6 +226,7 @@ func ParsePiUsageRecord(entry map[string]interface{}, sessionID string, sessionT
 		}
 	}
 	return &PiRecord{
+		StopReason:   stopReason,
 		Kind:         kind,
 		Input:        input,
 		Output:       output,

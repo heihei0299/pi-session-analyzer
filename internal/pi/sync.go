@@ -135,6 +135,7 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		var headerTs string
 		var headerCwd string
 		var parentSessionID *string
+		var forkTsMs *int64
 		if canSeek && hasCursor {
 			// read header
 			fh, err := os.Open(file)
@@ -172,6 +173,15 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			}
 			if v, ok := header["parentSession"].(string); ok && v != "" {
 				parentSessionID = &v
+				// fork 去重（与 TS oracle 同语义）：parentSession 为文件路径形态时，
+				// 早于 fork 点的消息是复制历史，不计入账本。
+				if strings.Contains(v, "/") || strings.Contains(v, "\\") {
+					if ts, ok := header["timestamp"].(string); ok {
+						if ms, err := parseEntryMs(ts); err == nil {
+							forkTsMs = &ms
+						}
+					}
+				}
 			}
 			suffixLen := rev.FileSize - cursorLastByte
 			if suffixLen <= 0 {
@@ -244,6 +254,15 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			}
 			if v, ok := header["parentSession"].(string); ok && v != "" {
 				parentSessionID = &v
+				// fork 去重（与 TS oracle 同语义）：parentSession 为文件路径形态时，
+				// 早于 fork 点的消息是复制历史，不计入账本。
+				if strings.Contains(v, "/") || strings.Contains(v, "\\") {
+					if ts, ok := header["timestamp"].(string); ok {
+						if ms, err := parseEntryMs(ts); err == nil {
+							forkTsMs = &ms
+						}
+					}
+				}
 			}
 			if len(lines) > 1 {
 				if rev.Complete {
@@ -278,6 +297,7 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		}
 		seen := make(map[string]*PiRecord)
 		identities := make(map[string]PiIdentity)
+		tsTextByID := make(map[string]string)
 		for _, line := range linesToProcess {
 			if strings.TrimSpace(line) == "" {
 				continue
@@ -285,6 +305,13 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			var entry map[string]interface{}
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {
 				continue
+			}
+			if forkTsMs != nil {
+				if tsStr, ok := entry["timestamp"].(string); ok && tsStr != "" {
+					if ms, err := parseEntryMs(tsStr); err == nil && ms < *forkTsMs {
+						continue
+					}
+				}
 			}
 			rec := ParsePiUsageRecord(entry, sessionID, sessionTimestamp, rev.ModifiedMs)
 			if rec == nil {
@@ -310,16 +337,22 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				msg = m
 			}
 			identity := PiRequestIdentity(entry, string(rec.Kind), usageRaw, msg)
+			tsText, _ := entry["timestamp"].(string)
+			// 同 requestId 文件内替换规则（与 TS oracle 一致）：有 stop 结论的覆盖无结论的，
+			// 结论状态相同才按 output 取大者。
 			if existing, ok := seen[identity.RequestID]; ok {
-				if rec.Output > existing.Output {
+				if shouldReplacePiRecord(existing, rec) {
 					seen[identity.RequestID] = rec
 					identities[identity.RequestID] = identity
+					tsTextByID[identity.RequestID] = tsText
 				}
 			} else {
 				seen[identity.RequestID] = rec
 				identities[identity.RequestID] = identity
+				tsTextByID[identity.RequestID] = tsText
 			}
 		}
+		pricingByModel := loadModelPricing(database)
 		_, _ = database.DB.Exec(`BEGIN`)
 		for reqID, rec := range seen {
 			identity := identities[reqID]
@@ -337,8 +370,9 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				}
 			}
 			_, _ = database.DB.Exec(`INSERT OR IGNORE INTO session_usage_dedup (data_source, request_id, semantic_id, has_entry_id) VALUES (?, ?, ?, ?)`, "pi_session", reqID, identity.SemanticID, boolToInt(identity.HasEntryID))
-			_, _ = database.DB.Exec(`INSERT OR IGNORE INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, input_token_semantics, total_cost_usd, latency_ms, status_code, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				reqID, rec.Provider, "pi", rec.Model, rec.RequestModel, rec.Model, int64(rec.Input), int64(rec.Output), int64(rec.CacheRead), int64(rec.CacheWrite), 0, formatFloat(rec.CostTotal), 0, rec.StatusCode, rec.ErrorMessage, rec.SessionID, "pi_session", 1, "1.0", rec.CreatedAt, "pi_session")
+			cost := costForPiRecord(rec, pricingByModel[rec.Model])
+			_, _ = database.DB.Exec(`INSERT OR IGNORE INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, input_token_semantics, total_cost_usd, latency_ms, status_code, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source, kind, reasoning_tokens, cwd, timestamp_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				reqID, rec.Provider, "pi", rec.Model, rec.RequestModel, rec.Model, int64(rec.Input), int64(rec.Output), int64(rec.CacheRead), int64(rec.CacheWrite), 0, formatFloat(cost), 0, rec.StatusCode, nullableString(rec.ErrorMessage), rec.SessionID, "pi_session", 1, "1.0", rec.CreatedAt, "pi_session", string(rec.Kind), int64(rec.Reasoning), headerCwd, tsTextByID[reqID])
 			imported++
 		}
 		parentStr := ""
@@ -353,7 +387,8 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		if strings.Contains(file, "/tasks/") || strings.Contains(file, "\\tasks\\") {
 			isTask = 1
 		}
-		_, _ = database.DB.Exec(`INSERT OR REPLACE INTO pi_sessions (session_id, header_ts, cwd, file_name, display_name, is_task, parent_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, sessionID, headerTs, headerCwd, fileBase, fileBase, isTask, parentStr)
+		displayName := displayNameOfPiFile(fileBase, extractFirstUserTextPiFile(file))
+		_, _ = database.DB.Exec(`INSERT OR REPLACE INTO pi_sessions (session_id, header_ts, cwd, file_name, display_name, is_task, parent_session_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, sessionID, headerTs, headerCwd, fileBase, displayName, isTask, parentStr)
 		if parentStr == "" {
 			_, _ = database.DB.Exec(`UPDATE pi_sessions SET parent_session_id = NULL WHERE session_id = ? AND parent_session_id = ''`, sessionID)
 		}

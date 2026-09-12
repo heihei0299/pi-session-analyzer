@@ -18,6 +18,7 @@ import (
 	"github.com/heihei0299/pi-session-anylize/internal/db"
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
 	sourcequery "github.com/heihei0299/pi-session-anylize/internal/query"
+	"github.com/heihei0299/pi-session-anylize/internal/refresh"
 	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
 	"github.com/heihei0299/pi-session-anylize/internal/timerange"
 )
@@ -275,8 +276,22 @@ func (s *Server) handleApiMeta(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, res.Meta)
 }
 
+// query 是统一查询入口：先 Refresh（source → ledger），再走 ledger-backed Query Engine。
+// CLI 走同一 Refresh + Query 映射，相同 Query Request 得到同一 domain 结果。
 func (s *Server) query(filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
-	return sourcequery.Query(s.sessionData, s.queryConfig, filter, view)
+	source := s.queryConfig.Source
+	if filter.Source != "" {
+		source = filter.Source
+	}
+	if err := refresh.Refresh(refresh.Config{
+		PiDir:    s.queryConfig.PiDir,
+		CodexDir: s.queryConfig.CodexDir,
+		DBPath:   s.queryConfig.DBPath,
+		Source:   source,
+	}); err != nil {
+		return nil, err
+	}
+	return sourcequery.Query(s.queryConfig, filter, view)
 }
 
 func (s *Server) handleApiDbMeta(w http.ResponseWriter, r *http.Request) {
@@ -366,7 +381,16 @@ func (s *Server) handleApiSessionDetail(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) queryAndSendDetail(w http.ResponseWriter, sessionId string) {
-	detail, err := s.sessionData.QueryDetail(s.dir, sessionId)
+	if err := refresh.Refresh(refresh.Config{
+		PiDir:    s.queryConfig.PiDir,
+		CodexDir: s.queryConfig.CodexDir,
+		DBPath:   s.queryConfig.DBPath,
+		Source:   "pi",
+	}); err != nil {
+		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
+		return
+	}
+	detail, err := sourcequery.QueryDetail(s.queryConfig, sessionId)
 	if err != nil {
 		if errors.Is(err, sessiondata.ErrSessionNotFound) {
 			sendError(w, http.StatusNotFound, "Not Found", err.Error())

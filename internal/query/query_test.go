@@ -7,8 +7,18 @@ import (
 	"testing"
 
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
+	"github.com/heihei0299/pi-session-anylize/internal/refresh"
 	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
 )
+
+// refreshAndQuery 先 Refresh 再查 ledger，与 server/CLI 生产路径一致。
+func refreshAndQuery(t *testing.T, cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
+	t.Helper()
+	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "all"}); err != nil {
+		t.Fatal(err)
+	}
+	return Query(cfg, filter, view)
+}
 
 func TestQueryCodexAndAllSources(t *testing.T) {
 	home := t.TempDir()
@@ -27,9 +37,8 @@ func TestQueryCodexAndAllSources(t *testing.T) {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sd := sessiondata.NewSessionData()
 	cfg := Config{PiDir: piDir, CodexDir: home, DBPath: filepath.Join(t.TempDir(), "ledger.db"), Source: "codex"}
-	res, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	res, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,14 +51,14 @@ func TestQueryCodexAndAllSources(t *testing.T) {
 	}
 
 	cfg.Source = "all"
-	res, err = Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	res, err = refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Totals.Requests != 2 || res.Totals.TotalTokens != 20 {
 		t.Fatalf("unexpected all totals: %+v", res.Totals)
 	}
-	res, err = Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
+	res, err = refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +66,13 @@ func TestQueryCodexAndAllSources(t *testing.T) {
 	if !ok || len(rows) != 2 || rows[0].Source == rows[1].Source {
 		t.Fatalf("all sessions should expose both sources: %+v", res.Rows)
 	}
-	if _, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewRequests}); err == nil || err.Error() != ErrRequestsUnsupported.Error() {
+	if _, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewRequests}); err == nil || err.Error() != ErrRequestsUnsupported.Error() {
 		t.Fatalf("expected stable unsupported requests error, got %v", err)
 	}
 	emptyCodex := t.TempDir()
 	cfg.Source = "codex"
 	cfg.CodexDir = emptyCodex
-	res, err = Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	res, err = refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,9 +89,8 @@ func TestQueryCodexRealShapedFixtureBaseline(t *testing.T) {
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 		Source:   "codex",
 	}
-	sd := sessiondata.NewSessionData()
 
-	totals, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	totals, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +119,7 @@ func TestQueryCodexRealShapedFixtureBaseline(t *testing.T) {
 		t.Fatalf("uncounted snapshot coverage must be machine-readable in meta: %+v", totals.Meta)
 	}
 
-	sessions, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
+	sessions, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +138,7 @@ func TestQueryCodexRealShapedFixtureBaseline(t *testing.T) {
 		t.Fatalf("sessions window must use the same upstream-aligned totals: %v", sessionTokens)
 	}
 
-	groups, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewGroups, By: domain.GroupByModel})
+	groups, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewGroups, By: domain.GroupByModel})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +162,7 @@ func TestQueryCodexRealShapedFixtureBaseline(t *testing.T) {
 	}
 	cfg.PiDir = piDir
 	cfg.Source = "all"
-	all, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	all, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,9 +179,8 @@ func TestQueryCodexCoverageDiagnosticsSurviveRepeatedQueries(t *testing.T) {
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 		Source:   "codex",
 	}
-	sd := sessiondata.NewSessionData()
 	for run := 1; run <= 2; run++ {
-		res, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+		res, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,7 +212,6 @@ func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) 
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sd := sessiondata.NewSessionData()
 	cfg := Config{
 		PiDir:    piDir,
 		CodexDir: filepath.Join("..", "codex", "testdata", "codex-period-home"),
@@ -213,7 +219,7 @@ func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) 
 		Source:   "codex",
 	}
 
-	codexTotals, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	codexTotals, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +227,7 @@ func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) 
 		t.Fatalf("codex totals should stay fully unpriced: %+v", codexTotals.Totals)
 	}
 
-	codexPeriod, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewPeriod, Period: domain.PeriodDay})
+	codexPeriod, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewPeriod, Period: domain.PeriodDay})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +243,7 @@ func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) 
 	}
 
 	cfg.Source = "all"
-	allTotals, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+	allTotals, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +251,7 @@ func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) 
 		t.Fatalf("all totals must keep known priced cost while marking unpriced source: %+v", allTotals.Totals)
 	}
 
-	allPeriod, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewPeriod, Period: domain.PeriodDay})
+	allPeriod, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewPeriod, Period: domain.PeriodDay})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +265,7 @@ func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) 
 	if allRows[1].Period != "2026-09-09" || allRows[1].TotalTokens != 31 || allRows[1].Cost != 0.25 {
 		t.Fatalf("unexpected all 09-09 row: %+v", allRows[1])
 	}
-	groups, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewGroups, By: domain.GroupByModel})
+	groups, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewGroups, By: domain.GroupByModel})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +281,7 @@ func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) 
 		t.Fatalf("unexpected all groups: %+v", groupTokens)
 	}
 
-	sessions, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
+	sessions, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +297,7 @@ func TestQueryCodexPeriodUsesMessageTimestampAndAllKeepsKnownCost(t *testing.T) 
 		t.Fatalf("all sessions must expose both sources: %+v", sessionRows)
 	}
 
-	meta, err := Query(sd, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewMeta})
+	meta, err := refreshAndQuery(t, cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewMeta})
 	if err != nil {
 		t.Fatal(err)
 	}

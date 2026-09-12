@@ -8,6 +8,9 @@ import (
 	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
 )
 
+// LoadSessionFiles 只供测试使用（canonical ledger-only 断言）。
+// 生产统计不再经过 ledger → SessionFileData → 内存聚合回绕，
+// Codex 查询由 internal/query 直接读 normalized ledger。
 func LoadSessionFiles(database *db.Database, physicalIDs map[string]bool) ([]*sessiondata.SessionFileData, error) {
 	metas, err := loadSourceSessions(database.DB)
 	if err != nil {

@@ -24,14 +24,10 @@ func SupportedSources() []string {
 	return []string{"pi", "codex"}
 }
 
-func withCapabilities(result *sessiondata.QueryResult) *sessiondata.QueryResult {
-	if result != nil && result.Meta != nil {
-		result.Meta.Sources = SupportedSources()
-	}
-	return result
-}
-
-func Query(sd *sessiondata.SessionData, cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
+// Query 是统一 Go Query Engine：对任意 source 只读 normalized ledger。
+// 调用方须先做 Refresh（source → ledger），Query 本身不执行
+// discovery/parse/refresh，不写 DB，不理解任何原始文件格式。
+func Query(cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
 	source := cfg.Source
 	if filter.Source != "" {
 		source = filter.Source
@@ -45,96 +41,35 @@ func Query(sd *sessiondata.SessionData, cfg Config, filter sessiondata.Filter, v
 	if view.Kind == sessiondata.ViewRequests && source != "pi" {
 		return nil, ErrRequestsUnsupported
 	}
-	if source == "pi" {
-		result, err := sd.Query(cfg.PiDir, filter, view)
-		if err != nil {
-			return result, err
-		}
-		return withCapabilities(result), nil
-	}
-	if source == "codex" {
-		return queryCodex(sd, cfg, filter, view)
-	}
-
-	codexFiles, diagnostics, err := loadCodex(cfg)
-	if err != nil {
-		return nil, err
-	}
-	piFiles, err := sd.ReadSessionFilesCached(cfg.PiDir)
-	if err != nil {
-		return nil, err
-	}
-	files := append(withSource(piFiles, "pi"), codexFiles...)
-	result, err := sd.QueryFiles(cfg.PiDir, files, filter, view)
-	if err != nil {
-		return nil, err
-	}
-	attachMeta(sd, cfg.PiDir, files, result, diagnostics)
-	return withCapabilities(result), nil
-}
-
-func queryCodex(sd *sessiondata.SessionData, cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
 	database, err := db.Open(db.ResolveDbPath(cfg.DBPath, ""))
 	if err != nil {
 		return nil, err
 	}
 	defer database.Close()
-	files, diagnostics, err := syncAndLoad(database, cfg.CodexDir)
-	if err != nil {
-		return nil, err
+	switch source {
+	case "pi":
+		return queryPi(database, cfg.PiDir, filter, view, nil)
+	case "codex":
+		return queryCodex(database, codex.ResolveHome(cfg.CodexDir), filter, view)
+	default:
+		return queryAll(database, cfg, filter, view)
 	}
-	result, err := sd.QueryFiles(codex.ResolveHome(cfg.CodexDir), files, filter, view)
-	if err != nil {
-		return nil, err
-	}
-	attachMeta(sd, codex.ResolveHome(cfg.CodexDir), files, result, diagnostics)
-	return withCapabilities(result), nil
 }
 
-func loadCodex(cfg Config) ([]*sessiondata.SessionFileData, codex.Diagnostics, error) {
+// QueryDetail 是 Pi 专属会话详情（ledger 派生）；Codex/All 由 server 层明确拒绝。
+func QueryDetail(cfg Config, sessionID string) (*sessiondata.SessionDetailResult, error) {
 	database, err := db.Open(db.ResolveDbPath(cfg.DBPath, ""))
 	if err != nil {
-		return nil, codex.Diagnostics{}, err
+		return nil, err
 	}
 	defer database.Close()
-	return syncAndLoad(database, cfg.CodexDir)
+	return queryPiDetail(database, sessionID)
 }
 
-func syncAndLoad(database *db.Database, codexDir string) ([]*sessiondata.SessionFileData, codex.Diagnostics, error) {
-	home := codex.ResolveHome(codexDir)
-	rollouts, discoveryDiagnostics, err := codex.DiscoverRollouts(home)
-	if err != nil {
-		return nil, discoveryDiagnostics, err
-	}
-	physicalIDs := make(map[string]bool, len(rollouts))
-	for _, rollout := range rollouts {
-		physicalIDs[rollout.PhysicalID] = true
-	}
-	syncResult, err := codex.SyncRollouts(database, home)
-	if err != nil {
-		return nil, syncResult.Diagnostics, err
-	}
-	files, err := codex.LoadSessionFiles(database, physicalIDs)
-	return files, syncResult.Diagnostics, err
+func errUnknownView(kind string) error {
+	return fmt.Errorf("unknown view kind: %s", kind)
 }
 
-func withSource(files []*sessiondata.SessionFileData, source string) []*sessiondata.SessionFileData {
-	out := make([]*sessiondata.SessionFileData, 0, len(files))
-	for _, file := range files {
-		copy := *file
-		copy.Source = source
-		out = append(out, &copy)
-	}
-	return out
-}
-
-func attachMeta(sd *sessiondata.SessionData, dir string, files []*sessiondata.SessionFileData, result *sessiondata.QueryResult, diagnostics codex.Diagnostics) {
-	metaResult, err := sd.QueryFiles(dir, files, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewMeta})
-	if err != nil || metaResult.Meta == nil {
-		return
-	}
-	meta := metaResult.Meta
-	meta.Warnings = append(meta.Warnings, diagnostics.Warnings...)
-	meta.UncountedSnapshots += diagnostics.UncountedSnapshots
-	result.Meta = meta
+func errSessionNotFound(sessionID string) error {
+	return fmt.Errorf("%w: %s", sessiondata.ErrSessionNotFound, sessionID)
 }

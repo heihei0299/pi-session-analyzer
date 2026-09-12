@@ -958,6 +958,16 @@ func compareTotalsMetric(a, b domain.Totals, key string) (bool, bool) {
 	}
 }
 
+// SortSessionRows 复用生产排序语义，供 ledger-backed 查询在内存行上排序。
+func SortSessionRows(rows []domain.SessionRow, key string, desc bool) {
+	sortSessions(rows, key, desc)
+}
+
+// SortRequestRows 复用生产排序语义，供 ledger-backed 查询在内存行上排序。
+func SortRequestRows(rows []domain.RequestRow, key string, desc bool) {
+	sortRequests(rows, key, desc)
+}
+
 func sortSessions(rows []domain.SessionRow, key string, desc bool) {
 	sort.Slice(rows, func(i, j int) bool {
 		a := rows[i]
