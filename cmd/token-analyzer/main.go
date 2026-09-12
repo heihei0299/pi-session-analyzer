@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
-	"github.com/heihei0299/pi-session-anylize/internal/opencode"
 	"github.com/heihei0299/pi-session-anylize/internal/query"
 	"github.com/heihei0299/pi-session-anylize/internal/render"
 	"github.com/heihei0299/pi-session-anylize/internal/serialize"
@@ -69,11 +68,6 @@ func main() {
 
 	window := "totals"
 	args := os.Args[1:]
-
-	if len(args) > 0 && args[0] == "opencode" {
-		handleOpencodeCommand(args[1:])
-		return
-	}
 
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd := args[0]
@@ -264,137 +258,4 @@ func jsonOutputData(res *sessiondata.QueryResult) map[string]any {
 		outData["meta"] = res.Meta
 	}
 	return outData
-}
-
-func handleOpencodeCommand(args []string) {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		fmt.Println(`用法:
-  token-analyzer opencode sync [--auth <a>] [--workspace <w>] [--data-dir <d>]
-  token-analyzer opencode export [--format json|csv] [--output <path>] [--data-dir <d>]`)
-		return
-	}
-
-	subCmd := args[0]
-	subArgs := args[1:]
-
-	switch subCmd {
-	case "sync":
-		fs := flag.NewFlagSet("token-analyzer opencode sync", flag.ExitOnError)
-		auth := fs.String("auth", "", "OpenCode auth token")
-		workspace := fs.String("workspace", "", "OpenCode 工作区 ID")
-		dataDir := fs.String("data-dir", "data/opencode", "本地存储目录")
-		_ = fs.Parse(subArgs)
-
-		if *auth == "" {
-			*auth = os.Getenv("OPENCODE_AUTH")
-		}
-		if *workspace == "" {
-			*workspace = os.Getenv("OPENCODE_WORKSPACE_ID")
-		}
-		if *auth == "" {
-			fmt.Fprintln(os.Stderr, "错误: 缺少 auth 凭证，请传入 --auth 或设置 OPENCODE_AUTH")
-			os.Exit(1)
-		}
-
-		storage := opencode.NewStorage(*dataDir)
-		unlock, err := storage.Lock()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "冲突: %v\n", err)
-			os.Exit(1)
-		}
-		defer unlock()
-
-		client := opencode.NewClient(*auth)
-		if *workspace == "" {
-			wList, err := client.GetWorkspaces()
-			if err != nil || len(wList) == 0 {
-				fmt.Fprintln(os.Stderr, "无法自动发现工作区，请传入 --workspace")
-				os.Exit(1)
-			}
-			*workspace = wList[0].ID
-		}
-
-		fmt.Printf("开始同步 OpenCode 工作区 %s 数据...\n", *workspace)
-		start := time.Now()
-		costs, err := client.GetMonthlyCosts(*workspace)
-		if err == nil && costs != nil {
-			now := time.Now()
-			_ = storage.SaveCosts(now.Year(), int(now.Month()), *costs)
-		}
-
-		hf, _ := storage.LoadHistory()
-		existingMap := make(map[string]bool)
-		for _, r := range hf.Records {
-			existingMap[r.ID] = true
-		}
-
-		var newAdded []opencode.UsageRecord
-		pages := 0
-		for p := 1; p <= 100; p++ {
-			pages++
-			list, err := client.GetUsageHistory(*workspace, p)
-			if err != nil || len(list) == 0 {
-				break
-			}
-			reached := false
-			for _, r := range list {
-				if existingMap[r.ID] {
-					reached = true
-					break
-				}
-				newAdded = append(newAdded, r)
-				existingMap[r.ID] = true
-			}
-			if reached {
-				break
-			}
-		}
-
-		allRecords := append(newAdded, hf.Records...)
-		var lastSynced *string
-		if len(allRecords) > 0 {
-			tStr := allRecords[0].TimeCreated
-			lastSynced = &tStr
-		}
-		_ = storage.SaveHistory(allRecords, lastSynced)
-
-		fmt.Printf("[opencode] 同步完成: 新增 %d 条记录 (抓取 %d 页, 耗时 %dms)\n",
-			len(newAdded), pages, time.Since(start).Milliseconds())
-
-	case "export":
-		fs := flag.NewFlagSet("token-analyzer opencode export", flag.ExitOnError)
-		format := fs.String("format", "csv", "导出格式 csv|json")
-		output := fs.String("output", "", "导出文件路径 (默认输出至 stdout)")
-		dataDir := fs.String("data-dir", "data/opencode", "本地存储目录")
-		_ = fs.Parse(subArgs)
-
-		storage := opencode.NewStorage(*dataDir)
-		hf, err := storage.LoadHistory()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "读取历史失败: %v\n", err)
-			os.Exit(1)
-		}
-
-		var outBytes []byte
-		if *format == "json" {
-			outBytes, _ = serialize.SerializeJSON(hf.Records)
-		} else {
-			_ = storage.ExportCSV(hf.Records)
-			outBytes, _ = os.ReadFile(filepath.Join(*dataDir, "history.csv"))
-		}
-
-		if *output != "" {
-			if err := os.WriteFile(*output, outBytes, 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "写入文件失败: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Printf("已成功导出 %d 条记录至 %s\n", len(hf.Records), *output)
-		} else {
-			fmt.Print(string(outBytes))
-		}
-
-	default:
-		fmt.Fprintf(os.Stderr, "未知子命令: %s (支持 sync / export)\n", subCmd)
-		os.Exit(1)
-	}
 }

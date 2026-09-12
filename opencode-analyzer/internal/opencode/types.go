@@ -1,7 +1,5 @@
 package opencode
 
-import "github.com/heihei0299/pi-session-anylize/internal/domain"
-
 type UsageRecord struct {
 	ID                 string  `json:"id"`
 	WorkspaceID        string  `json:"workspaceID"`
@@ -91,10 +89,21 @@ type AuditDiffRate struct {
 	Cost     float64 `json:"cost"`
 }
 
+type LocalTotals struct {
+	Requests    int     `json:"requests"`
+	Input       float64 `json:"input"`
+	Output      float64 `json:"output"`
+	CacheRead   float64 `json:"cacheRead"`
+	CacheWrite  float64 `json:"cacheWrite"`
+	Reasoning   float64 `json:"reasoning"`
+	TotalTokens float64 `json:"totalTokens"`
+	Cost        float64 `json:"cost"`
+}
+
 type AuditResult struct {
 	Year           int            `json:"year"`
 	Month          int            `json:"month"`
-	LocalTotals    domain.Totals  `json:"localTotals"`
+	LocalTotals    LocalTotals    `json:"localTotals"`
 	OpencodeTotals OpencodeTotals `json:"opencodeTotals"`
 	Diff           AuditDiff      `json:"diff"`
 	DiffRate       AuditDiffRate  `json:"diffRate"`

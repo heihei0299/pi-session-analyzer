@@ -66,10 +66,8 @@
 - **pi-switch 网关**：转发请求日志（`~/.pi-switch/requests.log`），统计口径 total = 总输入 + output（`promptTokens + completionTokens`）。是**对比基准**，不是 token-analyzer 的数据源——token-analyzer 数据只来自 session 目录（用户约束）。两者覆盖范围结构性不同（pi 直连请求只在 session 目录、其他客户端请求只在网关）；fork 去重生效后 8/1 起累计差 0.6%（8/2、8/4 分毫不差），8/1 当天网关刚启用（仅 4 条记录）为最大单日差异源。
 - **对账验证（2026-08-07）**：逐条匹配（时间戳+token 数）确认两侧对同一请求定价**完全一致**（679 条 0 差异），差异全部来自覆盖结构：① **pi 内部请求不计入**——pi 压缩/摘要等内部请求（Magic Context，无会话名，真实计费，约 $0.10/天）不入 session 对话流（compaction entry 无 usage 字段），token-analyzer 结构性漏算；② **其他客户端请求只在网关**——opencode dreamer 后台任务等（约 $0.09/天）。webui 已加口径说明（.scratch/webui-gateway-disclaimer/），用户决策：结构性接受、不引入网关数据源。
 
-## OpenCode 外部数据源与对账（ticket opencode-sync）
+## OpenCode 产品边界
 
-- **OpenCode 数据源（OpenCode Benchmark）**：`https://opencode.ai` 后台云端账单与用量数据源。提供月度模型成本聚合（`getCosts`）与分页请求使用历史明细（`getUsageInfo`），作为外部对比基准与云端账单核对源。
-- **OpenCode 客户端（OpenCodeClient）**：基于 SolidStart RPC 与 Seroval 序列化协议实现的逆向客户端模块；封装 auth cookie 凭证注入、工作区 ID 自动发现、分页抓取与速率控制。
-- **OpenCode 本地数据仓（OpenCodeStorage）**：负责 OpenCode 数据在本地 `data/opencode/` 下的 JSON 分层存储与 CSV 导出，维护已同步记录去重与增量游标（`lastSyncedTime`）。
-- **OpenCode 对账视图（OpenCode Audit View）**：WebUI 专属「OpenCode 对账」Tab，呈现月度模型成本堆叠柱状图、原生使用历史明细分页表，以及本地 Pi 统计 vs 官方扣费的按月/按日对账卡片；支持 Web 端一键触发后台增量同步（`/api/opencode/sync`）。
+- **OpenCode Analyzer**：独立于 token-analyzer 的同仓产品，归档 OpenCode 云端用量并与本地 Pi 消耗对账；OpenCode 不是 token-analyzer 的 usage source，也不属于 All。
+- **OpenCode 对账**：OpenCode 官方扣费与本地 Pi 消耗的比较，仅属于 OpenCode Analyzer；token-analyzer 不处理 OpenCode credential 或对账数据。
 

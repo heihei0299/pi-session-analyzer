@@ -1,7 +1,5 @@
 package opencode
 
-import "github.com/heihei0299/pi-session-anylize/internal/domain"
-
 const AuditComparisonExplanation = "本地统计仅含 pi 会话中计入的 assistant 消息（MessageTimeRange），未计入内部 compaction/分支同步等非会话请求及非 pi 客户端请求；OpenCode 官方账单含全部扣费请求，差额为预期结构性差异。localCost 为本地 usage.cost.total 求和（若未定价则可能为 0），opencode 成本为官方 cost 求和。"
 
 func ComputeOpencodeTotals(records []UsageRecord) OpencodeTotals {
@@ -33,7 +31,7 @@ func ComputeOpencodeTotals(records []UsageRecord) OpencodeTotals {
 	}
 }
 
-func BuildAudit(localTotals domain.Totals, opencodeRecords []UsageRecord, year, month int) AuditResult {
+func BuildAudit(localTotals LocalTotals, opencodeRecords []UsageRecord, year, month int) AuditResult {
 	opTotals := ComputeOpencodeTotals(opencodeRecords)
 
 	diff := AuditDiff{

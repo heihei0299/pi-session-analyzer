@@ -48,10 +48,18 @@ func TestStorageAndFlock(t *testing.T) {
 		t.Fatalf("save history failed: %v", err)
 	}
 
-	// 验证 CSV 文件生成
+	// 验证 CSV 文件生成；筛选导出使用纯编码器，不覆盖 canonical history.csv。
 	csvFile := filepath.Join(tmpDir, "history.csv")
-	if _, err := os.Stat(csvFile); err != nil {
+	before, err := os.ReadFile(csvFile)
+	if err != nil {
 		t.Fatalf("expected history.csv to exist, err: %v", err)
+	}
+	if _, err := EncodeCSV(records[:1]); err != nil {
+		t.Fatalf("encode filtered csv: %v", err)
+	}
+	after, err := os.ReadFile(csvFile)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("filtered export changed canonical history.csv")
 	}
 
 	// 验证模型过滤与分页

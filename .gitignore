@@ -10,3 +10,4 @@ data/
 src/prototype-session-detail.html
 token-analyzer
 token-analyzer-go
+opencode-analyzer/opencode-analyzer

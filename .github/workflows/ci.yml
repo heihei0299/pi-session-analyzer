@@ -42,4 +42,3 @@ jobs:
         run: |
           ./dist/token-analyzer-linux-amd64 --version
           ./dist/token-analyzer-linux-amd64 --help
-          ./dist/token-analyzer-linux-amd64 opencode --help

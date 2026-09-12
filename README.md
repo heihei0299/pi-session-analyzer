@@ -58,9 +58,9 @@ npm run build    # tsc 编译
 token-analyzer [totals|sessions|requests] [--source pi|codex|all] [--dir <pi-dir>] [--codex-dir <codex-home>] [选项]
 # npm/TS 版本（仅 Pi；以下示例中的 --source / --codex-dir 会被明确拒绝）
 token-analyzer [totals|sessions|requests] --dir <pi-dir> [选项]
-token-analyzer opencode sync [--auth <a>] [--workspace <w>] [--data-dir <d>]
-token-analyzer opencode export [--format json|csv] [--output <path>] [--data-dir <d>]
 ```
+
+OpenCode 云端用量同步与对账已迁入同仓独立项目 [`opencode-analyzer/`](opencode-analyzer/README.md)。token-analyzer 不再读取 OpenCode 凭据，也不再提供 OpenCode CLI、API 或 WebUI。
 
 开发时可用 `node src/cli.ts`（仅 Pi）或 `./dist/token-analyzer-go` 直接运行。
 
@@ -167,7 +167,6 @@ internal/
   timerange/            CST 本地时区双语义时间引擎（严格公历校验）
   watch/                增量实时监控引擎（跨平台 Inode 隔离、负补偿重读）
   server/               原生 net/http 服务（内嵌 webui.html、会话重命名防护）
-  opencode/             OpenCode RPC 逆向客户端、POSIX/Windows 文件锁、云端对账
   render/               终端 ASCII 格式化表格渲染
   serialize/            JSON / CSV 序列化器
 src/                    TypeScript 原型与历史 Node.js 实现
@@ -175,6 +174,7 @@ src/                    TypeScript 原型与历史 Node.js 实现
 test/                   集成与双轨金样对账测试（Node vs Go 5大窗口 0 误差验证）
 dist/                   构建产物（包含多平台交叉编译二进制）
 internal/codex/testdata/ synthetic Codex rollout fixtures
+opencode-analyzer/      独立 OpenCode Analyzer Go module（CLI/API/WebUI/storage/tests）
 .scratch/               功能规格与 issue（token-analyzer / webui / opencode-sync 等）
 .github/workflows/      自动化 CI / 发布流程
 ```

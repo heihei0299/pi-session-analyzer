@@ -2,8 +2,6 @@ package opencode
 
 import (
 	"testing"
-
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
 )
 
 func TestOpencodeAudit(t *testing.T) {
@@ -40,7 +38,7 @@ func TestOpencodeAudit(t *testing.T) {
 		t.Errorf("expected %f cost, got %f", expectedCost, totals.Cost)
 	}
 
-	local := domain.Totals{
+	local := LocalTotals{
 		Requests:    1,
 		TotalTokens: 400,
 		Cost:        5.0,

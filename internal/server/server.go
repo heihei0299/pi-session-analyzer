@@ -17,7 +17,6 @@ import (
 
 	"github.com/heihei0299/pi-session-anylize/internal/db"
 	"github.com/heihei0299/pi-session-anylize/internal/domain"
-	"github.com/heihei0299/pi-session-anylize/internal/opencode"
 	sourcequery "github.com/heihei0299/pi-session-anylize/internal/query"
 	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
 	"github.com/heihei0299/pi-session-anylize/internal/timerange"
@@ -35,11 +34,10 @@ type Options struct {
 }
 
 type Server struct {
-	dir             string
-	sessionData     *sessiondata.SessionData
-	opencodeStorage *opencode.Storage
-	queryConfig     sourcequery.Config
-	mux             *http.ServeMux
+	dir         string
+	sessionData *sessiondata.SessionData
+	queryConfig sourcequery.Config
+	mux         *http.ServeMux
 }
 
 func NewServer(dir string, sd *sessiondata.SessionData, options ...Options) *Server {
@@ -53,16 +51,11 @@ func NewServer(dir string, sd *sessiondata.SessionData, options ...Options) *Ser
 	if opts.Source == "" {
 		opts.Source = "pi"
 	}
-	opencodeDir := os.Getenv("OPENCODE_DATA_DIR")
-	if opencodeDir == "" {
-		opencodeDir = "data/opencode"
-	}
 	s := &Server{
-		dir:             dir,
-		sessionData:     sd,
-		opencodeStorage: opencode.NewStorage(opencodeDir),
-		queryConfig:     sourcequery.Config{PiDir: dir, Source: opts.Source, CodexDir: opts.CodexDir, DBPath: opts.DBPath},
-		mux:             http.NewServeMux(),
+		dir:         dir,
+		sessionData: sd,
+		queryConfig: sourcequery.Config{PiDir: dir, Source: opts.Source, CodexDir: opts.CodexDir, DBPath: opts.DBPath},
+		mux:         http.NewServeMux(),
 	}
 	s.registerRoutes()
 	return s
@@ -86,15 +79,13 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/period", s.handleApiPeriod)
 	s.mux.HandleFunc("GET /api/meta", s.handleApiMeta)
 	s.mux.HandleFunc("GET /api/db/meta", s.handleApiDbMeta)
-
-	// OpenCode 对账与同步端点
-	s.mux.HandleFunc("GET /api/opencode/costs", s.handleApiOpencodeCosts)
-	s.mux.HandleFunc("GET /api/opencode/history", s.handleApiOpencodeHistory)
-	s.mux.HandleFunc("GET /api/opencode/audit", s.handleApiOpencodeAudit)
-	s.mux.HandleFunc("POST /api/opencode/sync", s.handleApiOpencodeSync)
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(webUIContent)
@@ -470,233 +461,5 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 	sendJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"fileName": filepath.Base(target),
-	})
-}
-
-func (s *Server) handleApiOpencodeCosts(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	year, errY := strconv.Atoi(q.Get("year"))
-	month, errM := strconv.Atoi(q.Get("month"))
-	if errY != nil || errM != nil || month < 1 || month > 12 {
-		sendError(w, http.StatusBadRequest, "Bad Request", "缺少或无效 year/month 参数")
-		return
-	}
-
-	_ = s.opencodeStorage.EnsureDataDir()
-	costs, err := s.opencodeStorage.GetCosts(year, month)
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
-		return
-	}
-	if costs == nil {
-		sendJSON(w, http.StatusOK, map[string]any{
-			"year":  year,
-			"month": month,
-			"costs": opencode.CostsResult{Usage: []opencode.MonthlyCostItem{}, Keys: []opencode.KeyInfo{}},
-		})
-		return
-	}
-	sendJSON(w, http.StatusOK, map[string]any{
-		"year":  year,
-		"month": month,
-		"costs": costs,
-	})
-}
-
-func (s *Server) handleApiOpencodeHistory(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	page, _ := strconv.Atoi(q.Get("page"))
-	size, _ := strconv.Atoi(q.Get("size"))
-	model := q.Get("model")
-	sessionID := q.Get("session")
-	if sessionID == "" {
-		sessionID = q.Get("sessionId")
-	}
-	if sessionID == "" {
-		sessionID = q.Get("sessionID")
-	}
-
-	filter := opencode.HistoryFilter{
-		Model:     model,
-		SessionID: sessionID,
-	}
-
-	_ = s.opencodeStorage.EnsureDataDir()
-	rows, total, err := s.opencodeStorage.GetHistory(filter, page, size)
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
-		return
-	}
-
-	out := map[string]any{
-		"rows":  rows,
-		"total": total,
-	}
-	if page > 0 && size > 0 {
-		out["page"] = page
-		out["size"] = size
-	}
-	sendJSON(w, http.StatusOK, out)
-}
-
-func daysInMonth(year, month int) int {
-	return time.Date(year, time.Month(month+1), 0, 0, 0, 0, 0, time.UTC).Day()
-}
-
-func (s *Server) handleApiOpencodeAudit(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	year, errY := strconv.Atoi(q.Get("year"))
-	month, errM := strconv.Atoi(q.Get("month"))
-	if errY != nil || errM != nil || month < 1 || month > 12 {
-		sendError(w, http.StatusBadRequest, "Bad Request", "缺少或无效 year/month 参数")
-		return
-	}
-
-	lastDay := daysInMonth(year, month)
-	sinceStr := fmt.Sprintf("%04d-%02d-01", year, month)
-	untilStr := fmt.Sprintf("%04d-%02d-%02d", year, month, lastDay)
-
-	tr, err := timerange.MakeMessageRange(sinceStr, untilStr)
-	if err != nil {
-		sendError(w, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-
-	localRes, err := s.sessionData.Query(s.dir, sessiondata.Filter{TimeRange: tr}, sessiondata.View{Kind: sessiondata.ViewTotals})
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
-		return
-	}
-
-	hf, err := s.opencodeStorage.LoadHistory()
-	if err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
-		return
-	}
-
-	sinceMs, _ := timerange.ParseTimestamp(sinceStr, false)
-	untilMs, _ := timerange.ParseTimestamp(untilStr, true)
-
-	var filteredRecords []opencode.UsageRecord
-	for _, r := range hf.Records {
-		t, err := timerange.ParseUtcTimestamp(r.TimeCreated)
-		if err == nil && t >= sinceMs && t <= untilMs {
-			filteredRecords = append(filteredRecords, r)
-		}
-	}
-
-	audit := opencode.BuildAudit(*localRes.Totals, filteredRecords, year, month)
-	sendJSON(w, http.StatusOK, audit)
-}
-
-type syncRequestBody struct {
-	Auth        string `json:"auth"`
-	WorkspaceID string `json:"workspaceId"`
-	Workspace   string `json:"workspace"`
-}
-
-func (s *Server) handleApiOpencodeSync(w http.ResponseWriter, r *http.Request) {
-	// 获取跨进程排他锁
-	unlock, err := s.opencodeStorage.Lock()
-	if err != nil {
-		sendError(w, http.StatusConflict, "Conflict", err.Error())
-		return
-	}
-	defer unlock()
-
-	var reqBody syncRequestBody
-	bodyBytes, _ := io.ReadAll(r.Body)
-	if len(bodyBytes) > 0 {
-		_ = json.Unmarshal(bodyBytes, &reqBody)
-	}
-
-	auth := reqBody.Auth
-	if auth == "" {
-		auth = os.Getenv("OPENCODE_AUTH")
-	}
-	workspaceID := reqBody.WorkspaceID
-	if workspaceID == "" {
-		workspaceID = reqBody.Workspace
-	}
-	if workspaceID == "" {
-		workspaceID = os.Getenv("OPENCODE_WORKSPACE_ID")
-	}
-
-	if auth == "" {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", "认证失效: 缺少 OpenCode auth，请设置 OPENCODE_AUTH 环境变量")
-		return
-	}
-
-	client := opencode.NewClient(auth)
-
-	// 自动发现工作区
-	if workspaceID == "" {
-		workspaces, err := client.GetWorkspaces()
-		if err != nil || len(workspaces) == 0 {
-			sendError(w, http.StatusInternalServerError, "Internal Server Error", "无法发现工作区：请显式设置 OPENCODE_WORKSPACE_ID")
-			return
-		}
-		workspaceID = workspaces[0].ID
-		if workspaceID == "" {
-			workspaceID = workspaces[0].WorkspaceID
-		}
-	}
-
-	start := time.Now()
-	// 同步月度账单
-	costs, err := client.GetMonthlyCosts(workspaceID)
-	if err == nil && costs != nil {
-		now := time.Now()
-		_ = s.opencodeStorage.SaveCosts(now.Year(), int(now.Month()), *costs)
-	}
-
-	// 同步历史记录
-	hf, _ := s.opencodeStorage.LoadHistory()
-	existingRecords := hf.Records
-	recordMap := make(map[string]bool)
-	for _, r := range existingRecords {
-		recordMap[r.ID] = true
-	}
-
-	var newAdded []opencode.UsageRecord
-	pages := 0
-	for p := 1; p <= 100; p++ { // 最多安全抓取 100 页
-		pages++
-		pageRecords, err := client.GetUsageHistory(workspaceID, p)
-		if err != nil || len(pageRecords) == 0 {
-			break
-		}
-		reachedOld := false
-		for _, r := range pageRecords {
-			if recordMap[r.ID] {
-				reachedOld = true
-				break
-			}
-			newAdded = append(newAdded, r)
-			recordMap[r.ID] = true
-		}
-		if reachedOld {
-			break
-		}
-	}
-
-	allRecords := append(newAdded, existingRecords...)
-	var lastSynced *string
-	if len(allRecords) > 0 {
-		tStr := allRecords[0].TimeCreated
-		lastSynced = &tStr
-	}
-	_ = s.opencodeStorage.SaveHistory(allRecords, lastSynced)
-
-	sendJSON(w, http.StatusOK, opencode.SyncResult{
-		Added:     len(newAdded),
-		Pages:     pages,
-		ElapsedMs: time.Since(start).Milliseconds(),
-		LastSyncedTime: func() string {
-			if lastSynced != nil {
-				return *lastSynced
-			}
-			return ""
-		}(),
 	})
 }

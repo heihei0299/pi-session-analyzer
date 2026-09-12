@@ -76,23 +76,15 @@ func TestServerEndpoints(t *testing.T) {
 		t.Fatalf("renamed file does not exist: %s", expectedNewPath)
 	}
 
-	// 4. 验证 GET /api/opencode/costs
-	reqCosts := httptest.NewRequest("GET", "/api/opencode/costs?year=2026&month=8", nil)
-	wCosts := httptest.NewRecorder()
-	handler.ServeHTTP(wCosts, reqCosts)
-	if wCosts.Code != http.StatusOK {
-		t.Fatalf("expected 200 for opencode costs, got %d: %s", wCosts.Code, wCosts.Body.String())
+	// 4. OpenCode 已抽离，token-analyzer 不再注册其 API。
+	reqOpenCode := httptest.NewRequest("GET", "/api/opencode/costs?year=2026&month=8", nil)
+	wOpenCode := httptest.NewRecorder()
+	handler.ServeHTTP(wOpenCode, reqOpenCode)
+	if wOpenCode.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for extracted OpenCode API, got %d", wOpenCode.Code)
 	}
 
-	// 5. 验证 GET /api/opencode/audit
-	reqAudit := httptest.NewRequest("GET", "/api/opencode/audit?year=2026&month=8", nil)
-	wAudit := httptest.NewRecorder()
-	handler.ServeHTTP(wAudit, reqAudit)
-	if wAudit.Code != http.StatusOK {
-		t.Fatalf("expected 200 for opencode audit, got %d: %s", wAudit.Code, wAudit.Body.String())
-	}
-
-	// 6. 验证 GET /api/db/meta
+	// 5. 验证 GET /api/db/meta
 	reqDbMeta := httptest.NewRequest("GET", "/api/db/meta", nil)
 	wDbMeta := httptest.NewRecorder()
 	handler.ServeHTTP(wDbMeta, reqDbMeta)

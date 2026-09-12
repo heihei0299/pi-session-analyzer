@@ -36,11 +36,15 @@
 
 ### Frontier
 
-当前可立即执行：
+已完成：
 
 - **01 — 将 OpenCode 抽离为 standalone `opencode-analyzer/` 项目**
 
-完成 01 后，按依赖顺序执行 02 → 03 → 04 → 05。
+当前可立即执行：
+
+- **02 — 建立 canonical Pi/Codex contract**
+
+后续按依赖顺序执行 02 → 03 → 04 → 05。
 
 ## Ticket 摘要
 

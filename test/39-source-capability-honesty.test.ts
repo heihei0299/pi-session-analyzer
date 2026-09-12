@@ -18,8 +18,6 @@ test("T3-1 TS CLI 收到 --source / --codex-dir 明确报错并提示 Go 版本"
     ["serve", "--source", "all"],
     ["sessions", "--codex-dir", "/tmp/codex"],
     ["totals", "--codex-dir=/tmp/codex"],
-    ["opencode", "sync", "--source", "codex"],
-    ["opencode", "export", "--codex-dir=/tmp/codex"],
   ]) {
     assert.throws(() => parseArgs(argv), /Go 原生版本|Go 版本/, `应显式拒绝: ${argv.join(" ")}`);
     assert.throws(() => parseArgs(argv), /仅 Go 原生版本支持/, `错误应指向 Go 版本: ${argv.join(" ")}`);

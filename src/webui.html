@@ -456,31 +456,6 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 /* reduced motion */
 @media(prefers-reduced-motion:reduce){*{animation:none !important; transition:none !important}}
 
-/* ——— OpenCode 对账 ——— */
-.audit-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px}
-@media(max-width:980px){.audit-summary{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:560px){.audit-summary{grid-template-columns:1fr}}
-.opencode-sync-row{display:flex;gap:10px;align-items:center;margin:14px 0;flex-wrap:wrap}
-#opencode-sync{background:linear-gradient(180deg,#D4B260 0%,#BD963E 100%);color:#0E1416;border:1px solid var(--brass-deep);border-radius:10px;padding:7px 16px;cursor:pointer;font:700 13px var(--font-ui);box-shadow:0 2px 10px rgba(197,162,84,.4);transition:all .16s ease}
-#opencode-sync:disabled{opacity:.6;cursor:wait}
-#opencode-sync.syncing{animation:opencodePulse 1s infinite}
-@keyframes opencodePulse{0%{opacity:1}50%{opacity:.7}100%{opacity:1}}
-#opencode-toast{position:fixed;bottom:20px;right:20px;max-width:360px;background:#151D20;color:var(--enamel);border:1px solid var(--brass);border-radius:10px;padding:10px 16px;font:500 13px var(--font-ui);box-shadow:0 8px 24px rgba(0,0,0,.6);display:none;z-index:100}
-#opencode-toast.show{display:block;animation:panelIn .2s}
-#opencode-toast.error{background:var(--signal-soft);color:#FFCDD3;border-color:#FF8B9E}
-.chart-wrap{background:#12181A;border:1px solid rgba(197,162,84,.2);border-radius:var(--radius);padding:16px;box-shadow:0 12px 28px rgba(0,0,0,.45);margin-top:14px;position:relative}
-.chart-wrap h3{font:700 14px var(--font-ui);color:var(--enamel);margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.chart-wrap h3 i{font-style:italic;color:var(--brass-glint);font-weight:400;font-family:var(--font-display)}
-#opencode-cost-chart{width:100%;height:320px;display:block;background:#0E1315;border:1px solid rgba(255,255,255,.08);border-radius:10px}
-.chart-tooltip{position:absolute;pointer-events:none;z-index:60;background:#151D20;border:1px solid var(--brass);border-radius:8px;padding:8px 12px;box-shadow:0 8px 24px rgba(0,0,0,.7);font:12px var(--font-ui);color:var(--enamel);display:none;backdrop-filter:blur(8px)}
-.chart-tooltip h4{font:600 12px var(--font-mono);color:var(--brass-glint);margin-bottom:4px}
-.chart-tooltip .item{display:flex;justify-content:space-between;gap:12px;font:11px var(--font-mono);margin-top:2px}
-.opencode-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
-#opencode-month,.opencode-controls input[type="month"],.opencode-controls select{border:1px solid rgba(255,255,255,.15);background:#0E1416;border-radius:10px;padding:4px 8px;color:var(--enamel);font:500 12px var(--font-ui);color-scheme:dark}
-.opencode-legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font:500 11px var(--font-ui);color:var(--slate-2)}
-.opencode-legend span{display:inline-flex;align-items:center;gap:6px}
-.opencode-legend i{width:11px;height:11px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.3)}
-
 /* ——— Session Detail Drawer — Variant A (Bench Instrument) ——— */
 .drawer-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);z-index:40;display:none}
 .drawer-mask.open{display:block}
@@ -541,8 +516,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
     <button class="tab" data-tab="sessions">会话明细</button>
     <button class="tab" data-tab="requests">请求明细</button>
     <button class="tab" data-tab="manage">会话管理</button>
-    <button class="tab" data-tab="opencode">OpenCode 对账</button>
-  </nav>
+      </nav>
 </header>
 
 <div class="ruler-wrap">
@@ -580,7 +554,7 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 <div class="status-wrap">
   <div id="status-line">加载中… <span id="updated-at" class="updated hidden"></span></div>
   <div id="diagnostics" role="status" aria-live="polite"></div>
-  <div id="scope-note">口径说明：统计含 pi 四载体（assistant/toolResult/compaction/branch_summary，含 assistant+usage）；总输入 = input + cacheRead（总输入）；pi 压缩/内部请求与 opencode 等其他客户端请求不计入，与 pi-switch 网关有结构性差异（预期）。</div>
+  <div id="scope-note">口径说明：统计含 pi 四载体（assistant/toolResult/compaction/branch_summary，含 assistant+usage）；总输入 = input + cacheRead（总输入）；pi 压缩/内部请求与 其他客户端请求不计入，与 pi-switch 网关有结构性差异（预期）。</div>
 </div>
 <div id="error-banner"></div>
 
@@ -697,45 +671,6 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
     <div id="session-groups"></div>
   </section>
 
-  <section id="tab-opencode" class="tab-panel" data-tab="opencode">
-    <div id="opencode-audit" class="audit-summary">
-      <div class="card"><span class="rivet tl"></span><span class="rivet tr"></span><span class="rivet bl"></span><span class="rivet br"></span><div class="label">本地 Pi 统计</div><div class="value mono" id="v-opencode-local">—</div><div class="sub" id="v-opencode-local-sub">tokens / 费用 · 按月</div></div>
-      <div class="card"><span class="rivet tl"></span><span class="rivet tr"></span><span class="rivet bl"></span><span class="rivet br"></span><div class="label">OpenCode 官方计费</div><div class="value mono" id="v-opencode-remote">—</div><div class="sub" id="v-opencode-remote-sub">tokens / 费用 · 官方账单</div></div>
-      <div class="card"><span class="rivet tl"></span><span class="rivet tr"></span><span class="rivet bl"></span><span class="rivet br"></span><div class="label">差额对比</div><div class="value" id="v-opencode-diff">—</div><div class="sub" id="v-opencode-diff-sub">差额百分比 · 结构性差异说明</div></div>
-      <div class="card"><span class="rivet tl"></span><span class="rivet tr"></span><span class="rivet bl"></span><span class="rivet br"></span><div class="label">同步状态</div><div class="value mono" id="v-opencode-sync-count">—</div><div class="sub" id="v-opencode-sync-sub">已同步记录数</div></div>
-    </div>
-    <div class="opencode-sync-row">
-      <button id="opencode-sync">🔄 立即同步</button>
-      <span id="opencode-last-sync" style="font:500 12px var(--font-mono);color:var(--slate-2)">未同步</span>
-      <span id="opencode-sync-detail" style="font:500 11px var(--font-mono);color:var(--slate)"></span>
-    </div>
-    <div id="opencode-toast"></div>
-    <div class="chart-wrap">
-      <h3>月度成本 <i>stacked</i> — 按模型 <span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center"><input type="month" id="opencode-month"><span id="opencode-chart-hint" style="font:500 11px var(--font-mono);color:#85857D"></span></span></h3>
-      <canvas id="opencode-cost-chart" width="960" height="320"></canvas>
-      <div id="opencode-chart-tooltip" class="chart-tooltip"></div>
-      <div id="opencode-legend" class="opencode-legend"></div>
-      <div id="opencode-chart-empty" style="font:500 12px var(--font-mono);color:#85857D;margin-top:8px;display:none">暂无成本数据</div>
-    </div>
-    <div class="opencode-controls">
-      <label>模型筛选 <select id="opencode-model-filter"><option value="">全部模型</option></select></label>
-      <span style="flex:1"></span>
-      <label>每页 <select id="opencode-page-size"><option value="20" selected>20</option><option value="50">50</option><option value="100">100</option></select> 行</label>
-    </div>
-    <div class="detail-table-wrap">
-      <table id="opencode-history">
-        <thead><tr id="opencode-history-head">
-          <th>日期</th><th>模型</th><th>输入</th><th>缓存</th><th>输出</th><th>推理</th><th>成本</th><th>会话 ID</th>
-        </tr></thead>
-        <tbody id="opencode-history-body"></tbody>
-      </table>
-    </div>
-    <div class="pager" style="margin-top:10px">
-      <button id="opencode-prev" class="page-btn">上一页</button>
-      <span id="opencode-page-info"></span>
-      <button id="opencode-next" class="page-btn">下一页</button>
-      <span id="opencode-history-total" style="margin-left:auto;font:500 11px var(--font-mono);color:var(--slate-2)"></span>
-    </div>
   </section>
 </main>
 
@@ -756,7 +691,6 @@ button:focus-visible, select:focus-visible, input:focus-visible{outline:2px soli
 <script>
 "use strict";
 const state={preset:"today",since:null,until:null,source:"pi",sourceTouched:false,groupBy:"model",tab:"overview",autoRefresh:"off",refreshTimer:null,sessions:[],requests:[]};
-const opencodeState={year:new Date().getFullYear(),month:new Date().getMonth()+1,historyPage:1,historySize:20,filterModel:"",total:0,lastSync:null};
 const $=sel=>document.querySelector(sel);
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function fmtCompact(n){ if(n===undefined||n===null||Number.isNaN(Number(n))) return "0"; const num=Number(n); if(num>=1e9) return (num/1e9).toFixed(1).replace(/\.0$/,"")+"B"; if(num>=1e6) return (num/1e6).toFixed(1).replace(/\.0$/,"")+"M"; if(num>=1e4) return (num/1e3).toFixed(1).replace(/\.0$/,"")+"k"; return num.toLocaleString("en-US"); }
@@ -772,8 +706,6 @@ function fmtCostCell(v,r){
   return cost===0?UNPRICED:fmtCost(cost);
 }
 function fmtRate(r){return (r*100).toFixed(2)+"%"}
-function fmtMicroCost(n){return "$"+(n/1e8).toLocaleString("en-US",{minimumFractionDigits:4,maximumFractionDigits:4})}
-function fmtOpencodeCost(n){return n===0?UNPRICED:"$"+Number(n).toLocaleString("en-US",{minimumFractionDigits:4,maximumFractionDigits:4})}
 function dateStr(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function fmtTimestamp(iso) {
   if (!iso) return "";
@@ -1671,398 +1603,7 @@ async function saveSessionRename(row,input,errEl,name){
   }catch{ errEl.textContent="重命名失败"; restoreSessionName(input,row,name)}
 }
 
-/* ——— OpenCode 对账：极简实现，复用现有样式/模式，无图表库 ——— */
-const OPENCODE_COLORS=["#C5A254","#0FA08C","#E2452E","#7A8E99","#9B6B43","#4A7A8C","#B07A5B","#5B8A72"];
-function modelColor(m,idxMap){
-  if(idxMap && idxMap[m]!==undefined) return OPENCODE_COLORS[idxMap[m]%OPENCODE_COLORS.length];
-  let h=0; for(let i=0;i<m.length;i++) h=(h*31+m.charCodeAt(i))>>>0;
-  return OPENCODE_COLORS[h%OPENCODE_COLORS.length];
-}
-function fmtMicroCost(n){ return "$"+(n/1e8).toLocaleString("en-US",{minimumFractionDigits:4,maximumFractionDigits:4}); }
-function showOpencodeToast(msg,isError){
-  const el=$("#opencode-toast");
-  if(!el) return;
-  el.textContent=msg;
-  el.className=isError?"show error":"show";
-  el.style.display="block";
-  clearTimeout(showOpencodeToast._t);
-  showOpencodeToast._t=setTimeout(()=>{ el.style.display="none"; el.className=""; }, 3000);
-}
-async function fetchOpencodeCosts(year,month){
-  const p=new URLSearchParams({year:String(year),month:String(month)});
-  const res=await fetch("/api/opencode/costs?"+p);
-  if(!res.ok){ let d=""; try{d=(await res.json()).detail||""}catch{} throw new Error(d||("HTTP "+res.status)); }
-  return res.json();
-}
-async function fetchOpencodeAudit(year,month){
-  const p=new URLSearchParams({year:String(year),month:String(month)});
-  const res=await fetch("/api/opencode/audit?"+p);
-  if(!res.ok){ let d=""; try{d=(await res.json()).detail||""}catch{} throw new Error(d||("HTTP "+res.status)); }
-  return res.json();
-}
-async function fetchOpencodeHistory(page,size,model){
-  const p=new URLSearchParams({page:String(page),size:String(size)});
-  if(model) p.set("model",model);
-  const res=await fetch("/api/opencode/history?"+p);
-  if(!res.ok){ let d=""; try{d=(await res.json()).detail||""}catch{} throw new Error(d||("HTTP "+res.status)); }
-  return res.json();
-}
-async function postOpencodeSync(){
-  const res=await fetch("/api/opencode/sync",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
-  const body=await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(body.detail||("HTTP "+res.status));
-  return body;
-}
-function renderOpencodeAudit(data){
-  if(!data) return;
-  const lt=data.localTotals, ot=data.opencodeTotals;
-  const lEl=$("#v-opencode-local"), lsEl=$("#v-opencode-local-sub");
-  const rEl=$("#v-opencode-remote"), rsEl=$("#v-opencode-remote-sub");
-  const dEl=$("#v-opencode-diff"), dsEl=$("#v-opencode-diff-sub");
-  const scEl=$("#v-opencode-sync-count"), ssEl=$("#v-opencode-sync-sub");
-  if(lEl) lEl.textContent=fmtCompact(lt.totalTokens)+" / "+(lt.cost===0?UNPRICED:fmtCost(lt.cost));
-  if(lsEl) lsEl.textContent=lt.requests+" 请求 · "+fmtCompact((lt.input||0)+(lt.cacheRead||0))+" 输入";
-  if(rEl) rEl.textContent=fmtCompact(ot.totalTokens)+" / "+(ot.cost===0?UNPRICED:fmtCost(ot.cost));
-  if(rsEl) rsEl.textContent=ot.requests+" 请求 · "+fmtCompact((ot.input||0)+(ot.cacheRead||0))+" 输入";
-  if(dEl){
-    const fmtP=v=>(v*100).toFixed(1)+"%";
-    dEl.textContent=(data.diff.tokens>=0?"+":"")+fmtCompact(data.diff.tokens)+" / "+fmtP(data.diffRate.tokens);
-  }
-  if(dsEl){
-    const costDiff=data.diff.cost;
-    const pct=(data.diffRate.cost*100).toFixed(1)+"%";
-    const costStr=(data.opencodeTotals.cost===0 && data.localTotals.cost===0) ? "—" : ((costDiff>=0?"+":"")+"$"+Math.abs(costDiff).toFixed(4)+" / "+pct);
-    dsEl.textContent=costStr+" · "+(data.comparison||"");
-    dsEl.title=data.comparison||"";
-  }
-  if(scEl) scEl.textContent=String(ot.requests)+" 记录";
-  if(ssEl) ssEl.textContent="OpenCode 官方 · 差额率 tokens "+(data.diffRate.tokens*100).toFixed(1)+"% / 费用 "+(data.diffRate.cost*100).toFixed(1)+"%";
-}
-function renderOpencodeLegend(models,idxMap){
-  const el=$("#opencode-legend");
-  if(!el) return;
-  if(!models||models.length===0){ el.innerHTML=""; return; }
-  el.innerHTML=models.map(m=>'<span><i style="background:'+escapeHtml(modelColor(m,idxMap))+'"></i>'+escapeHtml(m)+'</span>').join("");
-}
-function drawOpencodeCostChart(wrapper){
-  const canvas=$("#opencode-cost-chart");
-  if(!canvas) return;
-  canvas._lastWrapper = wrapper;
-  const ctx=canvas.getContext("2d");
-  const hint=$("#opencode-chart-hint");
-  const emptyEl=$("#opencode-chart-empty");
-  const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const cssW = rect.width > 0 ? rect.width : (canvas.width || 960);
-  const cssH = 320;
-  canvas.width = Math.round(cssW * dpr);
-  canvas.height = Math.round(cssH * dpr);
-  ctx.scale(dpr, dpr);
-  const W = cssW, H = cssH;
-  ctx.clearRect(0,0,W,H);
-  if(!wrapper || !wrapper.costs || !wrapper.costs.usage || wrapper.costs.usage.length===0){
-    if(emptyEl) emptyEl.style.display="";
-    if(hint) hint.textContent="无数据";
-    ctx.fillStyle="#0E1315"; ctx.fillRect(0,0,W,H);
-    ctx.fillStyle="#8B9E9B"; ctx.font="12px JetBrains Mono"; ctx.textAlign="center"; ctx.fillText("暂无成本数据", W/2, H/2);
-    renderOpencodeLegend([]);
-    canvas._chartData = null;
-    return;
-  }
-  if(emptyEl) emptyEl.style.display="none";
-  const usage=wrapper.costs.usage;
-  const map=new Map();
-  const modelsSet=new Set();
-  for(const u of usage){
-    const d=u.date ? String(u.date).slice(0,10) : "unknown";
-    if(!map.has(d)) map.set(d,new Map());
-    const mMap=map.get(d);
-    const cost=(typeof u.totalCost==="number"?u.totalCost:0)/1e8;
-    mMap.set(u.model, (mMap.get(u.model)||0)+cost);
-    modelsSet.add(u.model);
-  }
-  const dates=[...map.keys()].sort();
-  const models=[...modelsSet].sort();
-  const idxMap={}; models.forEach((m,i)=>idxMap[m]=i);
-  let max=0;
-  for(const d of dates){
-    let s=0; for(const v of map.get(d).values()) s+=v;
-    if(s>max) max=s;
-  }
-  if(max===0) max=1;
-  const pad={l:52,t:20,r:16,b:30};
-  const plotW=W-pad.l-pad.r, plotH=H-pad.t-pad.b;
-  ctx.fillStyle="#0E1315"; ctx.fillRect(0,0,W,H);
-  ctx.strokeStyle="rgba(255,255,255,.07)"; ctx.lineWidth=1;
-  for(let i=0;i<=4;i++){
-    const y=pad.t + plotH - (plotH*i/4);
-    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W-pad.r, y); ctx.stroke();
-    ctx.fillStyle="#8B9E9B"; ctx.font="10px JetBrains Mono"; ctx.textAlign="right"; ctx.fillText("$"+(max*i/4).toFixed(2), pad.l-6, y+3);
-  }
-  const step=dates.length? plotW/dates.length : plotW;
-  const barW=Math.max(10, Math.min(42, step*0.62));
-  dates.forEach((d,di)=>{
-    const isHovered = canvas._hoveredDate === d;
-    const x=pad.l + di*step + (step-barW)/2;
-    if(isHovered){
-      ctx.fillStyle="rgba(197,162,84,.08)";
-      ctx.fillRect(pad.l + di*step, pad.t, step, plotH);
-    }
-    const mMap=map.get(d);
-    let y0=pad.t+plotH;
-    for(const m of models){
-      const v=mMap.get(m)||0;
-      if(v<=0) continue;
-      const h=(v/max)*plotH;
-      const y=y0 - h;
-      ctx.fillStyle=modelColor(m,idxMap);
-      ctx.fillRect(x,y,barW,h);
-      ctx.strokeStyle=isHovered?"var(--brass-glint)":"rgba(0,0,0,.25)";
-      ctx.lineWidth=isHovered?1.5:1;
-      ctx.strokeRect(x,y,barW,h);
-      y0=y;
-    }
-  });
-  ctx.fillStyle="#A4B3B0"; ctx.font="10px JetBrains Mono"; ctx.textAlign="center";
-  dates.forEach((d,i)=>{
-    const x=pad.l + i*step + step/2;
-    const label=String(d).slice(5);
-    if(dates.length>14 && i%2===1) return;
-    if(dates.length>30 && i%3!==0) return;
-    ctx.fillText(label, x, H-8);
-  });
-  if(hint) hint.textContent=dates.length+" 天 · "+models.length+" 模型 · 峰值 $"+max.toFixed(4);
-  renderOpencodeLegend(models,idxMap);
-  canvas._chartData = { pad, plotW, plotH, step, barW, dates, map, models, idxMap, max, cssW, cssH };
-}
-function renderOpencodeHistoryTable(rows){
-  const body=$("#opencode-history-body");
-  if(!body) return;
-  if(!rows || rows.length===0){
-    body.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--slate-2);font:500 12px var(--font-mono)">暂无历史记录</td></tr>';
-    return;
-  }
-  body.innerHTML=rows.map(r=>{
-    const date=r.timeCreated ? fmtTimestamp(r.timeCreated) : "-";
-    const model=escapeHtml(r.model||"-");
-    const totIn=fmtCompact((r.inputTokens||0)+(r.cacheReadTokens||0));
-    const cache=fmtCompact((r.cacheReadTokens||0)+(r.cacheWrite5mTokens||0)+(r.cacheWrite1hTokens||0));
-    const out=fmtCompact(r.outputTokens||0);
-    const reas=fmtCompact(r.reasoningTokens||0);
-    const rawCost=typeof r.cost==="number"?r.cost:0;
-    const costVal=rawCost>100?rawCost/1e8:rawCost;
-    const cost=costVal===0?UNPRICED:fmtCost(costVal);
-    const sid=escapeHtml(r.sessionID||"-");
-    return "<tr><td>"+escapeHtml(date)+"</td><td>"+model+"</td><td>"+totIn+"</td><td>"+cache+"</td><td>"+out+"</td><td>"+reas+"</td><td>"+cost+"</td><td title='"+sid+"'>"+sid.slice(0,12)+"</td></tr>";
-  }).join("");
-}
-async function refreshOpencodeCosts(){
-  try{
-    const data=await fetchOpencodeCosts(opencodeState.year, opencodeState.month);
-    drawOpencodeCostChart(data);
-  }catch(e){
-    const canvas=$("#opencode-cost-chart");
-    if(canvas){
-      const ctx=canvas.getContext("2d");
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle="#0E1315"; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle="#FF8B9E"; ctx.font="12px JetBrains Mono"; ctx.textAlign="center"; ctx.fillText("加载失败: "+e.message, canvas.width/2, canvas.height/2);
-    }
-    const hint=$("#opencode-chart-hint");
-    if(hint) hint.textContent="加载失败";
-    renderOpencodeLegend([]);
-  }
-}
-async function refreshOpencodeAudit(){
-  try{
-    const data=await fetchOpencodeAudit(opencodeState.year, opencodeState.month);
-    renderOpencodeAudit(data);
-    // 同步记录数补充
-    try{
-      const hist=await fetchOpencodeHistory(1,1,"");
-      $("#opencode-history-total").textContent=hist.total+" 条历史";
-      $("#v-opencode-sync-count").textContent=hist.total+" 条";
-      $("#v-opencode-sync-sub").textContent="已同步记录数 · 最近同步 "+($("#opencode-last-sync").textContent||"—");
-      // 动态更新模型筛选选项（首次）
-      if(hist.total>0){
-        const all=await fetch("/api/opencode/history").then(r=>r.json()).catch(()=>null);
-        if(all && Array.isArray(all.rows)){
-          const set=new Set(all.rows.map(x=>x.model).filter(Boolean));
-          const sel=$("#opencode-model-filter");
-          if(sel && sel.options.length<=1){
-            for(const m of [...set].sort()){ const o=document.createElement("option"); o.value=m; o.textContent=m; sel.appendChild(o); }
-          }
-        }
-      }
-    }catch{}
-  }catch(e){
-    const lEl=$("#v-opencode-local"); if(lEl) lEl.textContent="加载失败";
-    const rEl=$("#v-opencode-remote"); if(rEl) rEl.textContent=e.message.slice(0,30);
-  }
-}
-async function refreshOpencodeHistory(){
-  try{
-    const data=await fetchOpencodeHistory(opencodeState.historyPage, opencodeState.historySize, opencodeState.filterModel);
-    renderOpencodeHistoryTable(data.rows);
-    opencodeState.total=data.total;
-    const pages=Math.max(1,Math.ceil(data.total / opencodeState.historySize));
-    const info=$("#opencode-page-info");
-    if(info) info.textContent=data.total+" 行 · 第 "+opencodeState.historyPage+"/"+pages+" 页";
-    const prev=$("#opencode-prev"), next=$("#opencode-next");
-    if(prev) prev.disabled=opencodeState.historyPage<=1;
-    if(next) next.disabled=opencodeState.historyPage>=pages;
-    const tot=$("#opencode-history-total");
-    if(tot) tot.textContent=data.total+" 条 · 第 "+opencodeState.historyPage+"/"+pages+" 页";
-    // 更新审计卡片的同步计数（若未更新）
-    const scEl=$("#v-opencode-sync-count");
-    if(scEl && scEl.textContent==="—") scEl.textContent=String(data.total)+" 条";
-  }catch(e){
-    const body=$("#opencode-history-body");
-    if(body) body.innerHTML='<tr><td colspan="8" style="color:#7A1F14">加载失败: '+escapeHtml(e.message)+'</td></tr>';
-  }
-}
-async function refreshOpencodeAll(){
-  // 优先本地缓存毫秒级渲染：三个本地持久化数据并行拉取
-  await Promise.allSettled([refreshOpencodeCosts(), refreshOpencodeAudit(), refreshOpencodeHistory(), updateFilteredSessionCount()]);
-  // 更新最后同步时间（若 history 有数据，用最新记录时间近似）
-  try{
-    const hist=await fetch("/api/opencode/history?size=1&page=1").then(r=>r.json()).catch(()=>null);
-    if(hist && hist.rows && hist.rows[0]){
-      const t=hist.rows[0].timeCreated;
-      if(t) $("#opencode-last-sync").textContent="最后同步："+fmtTimestamp(t);
-    }
-  }catch{}
-}
-async function doOpencodeSync(){
-  const btn=$("#opencode-sync");
-  const detail=$("#opencode-sync-detail");
-  if(!btn) return;
-  btn.disabled=true; btn.classList.add("syncing"); btn.textContent="⏳ 同步中…";
-  showOpencodeToast("同步中…");
-  try{
-    const res=await postOpencodeSync();
-    showOpencodeToast("同步完成：新增 "+res.added+" 条，"+res.pages+" 页");
-    await refreshOpencodeAll();
-    const ts=res.lastSyncedTime ? fmtTimestamp(res.lastSyncedTime) : "刚刚";
-    const lastEl=$("#opencode-last-sync");
-    if(lastEl) lastEl.textContent="最后同步："+ts;
-    if(detail) detail.textContent=res.pages+" 页 · "+res.elapsedMs+"ms";
-    const scEl=$("#v-opencode-sync-count");
-    if(scEl) scEl.textContent=res.added+" 新增";
-  }catch(e){
-    showOpencodeToast("同步失败："+e.message,true);
-    // 降噪：Opencode 同步失败仅走 Toast，不写入全局 error-banner（避免盖住总览筛选项与水印条）
-    // const eb=$("#error-banner"); if(eb){ eb.textContent="OpenCode 同步失败："+e.message; eb.classList.add("show"); }
-  }finally{
-    btn.disabled=false; btn.classList.remove("syncing"); btn.textContent="🔄 立即同步";
-  }
-}
-function bindOpencodeInteractions(){
-  const monthEl=$("#opencode-month");
-  const syncBtn=$("#opencode-sync");
-  const filterEl=$("#opencode-model-filter");
-  const prevBtn=$("#opencode-prev");
-  const nextBtn=$("#opencode-next");
-  const sizeSel=$("#opencode-page-size");
-  if(monthEl){
-    monthEl.addEventListener("change", ()=>{
-      const v=monthEl.value;
-      if(!v) return;
-      const parts=v.split("-");
-      opencodeState.year=Number(parts[0]); opencodeState.month=Number(parts[1]);
-      refreshOpencodeCosts();
-      refreshOpencodeAudit();
-    });
-    monthEl.addEventListener("input", ()=>{
-      const v=monthEl.value;
-      if(!v) return;
-      const parts=v.split("-");
-      opencodeState.year=Number(parts[0]); opencodeState.month=Number(parts[1]);
-    });
-  }
-  if(syncBtn) syncBtn.addEventListener("click", doOpencodeSync);
-  if(filterEl) filterEl.addEventListener("change", ()=>{
-    opencodeState.filterModel=filterEl.value;
-    opencodeState.historyPage=1;
-    // opencode-sync filter change triggers history refresh
-    refreshOpencodeHistory();
-  });
-  if(prevBtn) prevBtn.addEventListener("click", ()=>{
-    if(opencodeState.historyPage>1){ opencodeState.historyPage--; refreshOpencodeHistory(); }
-  });
-  if(nextBtn) nextBtn.addEventListener("click", ()=>{
-    const pages=Math.max(1,Math.ceil(opencodeState.total/opencodeState.historySize));
-    if(opencodeState.historyPage<pages){ opencodeState.historyPage++; refreshOpencodeHistory(); }
-  });
-  if(sizeSel) sizeSel.addEventListener("change", ()=>{
-    opencodeState.historySize=Number(sizeSel.value);
-    opencodeState.historyPage=1;
-    refreshOpencodeHistory();
-  });
-  const chartCanvas = $("#opencode-cost-chart");
-  const chartTooltip = $("#opencode-chart-tooltip");
-  if(chartCanvas){
-    chartCanvas.addEventListener("mousemove", e=>{
-      const cd = chartCanvas._chartData;
-      if(!cd || !cd.dates || cd.dates.length===0) return;
-      const rect = chartCanvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const relX = mx - cd.pad.l;
-      if(relX >= 0 && relX <= cd.plotW && my >= cd.pad.t && my <= cd.pad.t + cd.plotH){
-        const idx = Math.floor(relX / cd.step);
-        if(idx >= 0 && idx < cd.dates.length){
-          const d = cd.dates[idx];
-          if(chartCanvas._hoveredDate !== d){
-            chartCanvas._hoveredDate = d;
-            drawOpencodeCostChart(chartCanvas._lastWrapper);
-          }
-          if(chartTooltip){
-            const mMap = cd.map.get(d);
-            let tot = 0;
-            if(mMap) for(const v of mMap.values()) tot += v;
-            let list = "";
-            for(const m of cd.models){
-              const val = mMap ? (mMap.get(m) || 0) : 0;
-              if(val > 0){
-                list += `<div class="item"><span><i style="width:8px;height:8px;display:inline-block;border-radius:2px;background:${escapeHtml(modelColor(m,cd.idxMap))};margin-right:6px"></i>${escapeHtml(m)}</span><strong style="color:var(--brass-glint)">$${val.toFixed(4)}</strong></div>`;
-              }
-            }
-            chartTooltip.innerHTML = `<h4>${escapeHtml(d)} · 总计 $${tot.toFixed(4)}</h4>${list}`;
-            chartTooltip.style.display = "block";
-            const tipW = 220;
-            const left = Math.min(rect.width - tipW - 10, Math.max(10, mx + 16));
-            const top = Math.max(10, my - 40);
-            chartTooltip.style.left = left + "px";
-            chartTooltip.style.top = top + "px";
-          }
-          return;
-        }
-      }
-      if(chartCanvas._hoveredDate){
-        chartCanvas._hoveredDate = null;
-        drawOpencodeCostChart(chartCanvas._lastWrapper);
-      }
-      if(chartTooltip) chartTooltip.style.display = "none";
-    });
-    chartCanvas.addEventListener("mouseleave", ()=>{
-      if(chartCanvas._hoveredDate){
-        chartCanvas._hoveredDate = null;
-        drawOpencodeCostChart(chartCanvas._lastWrapper);
-      }
-      if(chartTooltip) chartTooltip.style.display = "none";
-    });
-  }
-}
-function initOpencodeMonth(){
-  const el=$("#opencode-month");
-  if(!el) return;
-  const y=String(opencodeState.year).padStart(4,"0");
-  const m=String(opencodeState.month).padStart(2,"0");
-  el.value=y+"-"+m;
-}
-
-function refreshAll(){ if(!lastMeta) fetchMetaOnce(); if(state.tab==="overview") refreshOverview(); if(state.tab==="sessions") refreshSessionTable(); if(state.tab==="requests") refreshRequestTable(); if(state.tab==="manage") refreshSessionGroups(); if(state.tab==="opencode") refreshOpencodeAll(); }
+function refreshAll(){ if(!lastMeta) fetchMetaOnce(); if(state.tab==="overview") refreshOverview(); if(state.tab==="sessions") refreshSessionTable(); if(state.tab==="requests") refreshRequestTable(); if(state.tab==="manage") refreshSessionGroups(); }
 
 const detailDrawerState_unused = null; // placeholder to keep lint happy
 async function fetchDetail(sessionId){
@@ -2368,9 +1909,6 @@ function init(){
   bindDetailDrawerInteractions();
   bindSessionManage();
   bindTapeInteractions();
-  bindOpencodeInteractions();
-  initOpencodeMonth();
-  refreshOpencodeAll();
   fetchMetaOnce();
   applyPreset("today");
 }
