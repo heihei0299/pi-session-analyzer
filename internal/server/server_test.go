@@ -14,6 +14,8 @@ import (
 )
 
 func TestServerEndpoints(t *testing.T) {
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	t.Setenv("HOME", t.TempDir())
 	tmpDir, err := os.MkdirTemp("", "token-analyzer-server-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)

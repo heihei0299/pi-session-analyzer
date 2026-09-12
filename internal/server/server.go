@@ -398,7 +398,11 @@ func (s *Server) query(filter sessiondata.Filter, view sessiondata.View) (*sessi
 }
 
 func (s *Server) handleApiDbMeta(w http.ResponseWriter, r *http.Request) {
-	dbPath := db.ResolveDbPathFromEnv(r.URL.Query().Get("db"))
+	dbPath := s.queryConfig.DBPath
+	if queryPath := r.URL.Query().Get("db"); queryPath != "" {
+		dbPath = queryPath
+	}
+	dbPath = db.ResolveDbPathFromEnv(dbPath)
 	// 只读：db/meta 本身是观察口，不能推进游标或建库。
 	database, err := db.OpenReadOnly(dbPath)
 	if err != nil {
