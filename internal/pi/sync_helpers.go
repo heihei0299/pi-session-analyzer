@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heihei0299/pi-session-anylize/internal/db"
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/db"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 // parseEntryMs 解析 Pi 条目时间戳为毫秒（与 TS Date.parse 同语义的最小实现）。

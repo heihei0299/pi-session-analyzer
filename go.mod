@@ -1,4 +1,4 @@
-module github.com/heihei0299/pi-session-anylize
+module github.com/heihei0299/token-analyzer
 
 go 1.23.0
 

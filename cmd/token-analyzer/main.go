@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
-	"github.com/heihei0299/pi-session-anylize/internal/query"
-	"github.com/heihei0299/pi-session-anylize/internal/refresh"
-	"github.com/heihei0299/pi-session-anylize/internal/render"
-	"github.com/heihei0299/pi-session-anylize/internal/serialize"
-	"github.com/heihei0299/pi-session-anylize/internal/server"
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
-	"github.com/heihei0299/pi-session-anylize/internal/timerange"
+	"github.com/heihei0299/token-analyzer/internal/domain"
+	"github.com/heihei0299/token-analyzer/internal/query"
+	"github.com/heihei0299/token-analyzer/internal/refresh"
+	"github.com/heihei0299/token-analyzer/internal/render"
+	"github.com/heihei0299/token-analyzer/internal/serialize"
+	"github.com/heihei0299/token-analyzer/internal/server"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/timerange"
 )
 
 const Version = "2026.9.3"
@@ -57,7 +57,7 @@ func printHelp() {
 func main() {
 	if len(os.Args) > 1 {
 		if os.Args[1] == "-v" || os.Args[1] == "--version" {
-			fmt.Printf("token-analyzer %s (go edition)\n", Version)
+			fmt.Printf("token-analyzer %s\n", Version)
 			return
 		}
 		if os.Args[1] == "-h" || os.Args[1] == "--help" {

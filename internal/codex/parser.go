@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
+	"github.com/heihei0299/token-analyzer/internal/domain"
 	"github.com/klauspost/compress/zstd"
 )
 

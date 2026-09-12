@@ -9,9 +9,12 @@
 - **header**：会话文件首行 JSON entry，权威字段 = `id`（会话 ID）、`timestamp`（会话创建时间）、`cwd`（项目归属）、`parentSession`（fork 标记，见下）。
 - **项目归属（cwd）**：以 header `cwd` 为权威（完整绝对路径）；目录名是 cwd 的有损编码（`--` 包裹、`/`→`-`），不可反解，仅展示/辅助分组。聚合按规范化 cwd（resolve 去尾斜杠/符号链接）。
 - **计入口径（四载体，直切 cc-switch）**：`assistant`（`type=message, role=assistant`）、`toolResult`（`role=toolResult`）、`compaction`（`type=compaction`）、`branch_summary`（`type=branch_summary`）四者，门控 `has_billable||has_cost||failed`（`has_billable=input||output||cacheRead||cacheWrite>0`，`has_cost=cost.total>0`，`failed=stopReason∈{error,aborted}`），任一成立即计入；其余 `user` 等一律不计入。
-- **会话数据仓（SessionData）**：会话目录 → 派生窗口（totals/sessions/requests/groups/period/meta）的唯一深模块；单一 `query(filter, view)` interface 内聚 fork 去重（ADR-0001）、cwd 归一缓存、文件级快照缓存、派生、分页排序；CLI / API / watch 为其薄 adapter。
+- **事实中心（normalized SQLite ledger）**：Pi/Codex usage 唯一事实中心；所有统计窗口只从 ledger 派生，不再有文件扫描统计旁路。
+- **查询引擎（Go Query Engine）**：totals/sessions/requests/groups/period/detail/meta 的唯一生产统计 seam（`internal/query`）；只读已提交 ledger 快照，不执行 discovery/parse/sync/游标更新，不写 DB，不理解上游原始格式。
+- **刷新（Refresh）**：source → ledger 的唯一写入路径（`internal/refresh` 编排 + `internal/pi` / `internal/codex` source adapter）；承担 source-specific discovery、parse、identity、fork 去重（ADR-0001）、双账本去重、指纹增量、diagnostics；幂等，失败保留上一成功快照并经 meta/diagnostics 暴露。
+- **会话数据类型（sessiondata）**：共享查询类型（Filter/View/QueryResult）与 cwd 归一/显示名/排序 helper；不再承担文件扫描统计。会话重命名仍需按 sessionId 定位 Pi 文件（非统计路径）。
 - **子代理会话**：`isTask` 会话（路径含 `/tasks/`，header 含 `parentSession`，由 `parentSessionId` 指向主会话），其消耗在详情视图合并到主会话，主列表保持独立；API 字段 `isTask` 保持原名，仅 UI 文案为“子代理”。
-- **存储（SQLite 直切）**：`token-analyzer.db`（`proxy_request_logs/session_log_sync/session_usage_dedup/usage_daily_rollups/model_pricing` 5表，与 `cc-switch/schema.rs` 1:1），`SCHEMA_VERSION=2`，`WAL/foreign_keys/auto_vacuum INCREMENTAL`，路径 `TOKEN_ANALYZER_DB > --db > ~/.cache/token-analyzer/token-analyzer.db`（默认不共库，显式 `TOKEN_ANALYZER_DB=~/.cc-switch/cc-switch.db` 或 `--db` 才共库），`sync_pi_usage` 为唯一写入路径，读路径 `proxy_request_logs ∪ rollups` 的 SQL 聚合。
+- **存储（SQLite 直切）**：`token-analyzer.db`（`proxy_request_logs/session_log_sync/session_usage_dedup/usage_daily_rollups/model_pricing` + `pi_sessions/source_sessions`，与 `cc-switch/schema.rs` 1:1 扩展），`SCHEMA_VERSION=2`，`WAL/foreign_keys/auto_vacuum INCREMENTAL`，路径 `TOKEN_ANALYZER_DB > --db > ~/.cache/token-analyzer/token-analyzer.db`（默认不共库，显式 `TOKEN_ANALYZER_DB=~/.cc-switch/cc-switch.db` 或 `--db` 才共库）。写路径仅 Refresh（Pi `SyncPiUsage` + Codex `SyncRollouts`，按文件事务提交）；读路径仅 Query Engine 的 ledger SQL（`proxy_request_logs ∪ rollups`），经 `OpenReadOnly + query_only` 快照读取。
 - **双账本去重**：`session_usage_dedup(data_source, request_id, semantic_id, has_entry_id)`，`request_id = hash(pi-session-request-v3+kind+entry.id+timestamp)`，`semantic_id = hash(pi-session-semantic-v1+kind+entry_ts+msg_ts+provider/model/responseModel/... + canonical usage)`，同文件 `requestId` 去重（`stopReason` 优先/`output` 最大），跨文件持久账本，叠加 fork `ts<forkTs`。
 - **指纹增量**：`PiFileRevision{modifiedMs, fileSize, tailFingerprint(末4096B SHA256, pi-session-tail-v1), complete}` 编码于 `session_log_sync.last_synced_at`，`tail(oldEOF)==expected` 则 `seek`，否则全量重扫（账本防双算），`last_line_offset` 行游标保证半行不推进。
 - **会话发现（双布局，直切 cc-switch providers/pi.rs）**：`PI_CODING_AGENT_SESSION_DIR`（绝对路径才可枚举，相对路径 `400 PI_SESSION_DIR_REQUIRES_PROJECT_CONTEXT`）> `pi native defaults`（`getPiNativeSessionDir()` 读 pi 配置的 session_dir，若无则空）> `~/.pi/agent/sessions`（`--dir` 默认值）；`Flat`（根下 `*.jsonl`）vs `ProjectDirectories`（`sessions/<project>/*.jsonl` 两层）按 `layout` 枚举，不再递归兜底；`--dir` 显式时仅影响第三优先级默认根，`PI_CODING_AGENT_SESSION_DIR` 与 `~/.pi-switch` 等其他项目目录隔离。
@@ -26,7 +29,7 @@
 - **All 模式成本状态**：All 窗口可能同时含可定价 Pi 与 `unpriced` Codex；窗口 `cost` 保留可定价源的美元合计，`costStatus=unpriced` 表示合计含未定价源，展示必须标注「含 unpriced 源 / 部分可用」，不得把已知金额显示成 unpriced 或真实 `$0`。Codex 单源仍为 `unpriced`；真实零花费由空 `costStatus` + `cost=0` 区分。
 - **Codex 计入口径**：上游 `usage.input_tokens` 是**含缓存**的 prompt 总量，因此账本 `input` 一律记非缓存输入（`input_tokens - cached_input_tokens`，饱和减、不为负），`cacheRead = cached_input_tokens`；据此 `totalTokens = input + cacheRead + output`（ADR-0002）等于上游自报的 `usage.total_tokens`（唯一例外是 `cached > input` 的口径异常记录，此时按 0 饱和计入并告警，数值会大于上游）。`cacheWrite` / `reasoning` 独立成列且不参与 `totalTokens`（ADR-0004）。
 - **Codex 覆盖率诊断**：物理 rollout 只有 `token_count` 快照、没有 durable usage record 时不计入任何窗口，但必须产生 per-file 诊断（含未计入快照条数，结构化字段 `meta.uncountedSnapshots`）；诊断随文件 revision 存续、每次查询都会重放，游标命中跳过重扫也不例外。累计 snapshot 永远不是 Codex usage event，不参与 totals。
-- **Codex 源能力**：`meta.sources` 是后端能力唯一声明源。Go 原生后端声明 `["pi","codex"]`，npm/TS 后端只声明 `["pi"]`；共享 WebUI 只按该声明渲染源选择器。requests、会话详情、重命名仅覆盖 Pi：Codex/All 下这些入口必须禁用并给出原因，服务端返回明确 `unsupported`（400），不得返回 404 或写入 Pi 目录。
+- **Codex 源能力**：`meta.sources` 是后端能力唯一声明源。Go-only 后端恒声明 `["pi","codex"]`（无 npm/TS 后端）；WebUI 只按该声明渲染源选择器。requests、会话详情、重命名仅覆盖 Pi：Codex/All 下这些入口必须禁用并给出原因，服务端返回明确 `unsupported`（400），不得返回 404 或写入 Pi 目录。
 
 ## 统计窗口
 
@@ -41,7 +44,7 @@
 - **时间范围（TimeRange）**：branded 双语义 — `SessionTimeRange`（`kind: "session"`，按会话 header `timestamp` 闭区间，CLI `--since/--until` 与会话管理用）vs `MessageTimeRange`（`kind: "message"`，按消息 `timestamp` 逐条闭区间，webui 全端点 totals/groups/period/requests/sessions 用）。`since` 纯日期按本地 00:00，`until` 按本地 23:59:59.999；无效时间戳消息保守保留。
 - **消息级归属**（`MessageTimeRange`）：webui 全端点（totals/groups/period/requests/sessions）的 since/until 语义，跨天会话中落在范围内的请求/消耗按消息 timestamp 计入当天，使总览与明细求和一致（2026-09-01 修复：sessions 亦改为消息级，修复前总览 79M vs 会话明细 33M 对不上）。用户决策（ticket 22/23，2026-09-01 增补 sessions 消息级）。
 - **会话级归属**（`SessionTimeRange`）：仅 CLI `--since/--until` 按会话 header timestamp 过滤，跨天会话整段归 header 日（口径 A 保留）。
-- 两个层级在跨天场景数字有**预期差异**（webui vs CLI），spec 已记录；TimeRange 的 `kind` 在类型层面杜绝传错（SessionData 深模块内单引擎分派）。
+- 两个层级在跨天场景数字有**预期差异**（webui vs CLI），spec 已记录；TimeRange 的 `kind` 在类型层面杜绝传错（Query Engine 内单引擎分派）。
 ## 时间语义与网关可比窗口
 
 - **时间参数时区**：webui/CLI 的 since/until 按**本地时区**解释日期（CST）；网关日志 ts 为 UTC。对账时以本地时区解释网关 ts（用户决策 2026-08-06）。
@@ -65,6 +68,14 @@
 
 - **pi-switch 网关**：转发请求日志（`~/.pi-switch/requests.log`），统计口径 total = 总输入 + output（`promptTokens + completionTokens`）。是**对比基准**，不是 token-analyzer 的数据源——token-analyzer 数据只来自 session 目录（用户约束）。两者覆盖范围结构性不同（pi 直连请求只在 session 目录、其他客户端请求只在网关）；fork 去重生效后 8/1 起累计差 0.6%（8/2、8/4 分毫不差），8/1 当天网关刚启用（仅 4 条记录）为最大单日差异源。
 - **对账验证（2026-08-07）**：逐条匹配（时间戳+token 数）确认两侧对同一请求定价**完全一致**（679 条 0 差异），差异全部来自覆盖结构：① **pi 内部请求不计入**——pi 压缩/摘要等内部请求（Magic Context，无会话名，真实计费，约 $0.10/天）不入 session 对话流（compaction entry 无 usage 字段），token-analyzer 结构性漏算；② **其他客户端请求只在网关**——opencode dreamer 后台任务等（约 $0.09/天）。webui 已加口径说明（.scratch/webui-gateway-disclaimer/），用户决策：结构性接受、不引入网关数据源。
+
+## 后端与运行时（Go-only 终态，ADR-0005）
+
+- **Go 是唯一生产后端语言**：TypeScript CLI/API/server/db/session/watch 等生产实现与迁移期 parity oracle 均已删除；运行 CLI/API/WebUI 不需要 Node/npm。
+- **Query 与 Refresh 分离**：Query 只读快照；server 启动先做初次 Refresh 再对外服务；后续 refresh 走统一串行编排，多个 GET 不放大为重复同步；连续 GET 不改变 ledger 内容或同步游标。
+- **Watch 新语义**：只做 change → refresh → query，不再直接累加 usage/cost/totals；实时 totals 与同一时刻普通 query 完全一致；append/partial/truncate/rewrite/fork/cache/pricing 等规则只存在于 source adapter。
+- **WebUI 单一源码**：唯一人工维护源为 `internal/server/webui.html`（Go embed 直引），无 copy/sync；Go binary 自带完整 WebUI。
+- **canonical 契约**：`testdata/canonical` synthetic fixtures + golden expected 为长期行为契约（Pi/Codex 字段级断言，cost 容差 1e-9，排序稳定 tie-breaker）；不再依赖跨 runtime parity。
 
 ## OpenCode 产品边界
 

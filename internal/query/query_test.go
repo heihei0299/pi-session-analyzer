@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
-	"github.com/heihei0299/pi-session-anylize/internal/refresh"
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/domain"
+	"github.com/heihei0299/token-analyzer/internal/refresh"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 // refreshAndQuery 先 Refresh 再查 ledger，与 server/CLI 生产路径一致。

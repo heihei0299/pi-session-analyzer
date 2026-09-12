@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heihei0299/pi-session-anylize/internal/refresh"
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/refresh"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 const piCanonicalFixture = ".." + string(filepath.Separator) + ".." + string(filepath.Separator) + "testdata" + string(filepath.Separator) + "canonical" + string(filepath.Separator) + "pi"
@@ -20,6 +20,8 @@ const piCanonicalExpected = ".." + string(filepath.Separator) + ".." + string(fi
 // Query Engine 与冻结行为无漂移。只锁业务字段，分页/服务端元字段不在契约内。
 func TestCanonicalPiQueryContract(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	t.Setenv("HOME", t.TempDir())
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
 	cfg := Config{PiDir: piCanonicalFixture, DBPath: dbPath, Source: "pi"}
 	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, DBPath: cfg.DBPath, Source: "pi"}); err != nil {
@@ -99,12 +101,13 @@ func TestCanonicalPiQueryContract(t *testing.T) {
 	if err := json.Unmarshal(expectedBytes, &expected); err != nil {
 		t.Fatal(err)
 	}
-	// meta.sources 是后端能力声明（Go 提供 pi+codex，TS 只提供 pi），只断言业务字段。
+	// Go-only 后端能力声明：meta.sources 恒为 ["pi", "codex"]，TS oracle 已删除。
 	if metaActual, ok := actual["meta"].(map[string]any); ok {
 		if metaActual["sessionCount"] != expected["meta"].(map[string]any)["sessionCount"] {
 			t.Fatalf("meta.sessionCount drifted: %v", metaActual)
 		}
 		assertPiContractValue(t, metaActual["dataRange"], expected["meta"].(map[string]any)["dataRange"], "meta.dataRange")
+		assertPiContractValue(t, metaActual["sources"], expected["meta"].(map[string]any)["sources"], "meta.sources")
 		delete(actual, "meta")
 		delete(expected, "meta")
 	}
@@ -144,7 +147,7 @@ func normalizePiContract(path string, body map[string]any) any {
 		if m == nil {
 			m = body
 		}
-		return map[string]any{"sessionCount": m["sessionCount"], "dataRange": m["dataRange"]}
+		return map[string]any{"sessionCount": m["sessionCount"], "dataRange": m["dataRange"], "sources": m["sources"]}
 	}
 	rows, _ := body["rows"].([]any)
 	keys := []string{"period"}

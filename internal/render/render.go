@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
+	"github.com/heihei0299/token-analyzer/internal/domain"
 )
 
 func metricHeaders() []string {

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
+	"github.com/heihei0299/token-analyzer/internal/domain"
 )
 
 func SerializeJSON(v any) ([]byte, error) {

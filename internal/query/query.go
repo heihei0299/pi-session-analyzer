@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/heihei0299/pi-session-anylize/internal/codex"
-	"github.com/heihei0299/pi-session-anylize/internal/db"
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/codex"
+	"github.com/heihei0299/token-analyzer/internal/db"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 var ErrRequestsUnsupported = errors.New("Codex/all source does not support requests query")

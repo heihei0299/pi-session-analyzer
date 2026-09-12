@@ -8,9 +8,9 @@ package refresh
 import (
 	"sync"
 
-	"github.com/heihei0299/pi-session-anylize/internal/codex"
-	"github.com/heihei0299/pi-session-anylize/internal/db"
-	"github.com/heihei0299/pi-session-anylize/internal/pi"
+	"github.com/heihei0299/token-analyzer/internal/codex"
+	"github.com/heihei0299/token-analyzer/internal/db"
+	"github.com/heihei0299/token-analyzer/internal/pi"
 )
 
 // Config 与 query.Config 同构（分包避免 query 反向依赖 adapter）。

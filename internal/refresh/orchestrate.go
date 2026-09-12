@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/heihei0299/pi-session-anylize/internal/codex"
-	"github.com/heihei0299/pi-session-anylize/internal/pi"
+	"github.com/heihei0299/token-analyzer/internal/codex"
+	"github.com/heihei0299/token-analyzer/internal/pi"
 )
 
 var lastMu sync.RWMutex

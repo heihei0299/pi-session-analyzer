@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heihei0299/pi-session-anylize/internal/db"
-	"github.com/heihei0299/pi-session-anylize/internal/timerange"
+	"github.com/heihei0299/token-analyzer/internal/db"
+	"github.com/heihei0299/token-analyzer/internal/timerange"
 )
 
 type SyncResult struct {

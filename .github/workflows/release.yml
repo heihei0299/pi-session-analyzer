@@ -22,14 +22,12 @@ jobs:
           go-version: '1.23.x'
           cache: false
 
-      - name: Setup Node 24 (for dual-track parity test)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24.x'
-
-      - name: Run Tests
+      - name: Run Tests (Go-only)
+        env:
+          GOMAXPROCS: "2"
+          TOKEN_ANALYZER_DB: ""
         run: |
-          go test -v ./...
+          go test -p 1 ./...
 
       - name: Build Multi-Platform Binaries
         run: |

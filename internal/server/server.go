@@ -16,12 +16,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/heihei0299/pi-session-anylize/internal/db"
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
-	sourcequery "github.com/heihei0299/pi-session-anylize/internal/query"
-	"github.com/heihei0299/pi-session-anylize/internal/refresh"
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
-	"github.com/heihei0299/pi-session-anylize/internal/timerange"
+	"github.com/heihei0299/token-analyzer/internal/db"
+	"github.com/heihei0299/token-analyzer/internal/domain"
+	sourcequery "github.com/heihei0299/token-analyzer/internal/query"
+	"github.com/heihei0299/token-analyzer/internal/refresh"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/timerange"
 )
 
 //go:embed webui.html

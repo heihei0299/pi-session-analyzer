@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 func TestServerEndpoints(t *testing.T) {

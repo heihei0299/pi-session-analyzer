@@ -4,10 +4,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
-	"github.com/heihei0299/pi-session-anylize/internal/query"
-	"github.com/heihei0299/pi-session-anylize/internal/refresh"
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/domain"
+	"github.com/heihei0299/token-analyzer/internal/query"
+	"github.com/heihei0299/token-analyzer/internal/refresh"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 func TestJSONOutputDataIncludesMetaForGroupedAndPeriodResults(t *testing.T) {

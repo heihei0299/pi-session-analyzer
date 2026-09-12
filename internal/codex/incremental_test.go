@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heihei0299/pi-session-anylize/internal/db"
+	"github.com/heihei0299/token-analyzer/internal/db"
 	"github.com/klauspost/compress/zstd"
 )
 

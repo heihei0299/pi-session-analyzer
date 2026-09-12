@@ -9,11 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heihei0299/pi-session-anylize/internal/codex"
-	"github.com/heihei0299/pi-session-anylize/internal/db"
-	"github.com/heihei0299/pi-session-anylize/internal/domain"
-	"github.com/heihei0299/pi-session-anylize/internal/refresh"
-	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
+	"github.com/heihei0299/token-analyzer/internal/db"
+	"github.com/heihei0299/token-analyzer/internal/domain"
+	"github.com/heihei0299/token-analyzer/internal/refresh"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 type canonicalCodexSession struct {
@@ -43,6 +42,8 @@ type canonicalCodexSnapshot struct {
 }
 
 func TestCanonicalCodexQueryContract(t *testing.T) {
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	t.Setenv("HOME", t.TempDir())
 	cfg := Config{
 		CodexDir: filepath.Join("..", "codex", "testdata", "codex-home"),
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
@@ -122,6 +123,7 @@ func TestCanonicalCodexQueryContract(t *testing.T) {
 }
 
 // assertLedgerOnlyTotals 只读 ledger 行，不访问源文件系统：Query 必须能脱离 rollout 文件复现同一 totals。
+// 直接按 domain 口径累加 DB 行，不经过任何 SessionFileData 回绕或内存聚合旧路径。
 func assertLedgerOnlyTotals(t *testing.T, dbPath string, expected *domain.Totals) {
 	t.Helper()
 	database, err := db.Open(dbPath)
@@ -129,44 +131,25 @@ func assertLedgerOnlyTotals(t *testing.T, dbPath string, expected *domain.Totals
 		t.Fatal(err)
 	}
 	defer database.Close()
-	files, err := codex.LoadSessionFiles(database, map[string]bool{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// physicalIDs 为空时 LoadSessionFiles 不返回任何行：显式用 DB 全量行构造 ledger-only files。
-	if len(files) != 0 {
-		t.Fatalf("empty physical-ID set must return no ledger files, got %d", len(files))
-	}
-	rows, err := database.DB.Query(`SELECT model, session_id, cwd, timestamp_text, physical_rollout_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens FROM proxy_request_logs WHERE data_source = 'codex' ORDER BY created_at, request_id`)
+	rows, err := database.DB.Query(`SELECT input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, reasoning_tokens FROM proxy_request_logs WHERE data_source = 'codex' ORDER BY created_at, request_id`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	sd := sessiondata.NewSessionData()
-	var ledgerFiles []*sessiondata.SessionFileData
-	byPhysical := map[string]*sessiondata.SessionFileData{}
+	tot := domain.EmptyTotals()
+	tot.CostStatus = "unpriced"
 	for rows.Next() {
-		var model, sessionID, cwd, timestamp, physicalID string
 		var input, output, cacheRead, cacheWrite, reasoning int64
-		if err := rows.Scan(&model, &sessionID, &cwd, &timestamp, &physicalID, &input, &output, &cacheRead, &cacheWrite, &reasoning); err != nil {
+		if err := rows.Scan(&input, &output, &cacheRead, &cacheWrite, &reasoning); err != nil {
 			t.Fatal(err)
 		}
-		file, ok := byPhysical[physicalID]
-		if !ok {
-			file = &sessiondata.SessionFileData{SessionId: sessionID, Timestamp: timestamp, Cwd: cwd, Source: "codex"}
-			byPhysical[physicalID] = file
-			ledgerFiles = append(ledgerFiles, file)
-		}
-		file.Items = append(file.Items, sessiondata.MessageItem{Timestamp: timestamp, Model: model, Usage: domain.Usage{Input: float64(input), Output: float64(output), CacheRead: float64(cacheRead), CacheWrite: float64(cacheWrite), Reasoning: float64(reasoning)}})
+		domain.AddUsage(&tot, domain.Usage{Input: float64(input), Output: float64(output), CacheRead: float64(cacheRead), CacheWrite: float64(cacheWrite), Reasoning: float64(reasoning)})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	result, err := sd.QueryFiles("", ledgerFiles, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertCanonicalJSON(t, result.Totals, expected, "ledger-only.totals")
+	domain.FinalizeTotals(&tot)
+	assertCanonicalJSON(t, &tot, expected, "ledger-only.totals")
 }
 
 func assertCanonicalJSON(t *testing.T, actual, expected any, path string) {

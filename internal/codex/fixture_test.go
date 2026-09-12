@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heihei0299/pi-session-anylize/internal/db"
+	"github.com/heihei0299/token-analyzer/internal/db"
 )
 
 // 真实同形验收基线：真实命名（无 Z 后缀）、按年/月/日分目录、archived_sessions 归档根、
