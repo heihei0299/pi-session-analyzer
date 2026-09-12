@@ -177,7 +177,7 @@ type piAuditIdentity struct {
 func makePiAuditIdentity(entry map[string]any, kind string, usage, message map[string]any) piAuditIdentity {
 	semanticPayload := map[string]any{
 		"kind":  kind,
-		"usage": canonicalUsage(usage),
+		"usage": usage,
 	}
 	if timestamp, ok := entry["timestamp"].(string); ok && timestamp != "" {
 		semanticPayload["entry_timestamp"] = timestamp
@@ -207,21 +207,6 @@ func makePiAuditIdentity(entry map[string]any, kind string, usage, message map[s
 		Timestamp any    `json:"timestamp"`
 	}{kind, entryID, entry["timestamp"]})
 	return piAuditIdentity{requestID: requestID, semanticID: semanticID, hasEntryID: true}
-}
-
-func canonicalUsage(usage map[string]any) map[string]any {
-	out := make(map[string]any)
-	for _, key := range []string{"input", "output", "cacheRead", "cacheWrite", "reasoning", "totalTokens"} {
-		if value, ok := usage[key]; ok {
-			out[key] = value
-		}
-	}
-	if cost, ok := usage["cost"].(map[string]any); ok {
-		if total, ok := cost["total"]; ok {
-			out["cost"] = map[string]any{"total": total}
-		}
-	}
-	return out
 }
 
 func digest(label string, value any) string {

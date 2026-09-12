@@ -7,6 +7,8 @@ import (
 
 const DefaultRollupRetentionDays = 30
 
+const maintenanceOwnershipPredicate = `(app_type = 'pi' AND data_source = 'pi_session') OR (app_type = 'codex' AND data_source = 'codex')`
+
 // RollupAndPrune atomically moves expired request rows into daily aggregates,
 // deletes the moved rows, and reclaims SQLite pages. A failed transaction leaves
 // both tables exactly as they were before maintenance.
@@ -30,7 +32,7 @@ func RollupAndPrune(database *Database, now time.Time, retentionDays int) error 
 	}()
 
 	cutoff := now.Add(-time.Duration(retentionDays) * 24 * time.Hour).Unix()
-	_, err = tx.Exec(`
+	_, err = tx.Exec(fmt.Sprintf(`
 INSERT INTO usage_daily_rollups (
 	date, app_type, provider_id, model, request_model, pricing_model,
 	request_count, success_count, input_tokens, output_tokens,
@@ -55,7 +57,8 @@ SELECT
 	CAST(SUM(CAST(COALESCE(total_cost_usd, '0') AS REAL)) AS TEXT),
 	CAST(AVG(latency_ms) AS INTEGER)
 FROM proxy_request_logs
-WHERE created_at < ?
+WHERE (%s)
+  AND created_at < ?
 GROUP BY date(created_at, 'unixepoch', 'localtime'), app_type, provider_id, model,
          COALESCE(request_model, ''), COALESCE(pricing_model, '')
 ON CONFLICT(date, app_type, provider_id, model, request_model, pricing_model)
@@ -72,12 +75,12 @@ DO UPDATE SET
 	avg_latency_ms = CASE
 		WHEN usage_daily_rollups.request_count + excluded.request_count = 0 THEN 0
 		ELSE CAST((usage_daily_rollups.avg_latency_ms * usage_daily_rollups.request_count + excluded.avg_latency_ms * excluded.request_count) * 1.0 / (usage_daily_rollups.request_count + excluded.request_count) AS INTEGER)
-	END`, cutoff)
+	END`, maintenanceOwnershipPredicate), cutoff)
 	if err != nil {
 		return fmt.Errorf("write usage daily rollups: %w", err)
 	}
 
-	if _, err = tx.Exec(`DELETE FROM proxy_request_logs WHERE created_at < ?`, cutoff); err != nil {
+	if _, err = tx.Exec(fmt.Sprintf(`DELETE FROM proxy_request_logs WHERE (%s) AND created_at < ?`, maintenanceOwnershipPredicate), cutoff); err != nil {
 		return fmt.Errorf("prune expired usage: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

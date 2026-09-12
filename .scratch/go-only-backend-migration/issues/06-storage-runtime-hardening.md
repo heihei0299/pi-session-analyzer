@@ -8,6 +8,8 @@
 
 - [x] Refresh 成功后恢复统一的 rollup/prune maintenance：将超过保留窗口的 raw usage 聚合写入 `usage_daily_rollups`，随后删除对应 raw rows，并按既有 storage contract 执行必要的 incremental vacuum。
 - [x] rollup writer 保持幂等：重复 maintenance 不得重复累计同一 raw usage；失败不得留下“已 rollup 但 raw 未删”或“raw 已删但 rollup 未完整写入”的半状态。
+- [x] maintenance 的 rollup SELECT 与 raw DELETE 共用 ownership predicate，只处理 Pi `pi/pi_session` 与 Codex `codex/codex` 行；共享数据库其他应用行保持不变。
+- [x] 增加 shared-database preservation regression：覆盖旧/新 Pi、Codex、generic proxy、unrelated app，含重复 maintenance 与 rollup failure 场景。
 - [x] 明确 daily rollup 的查询能力边界：只有能够由完整自然日安全回答的 MessageTimeRange 才可直接使用 rollup。
 - [x] 当查询包含小时/分钟级 partial-day 边界、而对应历史 raw 已被 prune 时，不得把整日 rollup 当作精确结果；必须返回明确 coverage warning / partial coverage 状态，而不是静默给错数字。
 - [x] 增加 raw + rollup + partial-day synthetic regression，覆盖 totals / model groups / period，并证明 session/request/detail 不伪造 rollup identity。
@@ -23,9 +25,10 @@
 
 ## Answer
 
-- 已完成 30 天 `RollupAndPrune` 生命周期：raw usage 在事务内聚合、删除并幂等维护；rollup 保留 reasoning，旧 rollup schema 可迁移且只读 Query 可兼容。
+- 已完成 30 天 `RollupAndPrune` 生命周期：raw usage 在事务内聚合、删除并幂等维护；本次修复进一步将 rollup/prune 限制为 token-analyzer 自有 Pi/Codex 行，保留 reasoning，旧 rollup schema 可迁移且只读 Query 可兼容。
 - 已完成 partial-day coverage、Pi sync semantics migration、自愈重扫、Codex cheap physical fingerprint 与 Pi/Codex/All source-specific watch；CLI 与 server 均在 refresh 成功后确认 source revision，失败保留旧快照并重试。
-- 验证：`env -u TOKEN_ANALYZER_DB GOMAXPROCS=2 go test -p 1 ./...` 通过；`(cd opencode-analyzer && GOMAXPROCS=2 go test -p 1 ./...)` 通过；`git diff --check` 与 `gofmt` 静态检查通过。
+- 验证：`env -u TOKEN_ANALYZER_DB GOMAXPROCS=2 go test -p 1 ./...` 通过；`(cd opencode-analyzer && GOMAXPROCS=2 go test -p 1 ./...)` 通过；`gofmt` 与 `git diff --check` 通过。
+- 修复提交：`fix(audit): close final sign-off findings`。
 
 ## Acceptance focus
 

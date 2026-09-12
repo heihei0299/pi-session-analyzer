@@ -7,11 +7,29 @@ import (
 )
 
 func insertMaintenanceUsage(t *testing.T, database *Database, id string, createdAt time.Time, status int, model string, input, output, cacheRead, cacheWrite int, cost string, latency int) {
+	insertMaintenanceRow(t, database, id, createdAt, "pi", "pi_session", status, model, input, output, cacheRead, cacheWrite, cost, latency)
+}
+
+func insertMaintenanceRow(t *testing.T, database *Database, id string, createdAt time.Time, appType, dataSource string, status int, model string, input, output, cacheRead, cacheWrite int, cost string, latency int) {
 	t.Helper()
-	_, err := database.DB.Exec(`INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_cost_usd, latency_ms, status_code, session_id, created_at, data_source, kind, cwd, timestamp_text) VALUES (?, 'provider', 'pi', ?, 'request-model', 'pricing-model', ?, ?, ?, ?, ?, ?, ?, 'session', ?, 'pi_session', 'assistant', '/workspace', ?)`,
-		id, model, input, output, cacheRead, cacheWrite, cost, latency, status, createdAt.Unix(), createdAt.UTC().Format(time.RFC3339))
+	_, err := database.DB.Exec(`INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_cost_usd, latency_ms, status_code, session_id, created_at, data_source, kind, cwd, timestamp_text) VALUES (?, 'provider', ?, ?, 'request-model', 'pricing-model', ?, ?, ?, ?, ?, ?, ?, 'session', ?, ?, 'assistant', '/workspace', ?)`,
+		id, appType, model, input, output, cacheRead, cacheWrite, cost, latency, status, createdAt.Unix(), dataSource, createdAt.UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func assertMaintenanceRow(t *testing.T, database *Database, id, appType, dataSource, model string, input, output int, cost string) {
+	t.Helper()
+	var gotAppType, gotDataSource, gotModel, gotCost string
+	var gotInput, gotOutput int
+	err := database.DB.QueryRow(`SELECT app_type, data_source, model, input_tokens, output_tokens, total_cost_usd FROM proxy_request_logs WHERE request_id = ?`, id).
+		Scan(&gotAppType, &gotDataSource, &gotModel, &gotInput, &gotOutput, &gotCost)
+	if err != nil {
+		t.Fatalf("read shared row %q: %v", id, err)
+	}
+	if gotAppType != appType || gotDataSource != dataSource || gotModel != model || gotInput != input || gotOutput != output || gotCost != cost {
+		t.Fatalf("shared row %q changed: got=%q/%q/%q %d/%d %q", id, gotAppType, gotDataSource, gotModel, gotInput, gotOutput, gotCost)
 	}
 }
 
@@ -59,6 +77,79 @@ func TestRollupAndPruneIsAtomicAndIdempotent(t *testing.T) {
 	}
 	if rollupCount != 1 {
 		t.Fatalf("repeated maintenance must not duplicate rollups: %d", rollupCount)
+	}
+}
+
+func TestRollupAndPrunePreservesSharedDatabaseRows(t *testing.T) {
+	database, err := Open(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	old := time.Date(2026, 8, 1, 1, 0, 0, 0, time.UTC)
+	recent := time.Date(2026, 9, 1, 1, 0, 0, 0, time.UTC)
+	insertMaintenanceRow(t, database, "old-pi", old, "pi", "pi_session", 200, "pi-model", 10, 5, 1, 2, "0.10", 100)
+	insertMaintenanceRow(t, database, "old-codex", old, "codex", "codex", 200, "codex-model", 20, 6, 2, 3, "0.20", 200)
+	insertMaintenanceRow(t, database, "old-generic", old, "proxy", "proxy", 200, "generic-old", 30, 7, 3, 4, "0.30", 300)
+	insertMaintenanceRow(t, database, "old-other", old, "other", "other", 200, "other-old", 40, 8, 4, 5, "0.40", 400)
+	insertMaintenanceRow(t, database, "recent-pi", recent, "pi", "pi_session", 200, "pi-recent", 50, 9, 5, 6, "0.50", 500)
+	insertMaintenanceRow(t, database, "recent-codex", recent, "codex", "codex", 200, "codex-recent", 60, 10, 6, 7, "0.60", 600)
+	insertMaintenanceRow(t, database, "recent-generic", recent, "proxy", "proxy", 200, "generic-recent", 70, 11, 7, 8, "0.70", 700)
+
+	if err := RollupAndPrune(database, now, 30); err != nil {
+		t.Fatal(err)
+	}
+
+	var rawCount, rollupCount, rollupRequests, rollupInput, rollupOutput, nonOwnedRollups int
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM proxy_request_logs`).Scan(&rawCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM(request_count), 0), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0) FROM usage_daily_rollups`).Scan(&rollupCount, &rollupRequests, &rollupInput, &rollupOutput); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM usage_daily_rollups WHERE app_type NOT IN ('pi', 'codex')`).Scan(&nonOwnedRollups); err != nil {
+		t.Fatal(err)
+	}
+	if rawCount != 5 || rollupCount != 2 || rollupRequests != 2 || rollupInput != 30 || rollupOutput != 11 || nonOwnedRollups != 0 {
+		t.Fatalf("shared rows were included in maintenance: raw=%d rollups=%d requests=%d usage=%d/%d non-owned-rollups=%d", rawCount, rollupCount, rollupRequests, rollupInput, rollupOutput, nonOwnedRollups)
+	}
+
+	for _, row := range []struct {
+		id, appType, dataSource, model string
+		input, output                  int
+		cost                           string
+	}{
+		{"old-generic", "proxy", "proxy", "generic-old", 30, 7, "0.30"},
+		{"old-other", "other", "other", "other-old", 40, 8, "0.40"},
+		{"recent-pi", "pi", "pi_session", "pi-recent", 50, 9, "0.50"},
+		{"recent-codex", "codex", "codex", "codex-recent", 60, 10, "0.60"},
+		{"recent-generic", "proxy", "proxy", "generic-recent", 70, 11, "0.70"},
+	} {
+		assertMaintenanceRow(t, database, row.id, row.appType, row.dataSource, row.model, row.input, row.output, row.cost)
+	}
+	for _, id := range []string{"old-pi", "old-codex"} {
+		var count int
+		if err := database.DB.QueryRow(`SELECT COUNT(*) FROM proxy_request_logs WHERE request_id = ?`, id).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("expired owned row %q should be pruned", id)
+		}
+	}
+
+	if err := RollupAndPrune(database, now, 30); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM proxy_request_logs`).Scan(&rawCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM(request_count), 0) FROM usage_daily_rollups`).Scan(&rollupCount, &rollupRequests); err != nil {
+		t.Fatal(err)
+	}
+	if rawCount != 5 || rollupCount != 2 || rollupRequests != 2 {
+		t.Fatalf("maintenance is not idempotent: raw=%d rollups=%d requests=%d", rawCount, rollupCount, rollupRequests)
 	}
 }
 

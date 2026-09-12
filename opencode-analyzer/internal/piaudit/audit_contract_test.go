@@ -52,3 +52,106 @@ func TestTotalsForRangeUsesStandalonePiContract(t *testing.T) {
 		t.Fatalf("month boundary must match the September range: range=%+v month=%+v", totals, monthTotals)
 	}
 }
+
+func identityTestEntry(id string, message map[string]any) map[string]any {
+	entry := map[string]any{
+		"type":      "message",
+		"timestamp": "2026-09-10T01:00:00Z",
+		"message":   message,
+	}
+	if id != "" {
+		entry["id"] = id
+	}
+	return entry
+}
+
+func identityTestRecord(entry map[string]any, usage, message map[string]any) piAuditRecord {
+	identity := makePiAuditIdentity(entry, "assistant", usage, message)
+	return piAuditRecord{
+		requestID:  identity.requestID,
+		semanticID: identity.semanticID,
+		hasEntryID: identity.hasEntryID,
+		stopReason: stringValue(message["stopReason"]),
+		output:     number(usage["output"]),
+	}
+}
+
+func TestPiAuditIdentityIgnoresIrrelevantMessageMetadata(t *testing.T) {
+	usage := map[string]any{"input": 10.0, "output": 5.0, "extra": "same"}
+	message1 := map[string]any{"provider": "p", "model": "m", "responseId": "r", "stopReason": "stop", "content": []any{"ok"}, "irrelevant": "first"}
+	message2 := map[string]any{"provider": "p", "model": "m", "responseId": "r", "stopReason": "stop", "content": []any{"ok"}, "irrelevant": "second"}
+
+	got := deduplicateRecords([]piAuditRecord{
+		identityTestRecord(identityTestEntry("", message1), usage, message1),
+		identityTestRecord(identityTestEntry("", message2), usage, message2),
+	})
+	if len(got) != 1 {
+		t.Fatalf("irrelevant message metadata must deduplicate, got %d records", len(got))
+	}
+}
+
+func TestPiAuditIdentityDistinguishesCanonicalMessageFields(t *testing.T) {
+	usage := map[string]any{"input": 10.0, "output": 5.0}
+	message1 := map[string]any{"provider": "p", "model": "m", "responseId": "r", "content": []any{"ok"}}
+	message2 := map[string]any{"provider": "p", "model": "m2", "responseId": "r", "content": []any{"ok"}}
+
+	got := deduplicateRecords([]piAuditRecord{
+		identityTestRecord(identityTestEntry("", message1), usage, message1),
+		identityTestRecord(identityTestEntry("", message2), usage, message2),
+	})
+	if len(got) != 2 {
+		t.Fatalf("canonical message changes must not deduplicate, got %d records", len(got))
+	}
+}
+
+func TestPiAuditIdentityIncludesCompleteUsage(t *testing.T) {
+	usage1 := map[string]any{"input": 10.0, "output": 5.0, "metadata": map[string]any{"tier": "standard"}}
+	usage2 := map[string]any{"input": 10.0, "output": 5.0, "metadata": map[string]any{"tier": "priority"}}
+	message := map[string]any{"provider": "p", "model": "m", "content": []any{"ok"}}
+
+	got := deduplicateRecords([]piAuditRecord{
+		identityTestRecord(identityTestEntry("", message), usage1, message),
+		identityTestRecord(identityTestEntry("", message), usage2, message),
+	})
+	if len(got) != 2 {
+		t.Fatalf("extra usage fields must distinguish records, got %d", len(got))
+	}
+}
+
+func TestPiAuditIdentityIgnoresUsageMapKeyOrder(t *testing.T) {
+	usage1 := map[string]any{}
+	usage1["input"] = 10.0
+	usage1["output"] = 5.0
+	usage1["cost"] = map[string]any{"total": 0.1, "unit": "usd"}
+	usage1["metadata"] = map[string]any{"tier": "standard", "region": "cn"}
+	usage2 := map[string]any{}
+	usage2["metadata"] = map[string]any{"region": "cn", "tier": "standard"}
+	usage2["cost"] = map[string]any{"unit": "usd", "total": 0.1}
+	usage2["output"] = 5.0
+	usage2["input"] = 10.0
+	message := map[string]any{"provider": "p", "model": "m", "content": []any{"ok"}}
+
+	got := deduplicateRecords([]piAuditRecord{
+		identityTestRecord(identityTestEntry("", message), usage1, message),
+		identityTestRecord(identityTestEntry("", message), usage2, message),
+	})
+	if len(got) != 1 {
+		t.Fatalf("usage map key order must not change identity, got %d records", len(got))
+	}
+}
+
+func TestPiAuditRequestIDReplacementKeepsFinalRecord(t *testing.T) {
+	id := "request-1"
+	partialUsage := map[string]any{"input": 10.0, "output": 2.0}
+	finalUsage := map[string]any{"input": 10.0, "output": 8.0}
+	partialMessage := map[string]any{"provider": "p", "model": "m", "content": []any{"partial"}}
+	finalMessage := map[string]any{"provider": "p", "model": "m", "stopReason": "stop", "content": []any{"final"}}
+
+	got := deduplicateRecords([]piAuditRecord{
+		identityTestRecord(identityTestEntry(id, partialMessage), partialUsage, partialMessage),
+		identityTestRecord(identityTestEntry(id, finalMessage), finalUsage, finalMessage),
+	})
+	if len(got) != 1 || got[0].output != 8 || got[0].stopReason != "stop" {
+		t.Fatalf("request ID replacement must keep final record: %+v", got)
+	}
+}

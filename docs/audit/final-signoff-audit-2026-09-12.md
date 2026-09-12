@@ -21,6 +21,8 @@ Remaining findings:
 
 No new architecture rewrite is required. Both findings should be fixed inside tickets 06/07.
 
+> **Superseding remediation note (2026-09-12):** The working tree contains the F1/F2 implementation and focused regression coverage: maintenance is scoped to token-analyzer-owned Pi/Codex rows, and standalone identity includes the complete usage payload. The authorized root and standalone verification now pass; this note supersedes the two pre-fix findings without rewriting the historical review below. The remediation is included in `fix(audit): close final sign-off findings`.
+
 ---
 
 ## Standards findings
