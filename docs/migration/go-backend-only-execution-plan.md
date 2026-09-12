@@ -40,11 +40,15 @@
 
 - **01 — 将 OpenCode 抽离为 standalone `opencode-analyzer/` 项目**
 
-当前可立即执行：
+已完成：
 
 - **02 — 建立 canonical Pi/Codex contract**
 
-后续按依赖顺序执行 02 → 03 → 04 → 05。
+当前可立即执行：
+
+- **03 — 收敛 unified Go ledger + Query Engine**
+
+后续按依赖顺序执行 03 → 04 → 05。
 
 ## Ticket 摘要
 

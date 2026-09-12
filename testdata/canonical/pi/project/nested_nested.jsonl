@@ -1,0 +1,3 @@
+{"type":"session","id":"nested","timestamp":"2026-09-12T00:00:00Z","cwd":"/synthetic/project","parentSession":"/synthetic/fork_fork.jsonl"}
+{"type":"message","id":"copied-fork-1","timestamp":"2026-09-11T06:00:00Z","message":{"role":"assistant","provider":"p","model":"m2","usage":{"input":999,"output":999,"cacheRead":999,"cacheWrite":999,"reasoning":999,"cost":{"total":9.99}},"stopReason":"stop"}}
+{"type":"message","id":"nested-1","timestamp":"2026-09-12T01:00:00Z","message":{"role":"assistant","provider":"p","model":"m2","usage":{"input":7,"output":5,"cacheRead":0,"cacheWrite":1,"reasoning":2,"cost":{"total":0.06}},"stopReason":"stop"}}

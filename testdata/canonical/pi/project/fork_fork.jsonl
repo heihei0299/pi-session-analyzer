@@ -1,0 +1,3 @@
+{"type":"session","id":"fork","timestamp":"2026-09-11T00:00:00Z","cwd":"/synthetic/project","parentSession":"/synthetic/main_main.jsonl"}
+{"type":"message","id":"copied-a1","timestamp":"2026-09-10T01:00:00Z","message":{"role":"assistant","provider":"p","model":"m1","usage":{"input":999,"output":999,"cacheRead":999,"cacheWrite":999,"reasoning":999,"cost":{"total":9.99}},"stopReason":"stop"}}
+{"type":"message","id":"fork-1","timestamp":"2026-09-11T06:00:00Z","message":{"role":"assistant","provider":"p","model":"m2","usage":{"input":6,"output":4,"cacheRead":2,"cacheWrite":0,"reasoning":1,"cost":{"total":0.05}},"stopReason":"stop"}}
