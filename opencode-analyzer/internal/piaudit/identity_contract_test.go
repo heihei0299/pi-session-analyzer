@@ -26,9 +26,9 @@ func loadPiIdentityContract(t *testing.T) []piIdentityContractCase {
 	t.Helper()
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("locate shared identity contract fixture")
+		t.Fatal("locate standalone identity contract fixture")
 	}
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(filename), "../../../testdata/pi-identity-contract.json"))
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(filename), "testdata/pi-identity-contract.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
