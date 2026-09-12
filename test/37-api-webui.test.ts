@@ -29,12 +29,12 @@ test("S8-1 GET /api/db/meta 返回 dbPath 与 schemaVersion", async () => {
 });
 
 test("S8-2 scope-note 含四载体文案", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   assert.ok(html.includes("assistant/toolResult/compaction/branch_summary") || html.includes("四载体"), "webui.html 应含四载体说明");
 });
 
 test("S8-3 分组表表头“总输入”", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   // 检查是否有“总输入”文案
   assert.ok(html.includes("总输入") || html.includes("input + cacheRead"), "应含总输入");
 });

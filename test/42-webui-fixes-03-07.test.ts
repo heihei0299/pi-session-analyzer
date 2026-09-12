@@ -9,7 +9,7 @@ import { join } from "node:path";
 import vm from "node:vm";
 
 test("T03 总览分组表对未格式化列（分组键）统一经 escapeHtml 转义", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   const fnStart = html.indexOf("function renderTable(");
   assert.ok(fnStart >= 0, "应能定位 renderTable");
   const fnEnd = html.indexOf("\n}", fnStart) + 2;
@@ -69,13 +69,13 @@ test("T03 总览分组表对未格式化列（分组键）统一经 escapeHtml �
 });
 
 test("T03 明细表与会话管理已做单层转义，不应出现双重转义实体", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   // 确保明细表与会话管理不出现类似 escapeHtml(escapeHtml(...)) 的双重调用
   assert.doesNotMatch(html, /escapeHtml\s*\(\s*escapeHtml/, "不应存在嵌套 escapeHtml");
 });
 
 test("T07 自定义预设预填与切换隐藏契约", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   const fnStart = html.indexOf("function applyPreset(");
   assert.ok(fnStart >= 0, "应能定位 applyPreset");
   const fnEnd = html.indexOf("\nfunction customRangeValue()", fnStart);

@@ -25,6 +25,7 @@ func TestServerCodexSourceQueries(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := NewServer(t.TempDir(), sessiondata.NewSessionData(), Options{Source: "codex", CodexDir: codexHome, DBPath: filepath.Join(t.TempDir(), "ledger.db")})
+	mustRefreshNow(t, srv)
 	handler := srv.Handler()
 	index := httptest.NewRecorder()
 	handler.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -77,6 +78,7 @@ func TestServerCodexBaselineFixtureExposesUpstreamSemanticsAndDiagnostics(t *tes
 		CodexDir: filepath.Join("..", "codex", "testdata", "codex-home"),
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 	})
+	mustRefreshNow(t, srv)
 	handler := srv.Handler()
 
 	w := httptest.NewRecorder()
@@ -152,6 +154,7 @@ func TestServerRejectsDetailAndRenameForNonPiSources(t *testing.T) {
 		CodexDir: filepath.Join("..", "codex", "testdata", "codex-home"),
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 	})
+	mustRefreshNow(t, srv)
 	handler := srv.Handler()
 
 	for _, source := range []string{"codex", "all"} {
@@ -203,6 +206,7 @@ func TestServerRejectsDetailAndRenameForNonPiSources(t *testing.T) {
 		CodexDir: filepath.Join("..", "codex", "testdata", "codex-home"),
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 	})
+	mustRefreshNow(t, codexDefault)
 	w = httptest.NewRecorder()
 	codexDefault.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/sessions/uuid1/detail", nil))
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "Unsupported") {
@@ -240,6 +244,7 @@ func TestServerSourceSwitchingCapabilitiesAndEmptyDir(t *testing.T) {
 		CodexDir: codexHome,
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 	})
+	mustRefreshNow(t, srv)
 	handler := srv.Handler()
 
 	type totalsPayload struct {
@@ -305,6 +310,7 @@ func TestServerSourceSwitchingCapabilitiesAndEmptyDir(t *testing.T) {
 		CodexDir: emptyHome,
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 	})
+	mustRefreshNow(t, emptySrv)
 	emptyHandler := emptySrv.Handler()
 	w := httptest.NewRecorder()
 	emptyHandler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/meta", nil))
@@ -337,6 +343,7 @@ func TestServerSupportsCustomDateTimeRange(t *testing.T) {
 		Source: "pi",
 		DBPath: filepath.Join(t.TempDir(), "ledger.db"),
 	})
+	mustRefreshNow(t, srv)
 	handler := srv.Handler()
 
 	endpoints := []string{

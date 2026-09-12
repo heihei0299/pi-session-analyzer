@@ -17,7 +17,6 @@ import (
 	"github.com/heihei0299/pi-session-anylize/internal/server"
 	"github.com/heihei0299/pi-session-anylize/internal/sessiondata"
 	"github.com/heihei0299/pi-session-anylize/internal/timerange"
-	"github.com/heihei0299/pi-session-anylize/internal/watch"
 )
 
 const Version = "2026.9.3"
@@ -97,9 +96,15 @@ func main() {
 
 	_ = fs.Parse(args)
 
-	// Serve 模式
+	// Serve 模式：初次 Refresh 完成后才对外提供 snapshot 查询，
+	// 之后 watcher 以 change → refresh → query 驱动，GET 只读快照。
 	if window == "serve" {
 		srv := server.NewServer(*dir, nil, server.Options{Source: *source, CodexDir: *codexDir, DBPath: *dbPath})
+		if err := srv.RefreshNow(); err != nil {
+			fmt.Fprintf(os.Stderr, "初次同步失败（将提供既有快照并经 meta 暴露）: %v\n", err)
+		}
+		stopWatch := srv.StartWatch(2 * time.Second)
+		defer stopWatch()
 		addr := fmt.Sprintf("%s:%d", *host, *port)
 		fmt.Printf("Token Analyzer WebUI 已启动: http://%s/\n数据目录: %s\n", addr, *dir)
 		if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
@@ -127,29 +132,36 @@ func main() {
 		TimeRange: tr,
 	}
 
-	// Watch 实时监控模式
+	// Watch 实时监控模式：change → refresh → query，与普通查询同一快照源。
+	// source 解析/去重/费用等规则只在 adapter 内实现，这里不累加。
 	if *watchMode {
 		if *source != "pi" {
 			fmt.Fprintln(os.Stderr, "错误: --watch 目前只支持 --source pi")
 			os.Exit(1)
 		}
 		fmt.Printf("开始监控会话目录: %s (轮询间隔: %dms)...\n", *dir, *interval)
-		reader := watch.NewIncrementalReader(*dir)
-		tot := domain.EmptyTotals()
+		printWatchTotals := func() {
+			tot, err := watchTotalsOnce(*dir, *codexDir, *dbPath, filter)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "watch 失败（保留上次快照）: %v\n", err)
+				return
+			}
+			now := time.Now().Format("15:04:05")
+			fmt.Printf("[%s] 请求数: %d | 总 Token: %.0f | 花费: $%.4f\n",
+				now, tot.Requests, tot.TotalTokens, tot.Cost)
+		}
+		printWatchTotals()
+		last, _ := refresh.PiFingerprint(*dir)
 		ticker := time.NewTicker(time.Duration(*interval) * time.Millisecond)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			incs, err := reader.ReadIncrements()
-			if err != nil {
+			cur, err := refresh.PiFingerprint(*dir)
+			if err != nil || cur == last {
 				continue
 			}
-			if len(incs) > 0 {
-				watch.ApplyIncrements(&tot, incs)
-				now := time.Now().Format("15:04:05")
-				fmt.Printf("[%s] 新增 %d 条变动 | 请求数: %d | 总 Token: %.0f | 花费: $%.4f\n",
-					now, len(incs), tot.Requests, tot.TotalTokens, tot.Cost)
-			}
+			last = cur
+			printWatchTotals()
 		}
 		return
 	}
@@ -219,6 +231,23 @@ func main() {
 			fmt.Print(render.RenderTotalsTable(*res.Totals))
 		}
 	}
+}
+
+// watchTotalsOnce 是 --watch 每次 tick 的全部工作：refresh 后查同一快照。
+// 与普通查询走同一 Refresh + Query 映射，故 watch totals 与同一时刻
+// 普通 Query totals 天然一致；source 规则只在 adapter 内实现，这里不累加。
+func watchTotalsOnce(piDir, codexDir, dbPath string, filter sessiondata.Filter) (*domain.Totals, error) {
+	if err := refresh.Refresh(refresh.Config{PiDir: piDir, CodexDir: codexDir, DBPath: dbPath, Source: "pi"}); err != nil {
+		return nil, err
+	}
+	res, err := query.Query(query.Config{PiDir: piDir, CodexDir: codexDir, DBPath: dbPath, Source: "pi"}, filter, sessiondata.View{Kind: sessiondata.ViewTotals})
+	if err != nil {
+		return nil, err
+	}
+	if res.Totals == nil {
+		return nil, fmt.Errorf("watch 查询无 totals")
+	}
+	return res.Totals, nil
 }
 
 func jsonOutputData(res *sessiondata.QueryResult) map[string]any {

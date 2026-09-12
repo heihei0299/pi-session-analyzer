@@ -8,7 +8,9 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { handleApi } from "./api.ts";
 
-const HTML = readFileSync(new URL("./webui.html", import.meta.url), "utf8");
+// WebUI 唯一人工维护源码是 internal/server/webui.html（Go embed 直引）；
+// TS 后端在迁移期与 Go 共用同一份文件，05 删除 TS 后端时此处一并移除。
+const HTML = readFileSync(new URL("../internal/server/webui.html", import.meta.url), "utf8");
 
 export interface WebServerOptions {
   dir: string;

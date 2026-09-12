@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/heihei0299/pi-session-anylize/internal/db"
@@ -39,6 +40,13 @@ type Server struct {
 	sessionData *sessiondata.SessionData
 	queryConfig sourcequery.Config
 	mux         *http.ServeMux
+
+	// refresh orchestration：GET 只读快照，同步只走 RefreshNow
+	//（启动初次同步 + watcher 变更触发），并发触发由 refresh 包串行化。
+	// 错误按源记录：pi 查询只看 pi 的同步状态，不被 Codex 失败污染。
+	refreshMu      sync.RWMutex
+	lastRefreshErr map[string]error
+	lastRefreshAt  time.Time
 }
 
 func NewServer(dir string, sd *sessiondata.SessionData, options ...Options) *Server {
@@ -276,27 +284,102 @@ func (s *Server) handleApiMeta(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, res.Meta)
 }
 
-// query 是统一查询入口：先 Refresh（source → ledger），再走 ledger-backed Query Engine。
+// RefreshNow 执行统一同步（Pi + Codex 分源覆盖 ?source= 的各种切换），
+// 记录结果供 meta 对外暴露。失败保留上一成功 snapshot，只记错不抛快照。
+func (s *Server) RefreshNow() error {
+	cfg := s.queryConfig
+	piErr := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "pi"})
+	codexErr := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "codex"})
+	s.refreshMu.Lock()
+	s.lastRefreshErr = map[string]error{"pi": piErr, "codex": codexErr}
+	s.lastRefreshAt = time.Now()
+	s.refreshMu.Unlock()
+	return errors.Join(piErr, codexErr)
+}
+
+func (s *Server) lastRefresh() (time.Time, map[string]error) {
+	s.refreshMu.RLock()
+	defer s.refreshMu.RUnlock()
+	return s.lastRefreshAt, s.lastRefreshErr
+}
+
+// StartWatch 以指纹轮询驱动 change → refresh → query：目录有变才同步，
+// 否则所有 GET 都只读快照。返回 stop，调用方（serve）在退出时调用。
+func (s *Server) StartWatch(interval time.Duration) (stop func()) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		last, _ := refresh.Fingerprint(s.queryConfig.PiDir, s.queryConfig.CodexDir)
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				cur, err := refresh.Fingerprint(s.queryConfig.PiDir, s.queryConfig.CodexDir)
+				if err != nil || cur == last {
+					continue
+				}
+				last = cur
+				_ = s.RefreshNow()
+			}
+		}
+	}()
+	return func() { close(done); wg.Wait() }
+}
+
+// exposeRefreshError 把与本次查询源相关的同步失败经 meta 警告暴露
+// （快照本身不受影响；pi 查询不被 codex 失败污染）。
+func (s *Server) exposeRefreshError(res *sessiondata.QueryResult, source string) {
+	if res == nil {
+		return
+	}
+	if source == "" {
+		source = "pi"
+	}
+	_, errs := s.lastRefresh()
+	var failed []string
+	if (source == "pi" || source == "all") && errs["pi"] != nil {
+		failed = append(failed, fmt.Sprintf("Pi 同步失败（已保留上次成功快照）: %v", errs["pi"]))
+	}
+	if (source == "codex" || source == "all") && errs["codex"] != nil {
+		failed = append(failed, fmt.Sprintf("Codex 同步失败（已保留上次成功快照）: %v", errs["codex"]))
+	}
+	if len(failed) == 0 {
+		return
+	}
+	if res.Meta == nil {
+		res.Meta = &sessiondata.QueryMeta{Sources: sourcequery.SupportedSources(), Warnings: failed}
+		return
+	}
+	res.Meta.Warnings = append(res.Meta.Warnings, failed...)
+}
+
+// query 是统一查询入口：只读已提交 snapshot，不触发同步。
 // CLI 走同一 Refresh + Query 映射，相同 Query Request 得到同一 domain 结果。
 func (s *Server) query(filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
 	source := s.queryConfig.Source
 	if filter.Source != "" {
 		source = filter.Source
 	}
-	if err := refresh.Refresh(refresh.Config{
-		PiDir:    s.queryConfig.PiDir,
-		CodexDir: s.queryConfig.CodexDir,
-		DBPath:   s.queryConfig.DBPath,
-		Source:   source,
-	}); err != nil {
+	res, err := sourcequery.Query(s.queryConfig, filter, view)
+	if err != nil {
 		return nil, err
 	}
-	return sourcequery.Query(s.queryConfig, filter, view)
+	s.exposeRefreshError(res, source)
+	return res, nil
 }
 
 func (s *Server) handleApiDbMeta(w http.ResponseWriter, r *http.Request) {
 	dbPath := db.ResolveDbPathFromEnv(r.URL.Query().Get("db"))
-	database, err := db.Open(dbPath)
+	// 只读：db/meta 本身是观察口，不能推进游标或建库。
+	database, err := db.OpenReadOnly(dbPath)
 	if err != nil {
 		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
 		return
@@ -319,11 +402,24 @@ func (s *Server) handleApiDbMeta(w http.ResponseWriter, r *http.Request) {
 		rollupWatermark = &v
 	}
 
+	lastRefreshAt, lastRefreshErrs := s.lastRefresh()
+	var lastRefreshError *string
+	if joined := errors.Join(lastRefreshErrs["pi"], lastRefreshErrs["codex"]); joined != nil {
+		msg := joined.Error()
+		lastRefreshError = &msg
+	}
+	var lastRefreshUnix *int64
+	if !lastRefreshAt.IsZero() {
+		v := lastRefreshAt.Unix()
+		lastRefreshUnix = &v
+	}
 	sendJSON(w, http.StatusOK, map[string]any{
-		"dbPath":          dbPath,
-		"schemaVersion":   db.SchemaVersion,
-		"lastSyncAt":      lastSyncAt,
-		"rollupWatermark": rollupWatermark,
+		"dbPath":           dbPath,
+		"schemaVersion":    db.SchemaVersion,
+		"lastSyncAt":       lastSyncAt,
+		"rollupWatermark":  rollupWatermark,
+		"lastRefreshAt":    lastRefreshUnix,
+		"lastRefreshError": lastRefreshError,
 	})
 }
 
@@ -381,15 +477,6 @@ func (s *Server) handleApiSessionDetail(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) queryAndSendDetail(w http.ResponseWriter, sessionId string) {
-	if err := refresh.Refresh(refresh.Config{
-		PiDir:    s.queryConfig.PiDir,
-		CodexDir: s.queryConfig.CodexDir,
-		DBPath:   s.queryConfig.DBPath,
-		Source:   "pi",
-	}); err != nil {
-		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
-		return
-	}
 	detail, err := sourcequery.QueryDetail(s.queryConfig, sessionId)
 	if err != nil {
 		if errors.Is(err, sessiondata.ErrSessionNotFound) {

@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,34 @@ func Open(path string) (*Database, error) {
 func GetInstance(dbPath string) (*Database, error) {
 	resolved := ResolveDbPathFromEnv(dbPath)
 	return Open(resolved)
+}
+
+// OpenReadOnly 以只读方式打开已存在的 ledger，供 Query 快照读取。
+// 不建目录、不建表、不执行任何写 PRAGMA；文件缺失直接报错。
+// query_only 兜底：Query 路径即便有 bug 也写不进 DB。
+func OpenReadOnly(path string) (*Database, error) {
+	// 路径经 URL 转义含入 URI：含空格/?/# 的路径也不走样。
+	uri := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
+	sqlDB, err := sql.Open("sqlite", uri.String())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := sqlDB.Exec(`PRAGMA query_only = ON`); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	if _, err := sqlDB.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	// 缺失文件在这里现形：只读打开不存在的库要到首次访问才报错，
+	// 提前碰一下 schema 给出明确错误（空 ledger 也是合法快照，不误报）。
+	var tables int
+	if err := sqlDB.QueryRow(`SELECT count(*) FROM sqlite_master`).Scan(&tables); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("只读 ledger 不可用 %s: %w", path, err)
+	}
+	return &Database{DB: sqlDB, Path: path}, nil
 }
 
 func (d *Database) createTables() error {

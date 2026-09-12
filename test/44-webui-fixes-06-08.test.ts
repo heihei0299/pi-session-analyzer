@@ -9,7 +9,7 @@ import { join } from "node:path";
 import vm from "node:vm";
 
 test("T08 状态行会话数骨架与标签标记", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
 
   // 状态行应包含会话数专用 pill 与 id="meta-count"
   assert.match(
@@ -20,7 +20,7 @@ test("T08 状态行会话数骨架与标签标记", () => {
 });
 
 test("T08 renderSessionCount 逻辑：有筛选双值 N（全量 M），无筛选单值 M", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
 
   // 直接提取 webui.html 中的 hasTimeFilter 与 renderSessionCount 真实源码
   const startIdx = html.indexOf("function hasTimeFilter()");
@@ -59,7 +59,7 @@ test("T08 renderSessionCount 逻辑：有筛选双值 N（全量 M），无筛�
 });
 
 test("T06 总览页轮询复用快照数据并收敛为 totals+groups+meta 最小请求集", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
 
   // 1. poll 函数必须包含 snapshot 复用逻辑
   assert.match(

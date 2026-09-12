@@ -7,12 +7,14 @@ import (
 	"testing"
 )
 
-func TestEmbeddedWebUIIsSynchronizedWithCanonicalSource(t *testing.T) {
-	canonical, err := os.ReadFile(filepath.Join("..", "..", "src", "webui.html"))
+func TestEmbeddedWebUIMatchesSingleSource(t *testing.T) {
+	// WebUI 唯一人工维护源码：internal/server/webui.html，Go embed 直引。
+	// 此测试只防 embed 陈旧（改完未重新 build），不再有第二份 copy/sync。
+	single, err := os.ReadFile(filepath.Join("webui.html"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(canonical, webUIContent) {
-		t.Fatal("internal/server/webui.html is stale; run 'make sync-webui'")
+	if !bytes.Equal(single, webUIContent) {
+		t.Fatal("embedded WebUI is stale; rebuild the Go binary")
 	}
 }

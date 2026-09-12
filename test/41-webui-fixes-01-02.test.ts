@@ -45,7 +45,7 @@ test("T1 npm/TS CLI 非法 --since/--until 拒绝，合法日期不拒绝", asyn
 });
 
 test("T2 会话管理重命名取消静默，只有保存空名才提示", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   const fnStart = html.indexOf("function startSessionRename");
   const fnEnd = html.indexOf("function restoreSessionName", fnStart);
   assert.ok(fnStart >= 0 && fnEnd > fnStart, "应能定位 startSessionRename");

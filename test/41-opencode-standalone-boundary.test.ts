@@ -19,7 +19,7 @@ test("Ticket 01: token-analyzer 不再暴露或依赖 OpenCode runtime", () => {
     "internal/server/server.go",
     "src/cli.ts",
     "src/api.ts",
-    "src/webui.html",
+    "internal/server/webui.html",
   ];
   for (const path of surfaces) {
     const source = readFileSync(path, "utf8");

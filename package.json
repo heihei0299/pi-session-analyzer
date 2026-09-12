@@ -29,7 +29,7 @@
   "scripts": {
     "test": "env -u TOKEN_ANALYZER_DB TZ=Asia/Shanghai node --test 'test/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json && cp src/webui.html dist/",
+    "build": "tsc -p tsconfig.build.json && cp internal/server/webui.html dist/",
     "prepack": "npm run build"
   },
   "devDependencies": {

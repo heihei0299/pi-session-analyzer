@@ -41,7 +41,9 @@ func Query(cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessi
 	if view.Kind == sessiondata.ViewRequests && source != "pi" {
 		return nil, ErrRequestsUnsupported
 	}
-	database, err := db.Open(db.ResolveDbPath(cfg.DBPath, ""))
+	// 快照读取：只读打开，不建库、不建表、不写任何内容。
+	// ledger 不存在说明尚未做过初次 Refresh，报错由调用方经 refresh 状态解释。
+	database, err := db.OpenReadOnly(db.ResolveDbPathFromEnv(cfg.DBPath))
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +60,7 @@ func Query(cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessi
 
 // QueryDetail 是 Pi 专属会话详情（ledger 派生）；Codex/All 由 server 层明确拒绝。
 func QueryDetail(cfg Config, sessionID string) (*sessiondata.SessionDetailResult, error) {
-	database, err := db.Open(db.ResolveDbPath(cfg.DBPath, ""))
+	database, err := db.OpenReadOnly(db.ResolveDbPathFromEnv(cfg.DBPath))
 	if err != nil {
 		return nil, err
 	}

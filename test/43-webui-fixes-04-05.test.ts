@@ -9,7 +9,7 @@ import { join } from "node:path";
 import vm from "node:vm";
 
 test("T04 fmtCompact 紧凑数字十亿档显示 B 单位且去尾 0，其它档位保持不变", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   const fnStart = html.indexOf("function fmtCompact(");
   assert.ok(fnStart >= 0, "应能定位 fmtCompact");
   const fnEnd = html.indexOf("\n", fnStart);
@@ -40,7 +40,7 @@ test("T04 fmtCompact 紧凑数字十亿档显示 B 单位且去尾 0，其它档
 });
 
 test("T04 请求明细表头移除无效的 data-sort/data-dir 静态属性", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
 
   // request-head 不应再包含 data-sort 或 data-dir 静态属性
   assert.doesNotMatch(
@@ -63,7 +63,7 @@ test("T04 请求明细表头移除无效的 data-sort/data-dir 静态属性", ()
 });
 
 test("T05 exportData 导出触发瞬间按钮禁用并显示导出中，完成后恢复", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   const fnStart = html.indexOf("async function exportData(");
   assert.ok(fnStart >= 0, "应能定位 exportData");
   const fnEnd = html.indexOf("\nfunction downloadBlob(", fnStart);

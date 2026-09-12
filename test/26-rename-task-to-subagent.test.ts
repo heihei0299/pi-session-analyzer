@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 function html(): string {
-  return readFileSync(resolve("src/webui.html"), "utf8");
+  return readFileSync(resolve("internal/server/webui.html"), "utf8");
 }
 function contextMd(): string {
   return readFileSync(resolve("CONTEXT.md"), "utf8");

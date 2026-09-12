@@ -30,7 +30,7 @@ test("T4-1 periodRowsFromFiles 按消息 timestamp 拆分跨天 rollout", () => 
 });
 
 test("T4-2 WebUI 对 All 的部分可用成本保留金额并标注含 unpriced 源", () => {
-  const html = readFileSync(join("src", "webui.html"), "utf8");
+  const html = readFileSync(join("internal", "server", "webui.html"), "utf8");
   assert.match(html, /function fmtCostCell/, "应有统一的 costStatus 展示函数");
   assert.match(html, /含 unpriced 源/, "必须显示含 unpriced 源标注");
   assert.match(html, /部分可用/, "必须显示部分可用标注");

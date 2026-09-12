@@ -2,27 +2,24 @@ VERSION ?= 2026.9.3
 BIN_DIR = dist
 BINARY_NAME = token-analyzer-go
 
-.PHONY: all build test clean release sync-webui
+.PHONY: all build test clean release
 
 all: test build
 
 
-# `src/webui.html` is canonical; `sync-webui` refreshes the copy used by Go embed.
-sync-webui:
-	@cp -f src/webui.html internal/server/webui.html
-
-build: sync-webui
+# WebUI 唯一源码是 internal/server/webui.html（Go embed 直引），无 copy/sync。
+build:
 	@mkdir -p $(BIN_DIR)
 	go build -ldflags "-s -w" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/token-analyzer
 	@echo "Build successful: $(BIN_DIR)/$(BINARY_NAME)"
 
-test: sync-webui
+test:
 	go test -v ./...
 
 clean:
 	rm -rf $(BIN_DIR)/token-analyzer*
 
-release: sync-webui
+release:
 	@mkdir -p $(BIN_DIR)
 	GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o $(BIN_DIR)/token-analyzer-linux-amd64 ./cmd/token-analyzer
 	GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o $(BIN_DIR)/token-analyzer-linux-arm64 ./cmd/token-analyzer
