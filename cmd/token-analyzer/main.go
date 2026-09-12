@@ -19,7 +19,7 @@ import (
 	"github.com/heihei0299/token-analyzer/internal/timerange"
 )
 
-const Version = "2026.9.3"
+const Version = "2026.9.12"
 
 func defaultDir() string {
 	home, err := os.UserHomeDir()

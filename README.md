@@ -92,7 +92,7 @@ token-analyzer serve
 push `v<版本>` tag 由 GitHub Actions（[`.github/workflows/release.yml`](.github/workflows/release.yml)）自动完成 `go test -p 1 ./...` + `make release` + GitHub Release（Linux / macOS / Windows 二进制 + checksums）：
 
 ```bash
-git tag v2026.9.4 && git push && git push --tags
+git tag v2026.9.12 && git push && git push --tags
 ```
 
 - **版本**：日期式 semver（`YYYY.M.D`）；同日再次发布用 prerelease 后缀（`2026.9.3-1`）

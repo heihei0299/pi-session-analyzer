@@ -1,4 +1,4 @@
-VERSION ?= 2026.9.3
+VERSION ?= 2026.9.12
 BIN_DIR = dist
 BINARY_NAME = token-analyzer
 
