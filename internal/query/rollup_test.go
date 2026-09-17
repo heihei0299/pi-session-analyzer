@@ -19,9 +19,7 @@ func TestQueryUsesRollupsForAggregateWindowsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	piDir := t.TempDir()
-	if err := db.BindSourceRoot(database, "pi", piDir); err != nil {
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, piDir)
 	exec := func(statement string, args ...any) {
 		t.Helper()
 		if _, err := database.DB.Exec(statement, args...); err != nil {

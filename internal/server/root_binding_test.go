@@ -11,6 +11,19 @@ import (
 	"github.com/heihei0299/token-analyzer/internal/db"
 )
 
+// bindPiRoot mirrors production: canonicalize once, then use only the pinned
+// binding API.
+func bindPiRoot(t *testing.T, database *db.Database, root string) {
+	t.Helper()
+	canonical, err := db.CanonicalSourceRoot(root)
+	if err != nil {
+		t.Fatalf("canonicalize Pi root %q: %v", root, err)
+	}
+	if err := db.BindPinnedSourceRoot(database, "pi", canonical); err != nil {
+		t.Fatalf("bind Pi root %q: %v", root, err)
+	}
+}
+
 func TestServerDetailMapsRootConflictAndKeepsNotFound(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
 	t.Setenv("HOME", t.TempDir())
@@ -21,10 +34,7 @@ func TestServerDetailMapsRootConflictAndKeepsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.BindSourceRoot(database, "pi", boundRoot); err != nil {
-		database.Close()
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, boundRoot)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}

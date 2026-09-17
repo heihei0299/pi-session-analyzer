@@ -43,10 +43,7 @@ func TestServerRenameRejectsMismatchedRootBeforeFilesystemRename(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.BindSourceRoot(database, "pi", boundRoot); err != nil {
-		database.Close()
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, boundRoot)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -138,10 +135,7 @@ func TestServerRenameRejectsUnavailableRootBeforeFilesystemRename(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.BindSourceRoot(database, "pi", boundRoot); err != nil {
-		database.Close()
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, boundRoot)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -236,10 +230,7 @@ func TestServerRenameRejectsSymlinkTargetSwitchBeforeFilesystemRename(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.BindSourceRoot(database, "pi", targetA); err != nil {
-		database.Close()
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, targetA)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -296,10 +287,7 @@ func TestServerRenameRefusesSymlinkFileEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.BindSourceRoot(database, "pi", boundRoot); err != nil {
-		database.Close()
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, boundRoot)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}

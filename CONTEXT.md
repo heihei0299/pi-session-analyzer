@@ -78,7 +78,7 @@
 - **WebUI 单一源码**：唯一人工维护源为 `internal/server/webui.html`（Go embed 直引），无 copy/sync；Go binary 自带完整 WebUI。
 - **canonical 契约**：`testdata/canonical` synthetic fixtures + golden expected 为长期行为契约（Pi/Codex 字段级断言，cost 容差 1e-9，排序稳定 tie-breaker）；不再依赖跨 runtime parity。
 - **版本与发布**：Git `v<版本>` tag 是唯一版本来源；Makefile 仅将 tag 派生值注入 Go CLI，非 tag 本地构建显示 `dev`。release workflow 只构建 root `token-analyzer` module，并在发布前验证平台 artifact 的 `--version` 与 tag 一致；OpenCode Analyzer 的测试与发布属于外部项目。
-- **Pi root binding**：schema v3 的 `source_root_bindings` 将一个 ledger 绑定到一个 Pi root 的真实路径（`Abs/Clean + EvalSymlinks`）。Pi Refresh 首次绑定，其他 root 的 Refresh、Query、QueryDetail 明确拒绝；拒绝不会删除已有历史行。旧 v2/无 binding 的 ledger 在只读 Query 中 fail closed；可写 migration 只补齐 v3 schema，若已有 Pi 历史行，首次 Refresh 也不得自动认领，必须显式迁移/确认或使用新 ledger，只有无历史行的空 ledger 才能首次绑定。root 不存在或 symlink target 无法解析也拒绝，不把词法路径静默当作物理 identity。校验通过后 Refresh/Query/rename 复用同一个已固定的 canonical physical root，不再重新解析词法路径：候选 project 与 `.jsonl` symlink 一律拒绝，校验后替换 root/project/file symlink 只能 fail closed，不得导入或修改未绑定目录（游标、绑定与外部文件保持不变）。
+- **Pi root binding**：schema v3 的 `source_root_bindings` 将一个 ledger 绑定到一个 Pi root 的真实路径（`Abs/Clean + EvalSymlinks`）。Pi Refresh 首次绑定，其他 root 的 Refresh、Query、QueryDetail 明确拒绝；拒绝不会删除已有历史行。旧 v2/无 binding 的 ledger 在只读 Query 中 fail closed；可写 migration 只补齐 v3 schema，若已有 Pi 历史行，首次 Refresh 也不得自动认领，必须显式迁移/确认或使用新 ledger，只有无历史行的空 ledger 才能首次绑定。root 不存在或 symlink target 无法解析也拒绝，不把词法路径静默当作物理 identity。校验通过后 Refresh/Query/rename 复用同一个已固定的 canonical physical root，不再重新解析词法路径：候选 project 与 `.jsonl` symlink 一律拒绝且不跟随，失败即拒绝（游标、绑定与外部文件保持不变）。该保护是校验式 containment：discovery 阶段过滤，同步前与 rename 前分别复核 candidate/parent 的物理 containment；它不提供 dirfd/renameat 级原子隔离，最后一次复核与实际 open/rename 之间仍存在窗口。
 
 ## OpenCode 产品边界
 

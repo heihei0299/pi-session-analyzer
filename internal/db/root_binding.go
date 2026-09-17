@@ -21,12 +21,6 @@ func CanonicalSourceRoot(root string) (string, error) {
 	return sourceRootIdentity(root)
 }
 
-// ValidateSourceRoot checks a configured source root without opening a ledger.
-func ValidateSourceRoot(root string) error {
-	_, err := CanonicalSourceRoot(root)
-	return err
-}
-
 func HasPiHistory(database *Database) (bool, error) {
 	return hasPiHistory(database)
 }
@@ -102,61 +96,6 @@ func CheckPinnedSourceRoot(database *Database, source, pinnedRoot string) error 
 	}
 	if bound != pinnedRoot {
 		return sourceRootMismatch(source, bound, pinnedRoot)
-	}
-	return nil
-}
-
-func BindSourceRoot(database *Database, source, root string) error {
-	identity, err := CanonicalSourceRoot(root)
-	if err != nil {
-		return err
-	}
-
-	var bound string
-	err = database.DB.QueryRow(`SELECT root_path FROM source_root_bindings WHERE data_source = ?`, source).Scan(&bound)
-	if err == sql.ErrNoRows {
-		if source == "pi" {
-			hasHistory, err := hasPiHistory(database)
-			if err != nil {
-				return fmt.Errorf("check existing Pi history: %w", err)
-			}
-			if hasHistory {
-				return fmt.Errorf("%w: Pi history has no root binding; explicit migration or a new ledger is required", ErrSourceRootBindingRequired)
-			}
-		}
-		if _, err := database.DB.Exec(`INSERT INTO source_root_bindings (data_source, root_path) VALUES (?, ?)`, source, identity); err != nil {
-			return fmt.Errorf("bind %s source root: %w", source, err)
-		}
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read %s source root: %w", source, err)
-	}
-	if bound != identity {
-		return sourceRootMismatch(source, bound, identity)
-	}
-	return nil
-}
-
-func CheckSourceRoot(database *Database, source, root string) error {
-	identity, err := CanonicalSourceRoot(root)
-	if err != nil {
-		return err
-	}
-
-	var bound string
-	err = database.DB.QueryRow(`SELECT root_path FROM source_root_bindings WHERE data_source = ?`, source).Scan(&bound)
-	if err == sql.ErrNoRows {
-		return fmt.Errorf("%w: %s ledger has no binding", ErrSourceRootBindingMissing, source)
-	}
-	if err != nil {
-		if strings.Contains(err.Error(), "no such table") {
-			return fmt.Errorf("%w: %s ledger has no binding table", ErrSourceRootBindingMissing, source)
-		}
-		return fmt.Errorf("read %s source root: %w", source, err)
-	}
-	if bound != identity {
-		return sourceRootMismatch(source, bound, identity)
 	}
 	return nil
 }

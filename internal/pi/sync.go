@@ -95,6 +95,11 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			mergeDiagnostics(&diagnostics, &storedDiagnostics)
 			continue
 		}
+		if hasCursor && canSeek {
+			// 增量路径继续向上暴露已持久化诊断；本次新增诊断先保持在
+			// fileDiagnostics，避免失败路径持久化时与 stored 重复叠加。
+			mergeDiagnostics(&diagnostics, &storedDiagnostics)
+		}
 		var linesToProcess []string
 		var newCommittedByte int64
 		var newCommittedLines int64

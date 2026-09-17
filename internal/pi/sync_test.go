@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/heihei0299/token-analyzer/internal/db"
@@ -188,7 +189,6 @@ func TestPiSyncRollsBackUsageFailureAndRetries(t *testing.T) {
 		`SELECT COUNT(*) FROM proxy_request_logs`,
 		`SELECT COUNT(*) FROM session_usage_dedup`,
 		`SELECT COUNT(*) FROM pi_sessions`,
-		`SELECT COUNT(*) FROM session_log_sync`,
 	} {
 		var count int
 		if err := database.DB.QueryRow(query).Scan(&count); err != nil {
@@ -197,6 +197,15 @@ func TestPiSyncRollsBackUsageFailureAndRetries(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("failed transaction left rows for %q: %d", query, count)
 		}
+	}
+	// 事务回滚后只允许留 diagnostics-only 行：cursor/semantics 不推进，不伪装成成功 revision。
+	var cursor, semantics int
+	var summary string
+	if err := database.DB.QueryRow(`SELECT last_byte_offset, sync_semantics_version, diagnostics_summary FROM session_log_sync WHERE file_path = ?`, path).Scan(&cursor, &semantics, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if cursor != 0 || semantics != 0 || !strings.Contains(summary, "同步") {
+		t.Fatalf("mutation failure must persist diagnostics without a cursor: cursor=%d semantics=%d summary=%s", cursor, semantics, summary)
 	}
 	if _, err := database.DB.Exec(`DROP TRIGGER fail_pi_usage`); err != nil {
 		t.Fatal(err)

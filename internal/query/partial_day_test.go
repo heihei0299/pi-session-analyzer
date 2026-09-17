@@ -11,6 +11,19 @@ import (
 	"github.com/heihei0299/token-analyzer/internal/timerange"
 )
 
+// bindPiRoot mirrors production: canonicalize once, then use only the pinned
+// binding API.
+func bindPiRoot(t *testing.T, database *db.Database, root string) {
+	t.Helper()
+	canonical, err := db.CanonicalSourceRoot(root)
+	if err != nil {
+		t.Fatalf("canonicalize Pi root %q: %v", root, err)
+	}
+	if err := db.BindPinnedSourceRoot(database, "pi", canonical); err != nil {
+		t.Fatalf("bind Pi root %q: %v", root, err)
+	}
+}
+
 func TestPartialDayRollupReportsPartialCoverage(t *testing.T) {
 	t.Setenv("TOKEN_ANALYZER_DB", "")
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
@@ -19,9 +32,7 @@ func TestPartialDayRollupReportsPartialCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	piDir := t.TempDir()
-	if err := db.BindSourceRoot(database, "pi", piDir); err != nil {
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, piDir)
 	exec := func(statement string, args ...any) {
 		t.Helper()
 		if _, err := database.DB.Exec(statement, args...); err != nil {

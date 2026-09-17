@@ -17,9 +17,7 @@ func TestDefaultSessionOrderIsStableBeforePagination(t *testing.T) {
 		t.Fatal(err)
 	}
 	piDir := t.TempDir()
-	if err := db.BindSourceRoot(database, "pi", piDir); err != nil {
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, piDir)
 	for _, row := range []struct {
 		id, timestamp string
 	}{

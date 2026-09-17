@@ -42,10 +42,7 @@ func TestAggregateHandlersRejectUnsupportedQueryOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.BindSourceRoot(database, "pi", piDir); err != nil {
-		database.Close()
-		t.Fatal(err)
-	}
+	bindPiRoot(t, database, piDir)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}

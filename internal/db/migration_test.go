@@ -193,7 +193,7 @@ func TestReadOnlyLegacyV2WithoutRootBindingFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer readonly.Close()
-	if err := CheckSourceRoot(readonly, "pi", t.TempDir()); !errors.Is(err, ErrSourceRootBindingMissing) {
+	if err := CheckPinnedSourceRoot(readonly, "pi", canonicalRoot(t, t.TempDir())); !errors.Is(err, ErrSourceRootBindingMissing) {
 		t.Fatalf("read-only legacy ledger without binding must fail closed: %v", err)
 	}
 }
