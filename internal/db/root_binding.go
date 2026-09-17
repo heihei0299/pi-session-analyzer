@@ -16,6 +16,12 @@ var (
 	ErrSourceRootUnavailable     = errors.New("source root unavailable")
 )
 
+// ValidateSourceRoot checks a configured source root without opening a ledger.
+func ValidateSourceRoot(root string) error {
+	_, err := sourceRootIdentity(root)
+	return err
+}
+
 func BindSourceRoot(database *Database, source, root string) error {
 	identity, err := sourceRootIdentity(root)
 	if err != nil {
@@ -76,7 +82,7 @@ func hasPiHistory(database *Database) (bool, error) {
 	err := database.DB.QueryRow(`
 		SELECT CASE WHEN
 			EXISTS (SELECT 1 FROM pi_sessions LIMIT 1)
-			OR EXISTS (SELECT 1 FROM proxy_request_logs WHERE data_source = 'pi_session' OR app_type = 'pi' LIMIT 1)
+			OR EXISTS (SELECT 1 FROM proxy_request_logs WHERE app_type = 'pi' AND data_source = 'pi_session' LIMIT 1)
 			OR EXISTS (SELECT 1 FROM usage_daily_rollups WHERE app_type = 'pi' LIMIT 1)
 		THEN 1 ELSE 0 END`).Scan(&exists)
 	return exists == 1, err

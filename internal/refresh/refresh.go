@@ -49,13 +49,29 @@ func refreshLocked(cfg Config) error {
 	if source == "" {
 		source = "pi"
 	}
+	var piRoot pi.ResolveResult
+	if source == "pi" || source == "all" {
+		resolved, err := pi.ResolveConfiguredSessionRoot(cfg.PiDir)
+		if err != nil {
+			return err
+		}
+		piRoot = resolved
+		// An omitted Pi root is allowed for all-source Codex-only setups.
+		if piRoot.Root == "" {
+			if source == "pi" {
+				return db.ValidateSourceRoot(piRoot.Root)
+			}
+		} else if err := db.ValidateSourceRoot(piRoot.Root); err != nil {
+			return err
+		}
+	}
 	database, err := db.Open(db.ResolveDbPathFromEnv(cfg.DBPath))
 	if err != nil {
 		return err
 	}
 	defer database.Close()
 	if source == "pi" || source == "all" {
-		if _, err := pi.Refresh(database, cfg.PiDir); err != nil {
+		if _, err := pi.RefreshResolved(database, piRoot); err != nil {
 			return err
 		}
 	}

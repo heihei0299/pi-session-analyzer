@@ -11,6 +11,11 @@ func Refresh(database *db.Database, piDir string) (SyncResult, error) {
 	if err != nil {
 		return SyncResult{}, err
 	}
+	return RefreshResolved(database, resolved)
+}
+
+// RefreshResolved 使用调用方已经验证过的 Pi root，避免打开 ledger 后再次解析配置。
+func RefreshResolved(database *db.Database, resolved ResolveResult) (SyncResult, error) {
 	if resolved.Root != "" {
 		if err := db.BindSourceRoot(database, "pi", resolved.Root); err != nil {
 			return SyncResult{}, err
