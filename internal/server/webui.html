@@ -1151,7 +1151,7 @@ async function exportData(format){
     clearError();
     const params=filterParams();
     // Codex/All 不支持 requests：导出时不要把已知的 totals/sessions 一起拖垮。
-    const requestPromise = sourceSupportsPiOnlyFeatures() ? api("requests",params) : Promise.resolve({ rows: [] });
+    const requestPromise = sourceSupportsPiOnlyFeatures() ? api("requests",params) : Promise.reject(new Error("当前数据源不支持 requests 导出"));
     const [totals,sessions,requests]=await Promise.all([api("totals",params), api("sessions",params), requestPromise]);
     const stamp=dateStamp();
     if(format==="json"){ const blob=new Blob([JSON.stringify({totals,sessions,requests},null,2)],{type:"application/json"}); downloadBlob(blob,`token-analyzer-${stamp}.json`)}

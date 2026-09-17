@@ -181,29 +181,6 @@ func buildCodexSessionRows(scoped []codexSessionMeta, byPhysical map[string][]le
 	return rows
 }
 
-func buildCodexRequestRows(scoped []codexSessionMeta, byPhysical map[string][]ledgerRequest) []domain.RequestRow {
-	rows := make([]domain.RequestRow, 0)
-	byID := map[string]codexSessionMeta{}
-	for _, m := range scoped {
-		byID[m.physicalID] = m
-	}
-	for _, m := range scoped {
-		for _, r := range byPhysical[m.physicalID] {
-			tot := domain.EmptyTotals()
-			sumInto(&tot, r)
-			domain.FinalizeTotals(&tot)
-			rows = append(rows, domain.RequestRow{
-				Totals:      tot,
-				SessionId:   m.id(),
-				Timestamp:   r.timestamp(),
-				Model:       r.model,
-				DisplayName: sessiondata.DisplayNameOf(m.fileName, ""),
-			})
-		}
-	}
-	return rows
-}
-
 func queryCodex(database *db.Database, home string, f sessiondata.Filter, v sessiondata.View) (*sessiondata.QueryResult, error) {
 	metas, err := loadCodexMetas(database, home)
 	if err != nil {
