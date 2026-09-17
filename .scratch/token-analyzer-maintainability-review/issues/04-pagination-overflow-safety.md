@@ -25,5 +25,5 @@
 - 修改摘要：新增共享 `paginationBounds`，在计算索引前避免整数溢出，并让越界页稳定返回空 rows；HTTP sessions/requests 回归覆盖非法组合、正常/最后一页、排序、重复查询和大整数。
 - 验证：`TOKEN_ANALYZER_DB= go test ./internal/server ./internal/query`，39 个测试通过。
 - Review：完整 Standards/Spec 双轴 Review 已通过；分页契约与边界增量复核关闭。
-- Commit：待提交后记录。
+- Commit：`316fc41 fix(query): make pagination overflow-safe`。
 - 未解决边界问题：无。
