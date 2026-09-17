@@ -70,16 +70,28 @@ func LoadDiagnostics(database *db.Database, root string) (Diagnostics, error) {
 }
 
 func piPathWithin(root, candidate string) bool {
-	rootAbs, err := filepath.Abs(filepath.Clean(root))
+	rootAbs, err := canonicalPath(root)
 	if err != nil {
 		return false
 	}
-	candidateAbs, err := filepath.Abs(filepath.Clean(candidate))
+	candidateAbs, err := canonicalPath(candidate)
 	if err != nil {
 		return false
 	}
 	rel, err := filepath.Rel(rootAbs, candidateAbs)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func canonicalPath(path string) (string, error) {
+	absolute, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err == nil {
+		return filepath.Clean(resolved), nil
+	}
+	return absolute, nil
 }
 
 // persistFileDiagnostics updates only the diagnostic summary; an existing

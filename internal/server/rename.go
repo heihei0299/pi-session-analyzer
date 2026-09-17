@@ -141,6 +141,13 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 		sendError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if resolved.Root != "" {
+		resolved.Root, err = db.CanonicalSourceRoot(resolved.Root)
+		if err != nil {
+			sendQueryError(w, err)
+			return
+		}
+	}
 	ledger, err := db.OpenReadOnly(db.ResolveDbPathFromEnv(s.queryConfig.DBPath))
 	if err != nil {
 		sendQueryError(w, err)

@@ -16,14 +16,19 @@ var (
 	ErrSourceRootUnavailable     = errors.New("source root unavailable")
 )
 
+// CanonicalSourceRoot validates a configured root and returns its physical path.
+func CanonicalSourceRoot(root string) (string, error) {
+	return sourceRootIdentity(root)
+}
+
 // ValidateSourceRoot checks a configured source root without opening a ledger.
 func ValidateSourceRoot(root string) error {
-	_, err := sourceRootIdentity(root)
+	_, err := CanonicalSourceRoot(root)
 	return err
 }
 
 func BindSourceRoot(database *Database, source, root string) error {
-	identity, err := sourceRootIdentity(root)
+	identity, err := CanonicalSourceRoot(root)
 	if err != nil {
 		return err
 	}
@@ -55,7 +60,7 @@ func BindSourceRoot(database *Database, source, root string) error {
 }
 
 func CheckSourceRoot(database *Database, source, root string) error {
-	identity, err := sourceRootIdentity(root)
+	identity, err := CanonicalSourceRoot(root)
 	if err != nil {
 		return err
 	}

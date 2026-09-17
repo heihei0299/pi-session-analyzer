@@ -59,10 +59,15 @@ func refreshLocked(cfg Config) error {
 		// An omitted Pi root is allowed for all-source Codex-only setups.
 		if piRoot.Root == "" {
 			if source == "pi" {
-				return db.ValidateSourceRoot(piRoot.Root)
+				_, err := db.CanonicalSourceRoot(piRoot.Root)
+				return err
 			}
-		} else if err := db.ValidateSourceRoot(piRoot.Root); err != nil {
-			return err
+		} else {
+			canonical, err := db.CanonicalSourceRoot(piRoot.Root)
+			if err != nil {
+				return err
+			}
+			piRoot.Root = canonical
 		}
 	}
 	database, err := db.Open(db.ResolveDbPathFromEnv(cfg.DBPath))

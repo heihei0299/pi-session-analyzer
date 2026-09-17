@@ -155,7 +155,12 @@ func Query(cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessi
 		if err != nil {
 			return nil, err
 		}
-		piRoot = resolved.Root
+		if resolved.Root != "" {
+			piRoot, err = db.CanonicalSourceRoot(resolved.Root)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := db.CheckSourceRoot(database, "pi", piRoot); err != nil {
 			return nil, err
 		}
@@ -185,11 +190,17 @@ func QueryDetail(cfg Config, sessionID string) (*sessiondata.SessionDetailResult
 		return nil, err
 	}
 	defer database.Close()
-	piRoot, err := pi.ResolveConfiguredSessionRoot(cfg.PiDir)
+	resolved, err := pi.ResolveConfiguredSessionRoot(cfg.PiDir)
 	if err != nil {
 		return nil, err
 	}
-	if err := db.CheckSourceRoot(database, "pi", piRoot.Root); err != nil {
+	if resolved.Root != "" {
+		resolved.Root, err = db.CanonicalSourceRoot(resolved.Root)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := db.CheckSourceRoot(database, "pi", resolved.Root); err != nil {
 		return nil, err
 	}
 	return queryPiDetail(database, sessionID)

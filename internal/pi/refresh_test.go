@@ -1,12 +1,62 @@
 package pi
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/heihei0299/token-analyzer/internal/db"
 )
+
+func TestRefreshResolvedKeepsCanonicalPhysicalRootAfterSymlinkSwap(t *testing.T) {
+	targetA := t.TempDir()
+	targetB := t.TempDir()
+	link := filepath.Join(t.TempDir(), "pi-root")
+	if err := os.Symlink(targetA, link); err != nil {
+		t.Skipf("symlink is not supported: %v", err)
+	}
+	writeSession := func(root, id string) {
+		project := filepath.Join(root, "project")
+		if err := os.MkdirAll(project, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		content := fmt.Sprintf(`{"type":"session","id":%q,"timestamp":"2026-09-17T10:00:00Z","cwd":"/workspace"}
+{"type":"message","id":%q,"timestamp":"2026-09-17T10:01:00Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":2},"stopReason":"stop"}}
+`, id, id+"-request")
+		if err := os.WriteFile(filepath.Join(project, id+".jsonl"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSession(targetA, "target-a")
+	writeSession(targetB, "target-b")
+
+	canonical, err := db.CanonicalSourceRoot(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetB, link); err != nil {
+		t.Skipf("symlink target swap is not supported: %v", err)
+	}
+	if _, err := RefreshResolved(database, ResolveResult{Root: canonical, Layout: LayoutProjectDirectories}); err != nil {
+		t.Fatal(err)
+	}
+	var sessionID string
+	if err := database.DB.QueryRow(`SELECT session_id FROM pi_sessions`).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if sessionID != "target-a" {
+		t.Fatalf("canonical refresh must stay on the originally resolved root: %q", sessionID)
+	}
+}
 
 func TestRefreshHonorsProjectDirectoryLayoutWithoutRecursiveFallback(t *testing.T) {
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")

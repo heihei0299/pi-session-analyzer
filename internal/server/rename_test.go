@@ -206,6 +206,66 @@ func TestServerRenameReportsSnapshotVerificationFailureAfterFilesystemRename(t *
 	}
 }
 
+func TestServerRenameRejectsSymlinkTargetSwitchBeforeFilesystemRename(t *testing.T) {
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+	targetA := t.TempDir()
+	targetB := t.TempDir()
+	link := filepath.Join(t.TempDir(), "pi-root")
+	if err := os.Symlink(targetA, link); err != nil {
+		t.Skipf("symlink is not supported: %v", err)
+	}
+	piFile := filepath.Join(targetB, "project", "PiSession_uuid1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(piFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"type":"session","id":"uuid1","timestamp":"2026-09-17T10:00:00Z","cwd":"/pi/project"}
+{"type":"message","id":"request-1","timestamp":"2026-09-17T10:05:00Z","message":{"role":"assistant","model":"m1","usage":{"input":10,"output":5},"stopReason":"stop"}}
+`
+	if err := os.WriteFile(piFile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(piFile, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "ledger.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindSourceRoot(database, "pi", targetA); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetB, link); err != nil {
+		t.Skipf("symlink target swap is not supported: %v", err)
+	}
+
+	srv := NewServer(link, Options{DBPath: dbPath})
+	request := httptest.NewRequest(http.MethodPost, "/api/sessions/rename", strings.NewReader(`{"sessionId":"uuid1","name":"NewName"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "source root mismatch") {
+		t.Fatalf("symlink target switch must reject rename before lookup: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := os.ReadFile(piFile); err != nil {
+		t.Fatalf("switched target file must remain untouched: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetB, "project", "NewName_uuid1.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("switched target must not be renamed: %v", err)
+	}
+}
+
 func TestServerRenameReportsRefreshFailureAfterFilesystemRename(t *testing.T) {
 	t.Setenv("TOKEN_ANALYZER_DB", "")
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
