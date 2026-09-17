@@ -23,24 +23,46 @@ jobs:
           cache: false
 
       - name: Verify Release Tag
+        id: verify-tag
+        shell: bash
         run: |
-          tag_pattern='^v[0-9]{4}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])(-[0-9]+)?$'
-          for tag in v2026.9.12 v2026.9.12-1; do
+          tag_pattern='^v([1-9][0-9]{3})\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])(-([1-9][0-9]*))?$'
+          validate_tag() {
+            local tag="$1"
             if [[ ! "$tag" =~ $tag_pattern ]]; then
+              return 1
+            fi
+            local year="${BASH_REMATCH[1]}"
+            local month="${BASH_REMATCH[2]}"
+            local day="${BASH_REMATCH[3]}"
+            local actual expected
+            actual="$(date -u -d "$year-$month-$day" +%Y-%m-%d 2>/dev/null)" || return 1
+            expected="$(printf '%04d-%02d-%02d' "$((10#$year))" "$((10#$month))" "$((10#$day))")"
+            [[ "$actual" == "$expected" ]]
+          }
+          for tag in v2026.9.12 v2026.9.12-1 v2024.2.29; do
+            if ! validate_tag "$tag"; then
               echo "accepted release tag rejected: $tag"
               exit 1
             fi
           done
-          for tag in v1abc v2026 v2026.9 v2026.13.1 v2026.9.0 v2026.9.32; do
-            if [[ "$tag" =~ $tag_pattern ]]; then
+          for tag in v1abc v0000.1.1 v2026 v2026.9 v2026.13.1 v2026.9.0 v2026.9.32 v2026.2.29 v2026.4.31 v2026.9.12-0; do
+            if validate_tag "$tag"; then
               echo "invalid release tag accepted: $tag"
               exit 1
             fi
           done
-          if [[ ! "$GITHUB_REF_NAME" =~ $tag_pattern ]]; then
-            echo "release tag must match vYYYY.M.D[-N]: $GITHUB_REF_NAME"
+          if ! validate_tag "$GITHUB_REF_NAME"; then
+            echo "release tag must match a valid vYYYY.M.D[-N]: $GITHUB_REF_NAME"
             exit 1
           fi
+          version="${GITHUB_REF_NAME#v}"
+          prerelease=false
+          if [[ "$GITHUB_REF_NAME" =~ -[1-9][0-9]*$ ]]; then
+            prerelease=true
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Run Tests (Go-only)
         env:
@@ -51,11 +73,11 @@ jobs:
 
       - name: Build Multi-Platform Binaries
         run: |
-          make release VERSION="${GITHUB_REF_NAME#v}"
+          make release VERSION="${{ steps.verify-tag.outputs.version }}"
 
       - name: Smoke Check Binary
         run: |
-          test "$(./dist/token-analyzer-linux-amd64 --version)" = "token-analyzer ${GITHUB_REF_NAME#v}"
+          test "$(./dist/token-analyzer-linux-amd64 --version)" = "token-analyzer ${{ steps.verify-tag.outputs.version }}"
           ./dist/token-analyzer-linux-amd64 --help
 
       - name: Package Archives and Checksums
@@ -81,4 +103,4 @@ jobs:
             dist/checksums.txt
           generate_release_notes: true
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.verify-tag.outputs.prerelease }}
