@@ -46,7 +46,7 @@ OpenCode 云端用量同步与对账已迁入独立项目 [OpenCode Analyzer](ht
 开发时可用 `go run ./cmd/token-analyzer` 或 `./dist/token-analyzer` 直接运行。
 
 - **窗口**（位置参数，默认 `totals`）：`totals` 总消耗量 / `sessions` 会话级（每会话一行）/ `requests` 单请求级（逐条计入口径消息）
-- **数据源**：`--source pi|codex|all`（默认 `pi`）；Codex 目录优先级为 `--codex-dir > CODEX_HOME > ~/.codex`。`--dir` 始终只表示 Pi 目录。
+- **数据源**：`--source pi|codex|all`（默认 `pi`）；Codex 目录优先级为 `--codex-dir > CODEX_HOME > ~/.codex`。`--dir` 始终只表示 Pi 目录。`all` 在未配置可用 Pi root、但 Codex root 有效时明确按 Codex-only 查询：不创建 Pi binding、不读取 Pi history，Pi 部分为空；`pi` source 仍会拒绝不可用 root。
 - **数据库**：`--db <path>` 可指定 normalized ledger；未指定时使用 `TOKEN_ANALYZER_DB`/默认缓存路径。单个 ledger 只绑定一个 Pi root：首次 Pi Refresh 建立真实路径 binding，切换 `--dir` 后 Refresh/Query/QueryDetail 会明确拒绝且不删除历史行；旧 v2/无 binding ledger 的可写 migration 只补齐 schema；若已有 Pi 历史行，首次 Refresh 仍需显式迁移/确认或使用新 ledger，不能自动认领，只有空 ledger 才能首次绑定；缺失 root 或 symlink target 无法解析时安全拒绝。
 - **数据目录**：`--dir <path>`（默认 `~/.pi/agent/sessions/`）
 - **输出格式**：`--format table|json|csv`（默认 `table` 终端表格）

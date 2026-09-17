@@ -161,8 +161,10 @@ func Query(cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessi
 				return nil, err
 			}
 		}
-		if err := db.CheckSourceRoot(database, "pi", piRoot); err != nil {
-			return nil, err
+		if source == "pi" || piRoot != "" {
+			if err := db.CheckSourceRoot(database, "pi", piRoot); err != nil {
+				return nil, err
+			}
 		}
 	}
 	switch source {

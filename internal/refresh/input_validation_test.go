@@ -40,6 +40,20 @@ func TestRefreshRejectsUnavailablePiRootBeforeOpeningLedger(t *testing.T) {
 	}
 }
 
+func TestAllRefreshRejectsConfiguredUnavailablePiRootBeforeOpeningLedger(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	dbPath := filepath.Join(t.TempDir(), "ledger.db")
+	err := Refresh(Config{PiDir: filepath.Join(t.TempDir(), "missing"), CodexDir: t.TempDir(), DBPath: dbPath, Source: "all"})
+	if !errors.Is(err, db.ErrSourceRootUnavailable) {
+		t.Fatalf("all refresh must reject an unavailable configured Pi root: %v", err)
+	}
+	if _, statErr := os.Stat(dbPath); !os.IsNotExist(statErr) {
+		t.Fatalf("unavailable Pi root must not create an all-source ledger: stat error=%v", statErr)
+	}
+}
+
 func TestRefreshRejectsUnknownSourceBeforeOpeningLedger(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
 	err := Refresh(Config{PiDir: t.TempDir(), DBPath: dbPath, Source: "typo"})

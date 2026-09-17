@@ -74,7 +74,7 @@
 
 - **Go 是唯一生产后端语言**：TypeScript CLI/API/server/db/session/watch 等生产实现与迁移期 parity oracle 均已删除；运行 CLI/API/WebUI 不需要 Node/npm。
 - **Query 与 Refresh 分离**：Query 只读快照；server 启动先做初次 Refresh 再对外服务；后续 refresh 走统一串行编排，多个 GET 不放大为重复同步；连续 GET 不改变 ledger 内容或同步游标。
-- **Watch 新语义**：只做 source-specific change → source Refresh → query，不再直接累加 usage/cost/totals；Pi 变化只刷新 Pi，Codex 变化只刷新 Codex，失败保留 acknowledged revision 并在下一轮重试；实时 totals 与同一时刻普通 query 完全一致；append/partial/truncate/rewrite/fork/cache/pricing 等规则只存在于 source adapter。
+- **Watch 新语义**：只做 source-specific change → source Refresh → query，不再直接累加 usage/cost/totals；Pi 变化只刷新 Pi，Codex 变化只刷新 Codex，失败保留 acknowledged revision 并在下一轮重试；实时 totals 与同一时刻普通 query 完全一致；append/partial/truncate/rewrite/fork/cache/pricing 等规则只存在于 source adapter。`all` 未配置可用 Pi root 时明确降级为 Codex-only：不建立 Pi binding，也不读取 Pi history；`pi` source 仍对不可用 root fail closed。
 - **WebUI 单一源码**：唯一人工维护源为 `internal/server/webui.html`（Go embed 直引），无 copy/sync；Go binary 自带完整 WebUI。
 - **canonical 契约**：`testdata/canonical` synthetic fixtures + golden expected 为长期行为契约（Pi/Codex 字段级断言，cost 容差 1e-9，排序稳定 tie-breaker）；不再依赖跨 runtime parity。
 - **版本与发布**：Git `v<版本>` tag 是唯一版本来源；Makefile 仅将 tag 派生值注入 Go CLI，非 tag 本地构建显示 `dev`。release workflow 只构建 root `token-analyzer` module，并在发布前验证平台 artifact 的 `--version` 与 tag 一致；OpenCode Analyzer 的测试与发布属于外部项目。

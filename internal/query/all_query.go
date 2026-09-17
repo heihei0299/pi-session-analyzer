@@ -27,9 +27,19 @@ import (
 // queryAll 只是两侧 normalized 记录的组合查询，不存在独立的内存 merge 统计实现。
 func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v sessiondata.View) (*sessiondata.QueryResult, error) {
 	home := codex.ResolveHome(cfg.CodexDir)
-	piMetas, err := loadPiMetas(database)
-	if err != nil {
-		return nil, err
+	includePi := cfg.PiDir != ""
+	var piMetas []piSessionMeta
+	var piDiagnostics pi.Diagnostics
+	if includePi {
+		var err error
+		piMetas, err = loadPiMetas(database)
+		if err != nil {
+			return nil, err
+		}
+		piDiagnostics, err = pi.LoadDiagnostics(database, cfg.PiDir)
+		if err != nil {
+			return nil, err
+		}
 	}
 	codexMetas, err := loadCodexMetas(database, home)
 	if err != nil {
@@ -43,10 +53,6 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 	if err != nil {
 		return nil, err
 	}
-	piDiagnostics, err := pi.LoadDiagnostics(database, cfg.PiDir)
-	if err != nil {
-		return nil, err
-	}
 	metaOfAll := func() *sessiondata.QueryMeta {
 		meta := allMetaOf(cfg.PiDir, piMetas, codexMetas, diagnostics)
 		meta.Warnings = append(meta.Warnings, piDiagnostics.Warnings...)
@@ -56,13 +62,16 @@ func queryAll(database *db.Database, cfg Config, f sessiondata.Filter, v session
 		return &sessiondata.QueryResult{Window: "meta", Meta: metaOfAll()}, nil
 	}
 	piScoped := scopePiSessions(piMetas, f, nil)
-	piReqs, err := loadRequests(database, "pi", "pi_session", piSessionIDs(piScoped), false, f)
-	if err != nil {
-		return nil, err
+	var piReqs []ledgerRequest
+	if includePi {
+		piReqs, err = loadRequests(database, "pi", "pi_session", piSessionIDs(piScoped), false, f)
+		if err != nil {
+			return nil, err
+		}
 	}
 	piQueryReqs := piReqs
 	piPartialCoverage := false
-	if rollupsAllowed(f, v) {
+	if includePi && rollupsAllowed(f, v) {
 		rollups, err := loadRollups(database, "pi", f)
 		if err != nil {
 			return nil, err
