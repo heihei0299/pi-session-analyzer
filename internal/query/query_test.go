@@ -14,6 +14,7 @@ import (
 // refreshAndQuery 先 Refresh 再查 ledger，与 server/CLI 生产路径一致。
 func refreshAndQuery(t *testing.T, cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
 	t.Helper()
+	t.Setenv("TOKEN_ANALYZER_DB", "")
 	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "all"}); err != nil {
 		t.Fatal(err)
 	}

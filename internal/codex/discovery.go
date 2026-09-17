@@ -70,6 +70,7 @@ type RolloutFile struct {
 }
 
 type Diagnostics struct {
+	Source             string   `json:"source,omitempty"`
 	Warnings           []string `json:"warnings,omitempty"`
 	Skipped            int      `json:"skipped,omitempty"`
 	Conflicts          int      `json:"conflicts,omitempty"`
