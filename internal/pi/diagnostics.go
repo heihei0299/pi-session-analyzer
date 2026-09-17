@@ -94,6 +94,25 @@ func canonicalPath(path string) (string, error) {
 	return absolute, nil
 }
 
+// persistCommitFailureDiagnostics persists commit-failure diagnostics through an
+// independent ledger connection so a failed commit cannot reuse its broken
+// transaction connection. Only the diagnostic summary is updated; an existing
+// cursor is preserved for retry.
+func persistCommitFailureDiagnostics(database *db.Database, path string, diagnostics Diagnostics) error {
+	if database == nil || strings.TrimSpace(database.Path) == "" {
+		return persistFileDiagnostics(database, path, diagnostics)
+	}
+	independent, err := db.Open(database.Path)
+	if err != nil {
+		if fallbackErr := persistFileDiagnostics(database, path, diagnostics); fallbackErr != nil {
+			return fmt.Errorf("open independent ledger: %v; persist: %w", err, fallbackErr)
+		}
+		return fmt.Errorf("open independent ledger: %w", err)
+	}
+	defer independent.Close()
+	return persistFileDiagnostics(independent, path, diagnostics)
+}
+
 // persistFileDiagnostics updates only the diagnostic summary; an existing
 // cursor remains unchanged so the failed file is retried on the next refresh.
 func persistFileDiagnostics(database *db.Database, path string, diagnostics Diagnostics) error {

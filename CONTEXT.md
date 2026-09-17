@@ -74,11 +74,11 @@
 
 - **Go 是唯一生产后端语言**：TypeScript CLI/API/server/db/session/watch 等生产实现与迁移期 parity oracle 均已删除；运行 CLI/API/WebUI 不需要 Node/npm。
 - **Query 与 Refresh 分离**：Query 只读快照；server 启动先做初次 Refresh 再对外服务；后续 refresh 走统一串行编排，多个 GET 不放大为重复同步；连续 GET 不改变 ledger 内容或同步游标。
-- **Watch 新语义**：只做 source-specific change → source Refresh → query，不再直接累加 usage/cost/totals；Pi 变化只刷新 Pi，Codex 变化只刷新 Codex，失败保留 acknowledged revision 并在下一轮重试；实时 totals 与同一时刻普通 query 完全一致；append/partial/truncate/rewrite/fork/cache/pricing 等规则只存在于 source adapter。`all` 未配置可用 Pi root 时明确降级为 Codex-only：不建立 Pi binding，也不读取 Pi history；`pi` source 仍对不可用 root fail closed。
+- **Watch 新语义**：只做 source-specific change → source Refresh → query，不再直接累加 usage/cost/totals；Pi 变化只刷新 Pi，Codex 变化只刷新 Codex，失败保留 acknowledged revision 并在下一轮重试；实时 totals 与同一时刻普通 query 完全一致；append/partial/truncate/rewrite/fork/cache/pricing 等规则只存在于 source adapter。`all` 未配置可用 Pi root 时降为 Codex-only（不建立 Pi binding，也不读取 Pi history），但仅限 ledger 确认没有 token-analyzer 自有 Pi history：一旦发现无 binding 的 legacy Pi history，Refresh/Query 都以 `ErrSourceRootBindingRequired` fail closed，不隐藏也不自动认领历史行；`pi` source 仍对不可用 root fail closed。
 - **WebUI 单一源码**：唯一人工维护源为 `internal/server/webui.html`（Go embed 直引），无 copy/sync；Go binary 自带完整 WebUI。
 - **canonical 契约**：`testdata/canonical` synthetic fixtures + golden expected 为长期行为契约（Pi/Codex 字段级断言，cost 容差 1e-9，排序稳定 tie-breaker）；不再依赖跨 runtime parity。
 - **版本与发布**：Git `v<版本>` tag 是唯一版本来源；Makefile 仅将 tag 派生值注入 Go CLI，非 tag 本地构建显示 `dev`。release workflow 只构建 root `token-analyzer` module，并在发布前验证平台 artifact 的 `--version` 与 tag 一致；OpenCode Analyzer 的测试与发布属于外部项目。
-- **Pi root binding**：schema v3 的 `source_root_bindings` 将一个 ledger 绑定到一个 Pi root 的真实路径（`Abs/Clean + EvalSymlinks`）。Pi Refresh 首次绑定，其他 root 的 Refresh、Query、QueryDetail 明确拒绝；拒绝不会删除已有历史行。旧 v2/无 binding 的 ledger 在只读 Query 中 fail closed；可写 migration 只补齐 v3 schema，若已有 Pi 历史行，首次 Refresh 也不得自动认领，必须显式迁移/确认或使用新 ledger，只有无历史行的空 ledger 才能首次绑定。root 不存在或 symlink target 无法解析也拒绝，不把词法路径静默当作物理 identity。
+- **Pi root binding**：schema v3 的 `source_root_bindings` 将一个 ledger 绑定到一个 Pi root 的真实路径（`Abs/Clean + EvalSymlinks`）。Pi Refresh 首次绑定，其他 root 的 Refresh、Query、QueryDetail 明确拒绝；拒绝不会删除已有历史行。旧 v2/无 binding 的 ledger 在只读 Query 中 fail closed；可写 migration 只补齐 v3 schema，若已有 Pi 历史行，首次 Refresh 也不得自动认领，必须显式迁移/确认或使用新 ledger，只有无历史行的空 ledger 才能首次绑定。root 不存在或 symlink target 无法解析也拒绝，不把词法路径静默当作物理 identity。校验通过后 Refresh/Query/rename 复用同一个已固定的 canonical physical root，不再重新解析词法路径：候选 project 与 `.jsonl` symlink 一律拒绝，校验后替换 root/project/file symlink 只能 fail closed，不得导入或修改未绑定目录（游标、绑定与外部文件保持不变）。
 
 ## OpenCode 产品边界
 

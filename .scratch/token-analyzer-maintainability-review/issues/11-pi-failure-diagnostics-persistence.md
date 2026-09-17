@@ -24,7 +24,11 @@
 
 ## Completion note
 
-- 修改摘要：Pi mutation rollback 和 commit failure 均在事务结束后通过 summary-only persistence 记录 source-tagged diagnostics，不推进 cursor；retry 继续复用旧 cursor/有效 usage 并保持幂等。
-- 回归证据：新增 mutation failure → diagnostics persistence → retry/no-duplicate 测试；既有 cursor/retry 测试保持适用；测试未执行。
-- 静态验证：Go 文件已 `gofmt`，`git diff --check` 通过，rollback/commit/persist 调用链已检索。
-- 状态：保持 `claimed`，聚焦 Go 测试与 review 待执行；未解决阻塞为本轮 HANDOFF 未授权编译/测试。
+### 第二轮（remediation）
+
+- commit failure diagnostics 改用独立 ledger 连接持久化：新增 `persistCommitFailureDiagnostics`（`db.Open(database.Path)` 独立连接，失败回退同一路径但仅写 summary），commit 失败路径不再复用可能损坏的事务连接；写入仍为 summary-only（只在无行时插入零 cursor，`ON CONFLICT` 只更新 `diagnostics_summary`），不推进 cursor、不覆盖有效 usage。
+- commit 结果不确定的契约：失败路径不写 cursor；下一次 Refresh 重新读取实际持久化的 cursor，重试依靠 `session_usage_dedup` / request_id / semantic_id 去重，不确定 commit 不会重复记账（新增 retry/no-duplicate 回归）。
+- mutation rollback 路径保持原有独立语义（rollback + summary-only persist），未改行为。
+- 回归：新增 `TestPiCommitFailurePersistsDiagnosticsThroughIndependentConnection`（注入 commit failure → `LoadDiagnostics` 可重放、旧 rows/cursor 保留、retry 只导入一次、再次 retry 幂等且诊断保留）；既有 `TestPiMutationFailurePersistsDiagnosticsAndRetries` 覆盖 mutation rollback。
+- 静态验证：改动 Go 文件 `gofmt -l` 无输出；`git diff --check` 通过。未执行 `go test`、`go vet`、build（未获授权）；行为断言均为待执行回归。
+- 状态：保持 `claimed`；acceptance 未勾选，等待 review 与聚焦测试执行。

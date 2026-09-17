@@ -1,15 +1,59 @@
 package query
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/heihei0299/token-analyzer/internal/db"
 	"github.com/heihei0299/token-analyzer/internal/domain"
 	"github.com/heihei0299/token-analyzer/internal/refresh"
 	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
+
+func TestAllWithoutPiRootRejectsLegacyPiHistory(t *testing.T) {
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+	dbPath := filepath.Join(t.TempDir(), "ledger.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.DB.Exec(`INSERT INTO pi_sessions (session_id, header_ts, cwd, file_name, display_name) VALUES ('legacy-session', '2026-09-10T00:00:00Z', '/legacy', 'legacy.jsonl', 'legacy')`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if _, err := database.DB.Exec(`DELETE FROM source_root_bindings WHERE data_source = 'pi'`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{PiDir: "", CodexDir: t.TempDir(), DBPath: dbPath, Source: "all"}
+	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: cfg.Source}); !errors.Is(err, db.ErrSourceRootBindingRequired) {
+		t.Fatalf("legacy Pi history without binding must fail closed in Refresh: %v", err)
+	}
+	if _, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals}); !errors.Is(err, db.ErrSourceRootBindingRequired) {
+		t.Fatalf("legacy Pi history without binding must fail closed in Query: %v", err)
+	}
+	check, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer check.Close()
+	var count int
+	if err := check.DB.QueryRow(`SELECT COUNT(*) FROM pi_sessions WHERE session_id = 'legacy-session'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("legacy history rows must remain unchanged: count=%d err=%v", count, err)
+	}
+	var bindings int
+	if err := check.DB.QueryRow(`SELECT COUNT(*) FROM source_root_bindings WHERE data_source = 'pi'`).Scan(&bindings); err != nil || bindings != 0 {
+		t.Fatalf("legacy history must not be auto-claimed: bindings=%d err=%v", bindings, err)
+	}
+}
 
 func TestAllWithoutPiRootReturnsCodexOnly(t *testing.T) {
 	t.Setenv("TOKEN_ANALYZER_DB", "")

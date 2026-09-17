@@ -28,7 +28,11 @@ func CollectPiJsonlFiles(root string, layout Layout) []string {
 		}
 		for _, e := range entries {
 			if !e.IsDir() && filepath.Ext(e.Name()) == ".jsonl" {
-				out = append(out, filepath.Join(root, e.Name()))
+				full := filepath.Join(root, e.Name())
+				if isSymlinkPath(full) {
+					continue
+				}
+				out = append(out, full)
 			}
 		}
 		return out
@@ -42,13 +46,20 @@ func CollectPiJsonlFiles(root string, layout Layout) []string {
 			continue
 		}
 		projPath := filepath.Join(root, p.Name())
+		if isSymlinkPath(projPath) {
+			continue
+		}
 		files, err := os.ReadDir(projPath)
 		if err != nil {
 			continue
 		}
 		for _, f := range files {
 			if !f.IsDir() && filepath.Ext(f.Name()) == ".jsonl" {
-				out = append(out, filepath.Join(projPath, f.Name()))
+				full := filepath.Join(projPath, f.Name())
+				if isSymlinkPath(full) {
+					continue
+				}
+				out = append(out, full)
 			}
 		}
 	}

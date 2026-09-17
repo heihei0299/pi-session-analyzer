@@ -103,6 +103,9 @@ func costForPiRecord(rec *PiRecord, pricing modelPricing) float64 {
 
 // extractFirstUserTextPiFile 提取首条 user 文本（供 displayName，与 TS 同逻辑）。
 func extractFirstUserTextPiFile(path string) string {
+	if isSymlinkPath(path) {
+		return ""
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return ""

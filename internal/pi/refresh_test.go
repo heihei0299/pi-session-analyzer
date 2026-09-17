@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,26 @@ import (
 
 	"github.com/heihei0299/token-analyzer/internal/db"
 )
+
+func TestRefreshResolvedRejectsLexicalRootWithoutReparsing(t *testing.T) {
+	target := t.TempDir()
+	link := filepath.Join(t.TempDir(), "pi-root")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink is not supported: %v", err)
+	}
+	database, err := db.Open(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := RefreshResolved(database, ResolveResult{Root: link, Layout: LayoutProjectDirectories}); !errors.Is(err, db.ErrSourceRootMismatch) {
+		t.Fatalf("a non-canonical symlink root must be rejected without re-resolution: %v", err)
+	}
+	var bindings int
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM source_root_bindings`).Scan(&bindings); err != nil || bindings != 0 {
+		t.Fatalf("rejected root must not be bound: bindings=%d err=%v", bindings, err)
+	}
+}
 
 func TestRefreshResolvedKeepsCanonicalPhysicalRootAfterSymlinkSwap(t *testing.T) {
 	targetA := t.TempDir()
@@ -55,6 +76,55 @@ func TestRefreshResolvedKeepsCanonicalPhysicalRootAfterSymlinkSwap(t *testing.T)
 	}
 	if sessionID != "target-a" {
 		t.Fatalf("canonical refresh must stay on the originally resolved root: %q", sessionID)
+	}
+}
+
+func TestRefreshResolvedSkipsSymlinkProjectAndFileEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	goodProject := filepath.Join(root, "project")
+	if err := os.MkdirAll(goodProject, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	goodContent := `{"type":"session","id":"good","timestamp":"2026-09-17T10:00:00Z","cwd":"/workspace"}
+{"type":"message","id":"good-request","timestamp":"2026-09-17T10:01:00Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":2},"stopReason":"stop"}}
+`
+	if err := os.WriteFile(filepath.Join(goodProject, "good.jsonl"), []byte(goodContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evilContent := `{"type":"session","id":"evil","timestamp":"2026-09-17T10:00:00Z","cwd":"/evil"}
+{"type":"message","id":"evil-request","timestamp":"2026-09-17T10:01:00Z","message":{"role":"assistant","model":"m","usage":{"input":100,"output":200},"stopReason":"stop"}}
+`
+	if err := os.WriteFile(filepath.Join(outside, "evil.jsonl"), []byte(evilContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "evilproj")); err != nil {
+		t.Skipf("symlink is not supported: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "evil.jsonl"), filepath.Join(goodProject, "evil-link.jsonl")); err != nil {
+		t.Skipf("symlink is not supported: %v", err)
+	}
+	canonical, err := db.CanonicalSourceRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := RefreshResolved(database, ResolveResult{Root: canonical, Layout: LayoutProjectDirectories}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM pi_sessions WHERE session_id = 'evil'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("symlink project/file escape must not be imported: evil=%d", count)
+	}
+	if err := database.DB.QueryRow(`SELECT COUNT(*) FROM pi_sessions WHERE session_id = 'good'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("pinned good file must still import: count=%d err=%v", count, err)
 	}
 }
 

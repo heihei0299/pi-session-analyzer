@@ -15,6 +15,11 @@ import (
 
 const PiSyncSemanticsVersion = 2
 
+// injectCommitFailureForTest forces the next commit for matching files to fail
+// so commit-failure persistence and retry stay observably covered without
+// flaky filesystem or lock tricks. Production leaves it nil.
+var injectCommitFailureForTest func(string) bool
+
 type SyncResult struct {
 	Imported    int
 	Skipped     int
@@ -39,6 +44,10 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			if persistErr := persistFileDiagnostics(database, file, fileDiagnostics); persistErr != nil {
 				failures = append(failures, persistErr)
 			}
+		}
+		if isSymlinkPath(file) {
+			recordFailure(fmt.Errorf("refuse symlink file %q", file))
+			continue
 		}
 		rev, err := PiFileRevisionOf(file)
 		if err != nil {
@@ -456,12 +465,22 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		if _, err = tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint, sync_semantics_version, diagnostics_summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, file, rev.ModifiedMs, newCommittedLines, rev.ModifiedMs/1000, newCommittedByte, int64(newTail), PiSyncSemanticsVersion, string(summary)); err != nil {
 			return rollback(err)
 		}
-		if commitErr := tx.Commit(); commitErr != nil {
+		var commitErr error
+		if injectCommitFailureForTest != nil && injectCommitFailureForTest(file) {
+			_ = tx.Rollback()
+			commitErr = fmt.Errorf("injected commit failure for %s", file)
+		} else {
+			commitErr = tx.Commit()
+		}
+		if commitErr != nil {
+			// commit 结果可能不确定：失败路径不写 cursor，只持久化 diagnostics；
+			// 下一次 Refresh 重新读取实际持久化的 cursor，重试靠 dedup 幂等，
+			// 不假定旧 cursor 一定生效，也不重复记账。
 			_ = tx.Rollback()
 			fileDiagnostics.Skipped++
 			fileDiagnostics.warn("提交 %s 失败: %v", file, commitErr)
 			mergeDiagnostics(&diagnostics, &fileDiagnostics)
-			if persistErr := persistFileDiagnostics(database, file, fileDiagnostics); persistErr != nil {
+			if persistErr := persistCommitFailureDiagnostics(database, file, fileDiagnostics); persistErr != nil {
 				commitErr = errors.Join(commitErr, fmt.Errorf("持久化 %s 诊断失败: %w", file, persistErr))
 			}
 			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("提交 %s 失败: %w", file, commitErr)

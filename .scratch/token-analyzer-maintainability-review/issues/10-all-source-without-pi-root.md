@@ -23,7 +23,11 @@
 
 ## Completion note
 
-- 产品语义：选择允许 Codex-only All；无 Pi root 时不建立 Pi binding、不读取 Pi history，Codex totals/sessions/groups/period/meta 正常可查，Pi 部分为空；已配置但不可用的 Pi root 仍 fail closed。
-- 修改摘要：Refresh 与 Query 对无 Pi root 使用同一策略，QueryAll 跳过 Pi ledger/rollup/diagnostics 读取；新增 Codex-only All 回归和 All invalid-root 回归。
-- 静态验证：Go 文件已 `gofmt`，`git diff --check` 通过，All/Query/Refresh 分支已检索；测试未执行。
-- 状态：保持 `claimed`，聚焦 Go 测试与 review 待执行；未解决阻塞为本轮 HANDOFF 未授权编译/测试。
+### 第二轮（remediation）
+
+- 语义收窄：无 Pi root 的 Codex-only All 仅在 ledger 确认没有 token-analyzer 自有 Pi history 时成立；一旦发现无 binding 的 legacy Pi history，Refresh（`pi.RefreshResolved`）与 Query（`source=all`、piRoot 为空分支）都返回 `db.ErrSourceRootBindingRequired`，不隐藏、不自动认领、不写 binding，历史 rows 不变。
+- 已配置但不可用的 Pi root 仍 fail closed；`source=pi`、`source=codex`、有 Pi root 的 `source=all` 行为不变。
+- 回归：新增 `TestAllWithoutPiRootRejectsLegacyPiHistory`（legacy history → Refresh/Query 拒绝，pi_sessions 不变、binding 为 0）；既有 `TestAllWithoutPiRootReturnsCodexOnly` 覆盖空 ledger/Codex-only All 成功。
+- 文档：README、CONTEXT、ADR-0005 已同步上述边界。
+- 静态验证：改动 Go 文件 `gofmt -l` 无输出；`git diff --check` 通过。未执行 `go test`、`go vet`、build（未获授权）。
+- 状态：保持 `claimed`；acceptance 未勾选，等待 review 与聚焦测试执行。

@@ -19,6 +19,9 @@ func FindSessionFileByHeaderID(root string, layout Layout, sessionID string) (st
 		return "", fmt.Errorf("%w: empty session id", ErrSessionNotFound)
 	}
 	for _, path := range CollectPiJsonlFiles(root, layout) {
+		if isSymlinkPath(path) {
+			continue
+		}
 		file, err := os.Open(path)
 		if err != nil {
 			continue
@@ -39,6 +42,9 @@ func FindSessionFileByHeaderID(root string, layout Layout, sessionID string) (st
 			continue
 		}
 		if header.Type == "session" && header.ID == sessionID {
+			if err := VerifyPinnedSessionFile(root, path); err != nil {
+				continue
+			}
 			return path, nil
 		}
 	}

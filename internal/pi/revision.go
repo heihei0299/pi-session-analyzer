@@ -3,6 +3,7 @@ package pi
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"os"
 )
 
@@ -28,6 +29,9 @@ func tailFingerprintGo(buf []byte) uint32 {
 }
 
 func PiFileRevisionOf(path string) (PiFileRevision, error) {
+	if isSymlinkPath(path) {
+		return PiFileRevision{}, fmt.Errorf("refuse symlink file %q", path)
+	}
 	st, err := os.Stat(path)
 	if err != nil {
 		return PiFileRevision{}, err
@@ -63,6 +67,9 @@ func PiFileRevisionOf(path string) (PiFileRevision, error) {
 }
 
 func tailFingerprintAtGo(path string, offset int64) (uint32, error) {
+	if isSymlinkPath(path) {
+		return 0, fmt.Errorf("refuse symlink file %q", path)
+	}
 	l := offset
 	if l > 4096 {
 		l = 4096

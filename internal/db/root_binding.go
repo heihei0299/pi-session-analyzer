@@ -27,6 +27,85 @@ func ValidateSourceRoot(root string) error {
 	return err
 }
 
+func HasPiHistory(database *Database) (bool, error) {
+	return hasPiHistory(database)
+}
+
+func validatePinnedRoot(pinnedRoot string) error {
+	if strings.TrimSpace(pinnedRoot) == "" {
+		return fmt.Errorf("%w: empty root", ErrSourceRootUnavailable)
+	}
+	if !filepath.IsAbs(pinnedRoot) || filepath.Clean(pinnedRoot) != pinnedRoot {
+		return fmt.Errorf("%w: pinned root must be canonical absolute: %q", ErrSourceRootUnavailable, pinnedRoot)
+	}
+	info, err := os.Stat(pinnedRoot)
+	if err != nil {
+		return fmt.Errorf("%w: stat %q: %v", ErrSourceRootUnavailable, pinnedRoot, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: %q is not a directory", ErrSourceRootUnavailable, pinnedRoot)
+	}
+	resolved, err := filepath.EvalSymlinks(pinnedRoot)
+	if err != nil {
+		return fmt.Errorf("%w: resolve %q: %v", ErrSourceRootUnavailable, pinnedRoot, err)
+	}
+	if filepath.Clean(resolved) != pinnedRoot {
+		return fmt.Errorf("%w: pinned root changed %q -> %q", ErrSourceRootMismatch, pinnedRoot, resolved)
+	}
+	return nil
+}
+
+func BindPinnedSourceRoot(database *Database, source, pinnedRoot string) error {
+	if err := validatePinnedRoot(pinnedRoot); err != nil {
+		return err
+	}
+	var bound string
+	err := database.DB.QueryRow(`SELECT root_path FROM source_root_bindings WHERE data_source = ?`, source).Scan(&bound)
+	if err == sql.ErrNoRows {
+		if source == "pi" {
+			hasHistory, err := hasPiHistory(database)
+			if err != nil {
+				return fmt.Errorf("check existing Pi history: %w", err)
+			}
+			if hasHistory {
+				return fmt.Errorf("%w: Pi history has no root binding; explicit migration or a new ledger is required", ErrSourceRootBindingRequired)
+			}
+		}
+		if _, err := database.DB.Exec(`INSERT INTO source_root_bindings (data_source, root_path) VALUES (?, ?)`, source, pinnedRoot); err != nil {
+			return fmt.Errorf("bind %s source root: %w", source, err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read %s source root: %w", source, err)
+	}
+	if bound != pinnedRoot {
+		return sourceRootMismatch(source, bound, pinnedRoot)
+	}
+	return nil
+}
+
+func CheckPinnedSourceRoot(database *Database, source, pinnedRoot string) error {
+	if err := validatePinnedRoot(pinnedRoot); err != nil {
+		return err
+	}
+	var bound string
+	err := database.DB.QueryRow(`SELECT root_path FROM source_root_bindings WHERE data_source = ?`, source).Scan(&bound)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("%w: %s ledger has no binding", ErrSourceRootBindingMissing, source)
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return fmt.Errorf("%w: %s ledger has no binding table", ErrSourceRootBindingMissing, source)
+		}
+		return fmt.Errorf("read %s source root: %w", source, err)
+	}
+	if bound != pinnedRoot {
+		return sourceRootMismatch(source, bound, pinnedRoot)
+	}
+	return nil
+}
+
 func BindSourceRoot(database *Database, source, root string) error {
 	identity, err := CanonicalSourceRoot(root)
 	if err != nil {

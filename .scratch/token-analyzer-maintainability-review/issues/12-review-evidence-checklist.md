@@ -23,8 +23,10 @@
 
 ## Completion note
 
-- 证据同步：Issue 01/02 checklist 已依据既有记录的聚焦测试与 Review 结果勾选；Issue 09/10/11 保持 `claimed`，未把未执行的 Go 测试当作完成证据。
-- 文档同步：README、CONTEXT 和 ADR-0005 已记录 canonical physical root 与无 Pi root 的 Codex-only All 语义。
-- 静态验证：相关 Go 文件已 `gofmt`，`git diff --check` 通过，root/All/diagnostics 关键路径已静态检索；未执行 `go test`、`go vet`、build 或全量测试（HANDOFF 未授权）。
-- 剩余阻塞：09–11 的聚焦 Go 测试、首次 review 和后续整改仍待执行。
+### 第二轮（remediation）
+
+- 证据同步：Issue 01/02 保持已根据既有记录勾选；Issue 09/10/11 保持 `claimed`，未把未执行的 Go 测试写成行为验证，本轮为三项 finding 补写实现摘要、回归测试清单与“未执行”声明。
+- 文档同步：README、CONTEXT 和 ADR-0005 已补充（1）校验后固定 canonical physical root、拒绝候选 project/`.jsonl` symlink；（2）无 Pi root 的 Codex-only All 仅在 ledger 无 token-analyzer 自有 Pi history 时成立，legacy Pi history 一律 fail closed 且不自动认领。
+- 静态验证：改动 Go 文件 `gofmt -l` 无输出；`git diff --check` 通过。未执行 `go test`、`go vet`、build 或全量测试（未获授权）。
+- 剩余阻塞：09–11 的聚焦 Go 测试与 review；本轮 commit 后等待 w9:p1 review。
 - Awaiting: review。

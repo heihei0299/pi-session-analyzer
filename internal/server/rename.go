@@ -154,7 +154,7 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer ledger.Close()
-	if err := db.CheckSourceRoot(ledger, "pi", resolved.Root); err != nil {
+	if err := db.CheckPinnedSourceRoot(ledger, "pi", resolved.Root); err != nil {
 		sendQueryError(w, err)
 		return
 	}
@@ -176,6 +176,10 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if err := pi.VerifyPinnedSessionFile(resolved.Root, matchedFile); err != nil {
+		sendQueryError(w, err)
+		return
+	}
 	fi, err := os.Stat(matchedFile)
 	if err != nil {
 		sendError(w, http.StatusInternalServerError, "Internal Server Error", err.Error())
@@ -187,9 +191,17 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 	}
 
 	target := filepath.Join(filepath.Dir(matchedFile), fmt.Sprintf("%s_%s.jsonl", sanitized, tail))
+	if err := pi.VerifyPinnedTarget(resolved.Root, target); err != nil {
+		sendQueryError(w, err)
+		return
+	}
 	if target != matchedFile {
 		if _, err := os.Stat(target); err == nil {
 			sendError(w, http.StatusConflict, "Conflict", "同名文件已存在")
+			return
+		}
+		if err := pi.VerifyPinnedSessionFile(resolved.Root, matchedFile); err != nil {
+			sendQueryError(w, err)
 			return
 		}
 		if err := os.Rename(matchedFile, target); err != nil {

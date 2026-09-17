@@ -23,7 +23,10 @@
 
 ## Completion note
 
-- 修改摘要：新增 canonical physical root 返回值；Refresh 在打开 ledger 前固定 canonical root，Query/QueryDetail/rename 在后续读取或 mutation 中复用 canonical path；增量 diagnostics path 也按 physical containment 判断。
-- 回归证据：新增 symlink target switch 后 RefreshResolved 与 rename gate 测试，覆盖校验后不重新解析词法 symlink 的契约；测试未执行。
-- 静态验证：Go 文件已 `gofmt`，`git diff --check` 通过，canonical root 调用链已检索。
-- 状态：保持 `claimed`，聚焦 Go 测试与 review 待执行；未解决阻塞为本轮 HANDOFF 未授权编译/测试。
+### 第二轮（remediation）
+
+- 修改摘要：根 identity 固定为 pinned canonical physical root：新增 `BindPinnedSourceRoot` / `CheckPinnedSourceRoot`，不重解析，要求 root 自身就是已解析的绝对物理路径；RefreshResolved、Query、QueryDetail、rename 全部改用 pinned 版本，不再在绑定阶段重新 canonicalize 后丢弃 identity。
+- 候选实体校验：`CollectPiJsonlFiles` 跳过 `.jsonl` 与 project symlink；新增 `VerifyPinnedSessionFile` / `VerifyPinnedTarget`（拒绝 symlink file/project，并校验物理 containment），RefreshResolved 在同步前逐个校验候选，rename 在 lookup 后、Stat 前、Rename 前分别校验。
+- Refresh/Query 与 rename 的 root/project/.jsonl symlink target 替换、校验后不重解析的回归测试已补：`TestRefreshResolvedSkipsSymlinkProjectAndFileEscape`、`TestServerRenameRefusesSymlinkFileEscape`；既有 `TestRefreshResolvedKeepsCanonicalPhysicalRootAfterSymlinkSwap`、`TestServerRenameRejectsSymlinkTargetSwitchBeforeFilesystemRename`、`TestSourceRootBinding*` 保持适用。
+- 静态验证：改动 Go 文件 `gofmt -l` 无输出（已格式化）；`git diff --check` 通过。本机未执行 `go test`、`go vet`、build 或全量测试（未获授权），所有行为断言仅为待执行回归。
+- 状态：保持 `claimed`；acceptance 未勾选，等待 review 与聚焦测试执行。

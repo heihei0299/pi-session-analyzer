@@ -161,10 +161,20 @@ func Query(cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessi
 				return nil, err
 			}
 		}
-		if source == "pi" || piRoot != "" {
-			if err := db.CheckSourceRoot(database, "pi", piRoot); err != nil {
+		if source == "pi" {
+			if err := db.CheckPinnedSourceRoot(database, "pi", piRoot); err != nil {
 				return nil, err
 			}
+		} else if piRoot == "" {
+			has, err := db.HasPiHistory(database)
+			if err != nil {
+				return nil, err
+			}
+			if has {
+				return nil, fmt.Errorf("%w: Pi history has no root binding; explicit migration or a new ledger is required", db.ErrSourceRootBindingRequired)
+			}
+		} else if err := db.CheckPinnedSourceRoot(database, "pi", piRoot); err != nil {
+			return nil, err
 		}
 	}
 	switch source {
@@ -202,7 +212,7 @@ func QueryDetail(cfg Config, sessionID string) (*sessiondata.SessionDetailResult
 			return nil, err
 		}
 	}
-	if err := db.CheckSourceRoot(database, "pi", resolved.Root); err != nil {
+	if err := db.CheckPinnedSourceRoot(database, "pi", resolved.Root); err != nil {
 		return nil, err
 	}
 	return queryPiDetail(database, sessionID)

@@ -266,6 +266,62 @@ func TestServerRenameRejectsSymlinkTargetSwitchBeforeFilesystemRename(t *testing
 	}
 }
 
+func TestServerRenameRefusesSymlinkFileEscape(t *testing.T) {
+	t.Setenv("TOKEN_ANALYZER_DB", "")
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+	boundRoot := t.TempDir()
+	outside := t.TempDir()
+	project := filepath.Join(boundRoot, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outsideFile := filepath.Join(outside, "evil.jsonl")
+	content := `{"type":"session","id":"evil-id","timestamp":"2026-09-17T10:00:00Z","cwd":"/evil"}
+{"type":"message","id":"evil-request","timestamp":"2026-09-17T10:05:00Z","message":{"role":"assistant","model":"m1","usage":{"input":10,"output":5},"stopReason":"stop"}}
+`
+	if err := os.WriteFile(outsideFile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(outsideFile, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(project, "PiSession_evil-id.jsonl")
+	if err := os.Symlink(outsideFile, link); err != nil {
+		t.Skipf("symlink is not supported: %v", err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "ledger.db")
+	database, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.BindSourceRoot(database, "pi", boundRoot); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	srv := NewServer(boundRoot, Options{DBPath: dbPath})
+	request := httptest.NewRequest(http.MethodPost, "/api/sessions/rename", strings.NewReader(`{"sessionId":"evil-id","name":"NewName"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(response, request)
+	if response.Code == http.StatusOK {
+		t.Fatalf("symlink escape must not rename successfully: status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(outsideFile); err != nil {
+		t.Fatalf("outside file must remain untouched: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "NewName_evil-id.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("outside directory must not be modified: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, "NewName_evil-id.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("pinned project must not gain a renamed symlink: %v", err)
+	}
+}
+
 func TestServerRenameReportsRefreshFailureAfterFilesystemRename(t *testing.T) {
 	t.Setenv("TOKEN_ANALYZER_DB", "")
 	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")

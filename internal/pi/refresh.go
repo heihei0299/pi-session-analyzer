@@ -1,6 +1,9 @@
 package pi
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/heihei0299/token-analyzer/internal/db"
 )
 
@@ -21,13 +24,27 @@ func Refresh(database *db.Database, piDir string) (SyncResult, error) {
 	return RefreshResolved(database, resolved)
 }
 
-// RefreshResolved 使用调用方已经 canonicalize 的 Pi root，后续只访问该 physical path。
+// RefreshResolved 使用调用方已经 canonicalize 的 Pi root，后续只访问该 pinned physical path。
+// 不在绑定阶段重新解析丢弃 identity；候选文件逐个验证 containment 并拒绝 symlink。
 func RefreshResolved(database *db.Database, resolved ResolveResult) (SyncResult, error) {
-	if resolved.Root != "" {
-		if err := db.BindSourceRoot(database, "pi", resolved.Root); err != nil {
+	if strings.TrimSpace(resolved.Root) == "" {
+		has, err := db.HasPiHistory(database)
+		if err != nil {
+			return SyncResult{}, fmt.Errorf("check existing Pi history: %w", err)
+		}
+		if has {
+			return SyncResult{}, fmt.Errorf("%w: Pi history has no root binding; explicit migration or a new ledger is required", db.ErrSourceRootBindingRequired)
+		}
+		return SyncPiUsage(database, nil)
+	}
+	if err := db.BindPinnedSourceRoot(database, "pi", resolved.Root); err != nil {
+		return SyncResult{}, err
+	}
+	files := CollectPiJsonlFiles(resolved.Root, resolved.Layout)
+	for _, f := range files {
+		if err := VerifyPinnedSessionFile(resolved.Root, f); err != nil {
 			return SyncResult{}, err
 		}
 	}
-	files := CollectPiJsonlFiles(resolved.Root, resolved.Layout)
 	return SyncPiUsage(database, files)
 }
