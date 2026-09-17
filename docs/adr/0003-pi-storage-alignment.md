@@ -1,7 +1,9 @@
 # ADR-0003 — 存储与口径对齐 cc-switch（SQLite 直切，无兼容）
 
-- **状态**: Accepted（2026-09-03，直切）
+- **状态**: Accepted（2026-09-03，直切；历史决策，当前实现以 ADR-0005 为准）
 - **影响组件**: `src/db.ts` / `src/pi-discovery.ts` / `src/pi-parse.ts` / `src/pi-identity.ts` / `src/pi-sync.ts` / `src/cost/calculator.ts` / `src/db-aggregation.ts` / `src/api.ts` / `src/webui.html` / `internal/db` / `internal/pi` / `CONTEXT.md`
+
+> **当前状态说明（2026-09-12）**：本文保留 2026-09-03 的历史存储对齐决策；其中 `SCHEMA_VERSION=1`、旧 5 表和 Node/TS 实现只描述当时状态，不是当前执行依据。Go-only 当前 schema 为 v3，增加 `source_root_bindings` 将一个 ledger 绑定到一个 Pi root 的真实路径；无 binding 的 legacy Pi rows 在只读路径 fail closed，已有历史行也不能被首次 Refresh 自动认领，必须显式迁移/确认或使用新 ledger；root Refresh/Query/QueryDetail 与 symlink 解析语义见 [`CONTEXT.md`](../../CONTEXT.md) 与 [`ADR-0005`](0005-go-only-backend.md)。
 
 ## 背景
 

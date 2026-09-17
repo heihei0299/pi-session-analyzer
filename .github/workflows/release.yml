@@ -22,6 +22,26 @@ jobs:
           go-version: '1.23.x'
           cache: false
 
+      - name: Verify Release Tag
+        run: |
+          tag_pattern='^v[0-9]{4}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])(-[0-9]+)?$'
+          for tag in v2026.9.12 v2026.9.12-1; do
+            if [[ ! "$tag" =~ $tag_pattern ]]; then
+              echo "accepted release tag rejected: $tag"
+              exit 1
+            fi
+          done
+          for tag in v1abc v2026 v2026.9 v2026.13.1 v2026.9.0 v2026.9.32; do
+            if [[ "$tag" =~ $tag_pattern ]]; then
+              echo "invalid release tag accepted: $tag"
+              exit 1
+            fi
+          done
+          if [[ ! "$GITHUB_REF_NAME" =~ $tag_pattern ]]; then
+            echo "release tag must match vYYYY.M.D[-N]: $GITHUB_REF_NAME"
+            exit 1
+          fi
+
       - name: Run Tests (Go-only)
         env:
           GOMAXPROCS: "2"
@@ -38,7 +58,12 @@ jobs:
 
       - name: Build Multi-Platform Binaries
         run: |
-          make release
+          make release VERSION="${GITHUB_REF_NAME#v}"
+
+      - name: Smoke Check Binary
+        run: |
+          test "$(./dist/token-analyzer-linux-amd64 --version)" = "token-analyzer ${GITHUB_REF_NAME#v}"
+          ./dist/token-analyzer-linux-amd64 --help
 
       - name: Package Archives and Checksums
         run: |

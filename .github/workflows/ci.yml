@@ -1,6 +1,12 @@
 name: CI
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -19,6 +25,16 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: false
+
+      - name: Check Go Formatting
+        run: |
+          test -z "$(gofmt -l $(git ls-files '*.go'))"
+
+      - name: Run Vet (Go-only)
+        env:
+          GOMAXPROCS: "2"
+        run: |
+          go vet ./...
 
       - name: Run Tests (Go-only)
         env:

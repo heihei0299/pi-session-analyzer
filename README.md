@@ -1,7 +1,7 @@
 # Token Analyzer
 
 分析 Pi 会话与 Codex rollout token 消耗的 Go-only CLI 工具（单二进制，零外部依赖）。Pi 默认读取 `~/.pi/agent/sessions/`，Codex 读取 `sessions/` 与 `archived_sessions/` 下的 plain/zstd rollout。读取全部合法会话，按统计口径 A 提取消耗数据（含 **fork 会话去重**——fork 复制的历史消息不重复计费），输出总消耗量 / 会话级 / 单请求级三个窗口的指标，支持模型 / cwd 维度拆分、时间维度汇总与筛选、结构化输出（JSON/CSV），并可实时监控正在运行的 pi 进程（`--watch` 同样按 fork 去重口径）；`serve` 子命令启动零依赖本地 Web 面板（总览卡片 / 分组表 / 会话与请求明细 / 会话管理），支持时间范围筛选、**服务端分页排序**、基于 source revision 的自动刷新、导出 JSON/CSV 与会话重命名。
-以 GitHub Release 发布 Go 单二进制（Linux / macOS / Windows，日期式版本如 `2026.9.3`），不再提供 npm 分发。
+以 GitHub Release 发布 Go 单二进制（Linux / macOS / Windows，日期式版本 `YYYY.M.D`），不再提供 npm 分发。
 领域术语与最终架构见 [`CONTEXT.md`](CONTEXT.md)，关键决策见 [`docs/adr/`](docs/adr/)。历史迁移计划与审计记录仅作背景参考，不是当前执行入口。
 
 ## 安装
@@ -16,6 +16,8 @@ make build
 # 3. 多平台交叉编译发布 (生成 Linux / macOS / Windows 产物)
 make release
 ```
+
+版本唯一来源是 Git 的 `v<版本>` release tag；Makefile 在构建时将 tag 去掉 `v` 注入 CLI。非 tag 的本地构建显示 `dev`，要生成带发布版本的产物请在对应 tag 上使用 Makefile。
 
 开发环境只需要 Go 1.23+（纯 Go zstd decoder 读取 Codex compressed rollout，modernc.org/sqlite 零 CGO）。运行 CLI/API/WebUI 不需要 Node/npm。
 
@@ -45,7 +47,7 @@ OpenCode 云端用量同步与对账已迁入同仓独立项目 [`opencode-analy
 
 - **窗口**（位置参数，默认 `totals`）：`totals` 总消耗量 / `sessions` 会话级（每会话一行）/ `requests` 单请求级（逐条计入口径消息）
 - **数据源**：`--source pi|codex|all`（默认 `pi`）；Codex 目录优先级为 `--codex-dir > CODEX_HOME > ~/.codex`。`--dir` 始终只表示 Pi 目录。
-- **数据库**：`--db <path>` 可指定 normalized ledger；未指定时使用 `TOKEN_ANALYZER_DB`/默认缓存路径。
+- **数据库**：`--db <path>` 可指定 normalized ledger；未指定时使用 `TOKEN_ANALYZER_DB`/默认缓存路径。单个 ledger 只绑定一个 Pi root：首次 Pi Refresh 建立真实路径 binding，切换 `--dir` 后 Refresh/Query/QueryDetail 会明确拒绝且不删除历史行；旧 v2/无 binding ledger 的可写 migration 只补齐 schema；若已有 Pi 历史行，首次 Refresh 仍需显式迁移/确认或使用新 ledger，不能自动认领，只有空 ledger 才能首次绑定；缺失 root 或 symlink target 无法解析时安全拒绝。
 - **数据目录**：`--dir <path>`（默认 `~/.pi/agent/sessions/`）
 - **输出格式**：`--format table|json|csv`（默认 `table` 终端表格）
 - **筛选**（对所有窗口生效，可组合）：`--model <id>` / `--cwd <path>` / `--since <时间>` / `--until <时间>`
@@ -89,13 +91,13 @@ token-analyzer serve
 
 ## 发布
 
-push `v<版本>` tag 由 GitHub Actions（[`.github/workflows/release.yml`](.github/workflows/release.yml)）自动完成 `go test -p 1 ./...` + `make release` + GitHub Release（Linux / macOS / Windows 二进制 + checksums）：
+推送 `v<版本>` tag 由 GitHub Actions（[`.github/workflows/release.yml`](.github/workflows/release.yml)）自动完成 `go test -p 1 ./...` + `make release` + `--help`/`--version` smoke check + GitHub Release（Linux / macOS / Windows 二进制 + checksums）；发布前会校验 artifact 的 `--version` 与 tag 一致：
 
 ```bash
 git tag v2026.9.12 && git push && git push --tags
 ```
 
-- **版本**：日期式 semver（`YYYY.M.D`）；同日再次发布用 prerelease 后缀（`2026.9.3-1`）
+- **版本来源**：Git `v<版本>` tag 是唯一权威来源；日期式 semver 为 `YYYY.M.D`，同日再次发布用 prerelease 后缀（如 `2026.9.12-1`）
 - **产物**：只发布 Go-only token-analyzer 所需二进制，不再区分 Go/npm edition
 
 ## Web 面板（serve）
@@ -137,11 +139,11 @@ CONTEXT.md              领域术语表（统计口径、fork 会话、字段语
 docs/adr/               架构决策记录（0001～0005，终态见 0005 Go-only 后端）
 Makefile                多平台交叉编译与自动化测试脚本（Go-only，无 Node 依赖）
 go.mod                  Go 模块 `github.com/heihei0299/token-analyzer`（纯 Go zstd decoder 与 SQLite 依赖）
-cmd/token-analyzer/     Go CLI 与 Serve 统一主程序入口
+cmd/token-analyzer/     Go CLI 与 Serve 入口（main 参数编排、watch 监控、output 输出）
 internal/
   pi/                   Pi source adapter（discovery/parse/identity/dedup/增量 refresh，fork 去重与双账本在此终结）
   codex/                Codex source adapter（durable usage、plain/zstd、diagnostics）
-  db/                   normalized SQLite ledger（usage 唯一事实中心）
+  db/                   normalized SQLite ledger（usage 唯一事实中心，schema v3 含 Pi root binding）
   query/                统一 Go Query Engine（totals/sessions/requests/groups/period/detail/meta，只读快照）
   refresh/              Refresh 编排（source → ledger，串行化，失败保快照并经 meta 暴露）
   domain/               核心聚合模型与指标定义（ADR-0002 口径、Totals）

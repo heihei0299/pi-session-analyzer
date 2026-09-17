@@ -98,6 +98,9 @@ func TestGoOnlyNoOpenCodeRuntime(t *testing.T) {
 // 无 TS backend、无旧聚合生产路径、无 Codex 回绕、无 Watch 独立统计、无 WebUI 双副本、无运行时耦合。
 func TestGoOnlyDeletionContract(t *testing.T) {
 	root := repoRoot(t)
+	if _, err := os.Stat(filepath.Join(root, "opencode-analyzer")); !os.IsNotExist(err) {
+		t.Fatalf("Go-only contract violated: opencode-analyzer/ must be maintained outside this repository")
+	}
 	// 无 TS backend：生产 TS 与 Node 构建链不得存在。
 	for _, rel := range []string{
 		"src/cli.ts", "src/api.ts", "src/server.ts", "src/db.ts",
