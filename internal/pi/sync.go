@@ -56,6 +56,17 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		if err != nil && err != sql.ErrNoRows {
 			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("读取 %s 游标失败: %w", file, err)
 		}
+		var storedDiagnostics Diagnostics
+		if err == nil {
+			storedDiagnostics, err = decodeDiagnostics(storedSummary.String)
+			if err != nil {
+				return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("读取 %s 诊断失败: %w", file, err)
+			}
+		}
+		if err == nil && storedDiagnostics.Source != "" && storedDiagnostics.Source != "pi" {
+			recordFailure(fmt.Errorf("诊断摘要属于 %s source", storedDiagnostics.Source))
+			continue
+		}
 		if err == nil && nByte.Valid && nTail.Valid && nSemantics.Valid && nSemantics.Int64 == PiSyncSemanticsVersion {
 			cursorLastByte = nByte.Int64
 			cursorTail = uint32(nTail.Int64)
@@ -71,12 +82,11 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			}
 		}
 		if hasCursor && canSeek && rev.FileSize == cursorLastByte && rev.TailFingerprint == cursorTail {
-			stored, decodeErr := decodeDiagnostics(storedSummary.String)
-			if decodeErr != nil {
-				return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("读取 %s 诊断失败: %w", file, decodeErr)
-			}
-			mergeDiagnostics(&diagnostics, &stored)
+			mergeDiagnostics(&diagnostics, &storedDiagnostics)
 			continue
+		}
+		if hasCursor && canSeek {
+			mergeDiagnostics(&fileDiagnostics, &storedDiagnostics)
 		}
 		var linesToProcess []string
 		var newCommittedByte int64

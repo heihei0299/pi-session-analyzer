@@ -1,6 +1,7 @@
 package pi
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -84,6 +85,25 @@ func piPathWithin(root, candidate string) bool {
 // persistFileDiagnostics updates only the diagnostic summary; an existing
 // cursor remains unchanged so the failed file is retried on the next refresh.
 func persistFileDiagnostics(database *db.Database, path string, diagnostics Diagnostics) error {
+	var storedSummary sql.NullString
+	err := database.DB.QueryRow(`SELECT diagnostics_summary FROM session_log_sync WHERE file_path = ?`, path).Scan(&storedSummary)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil {
+		stored, decodeErr := decodeDiagnostics(storedSummary.String)
+		if decodeErr != nil {
+			return fmt.Errorf("decode existing diagnostics for %s: %w", path, decodeErr)
+		}
+		if stored.Source != "" && stored.Source != diagnostics.Source {
+			return nil
+		}
+		mergeDiagnostics(&stored, &diagnostics)
+		if stored.Source == "" {
+			stored.Source = diagnostics.Source
+		}
+		diagnostics = stored
+	}
 	summary, err := json.Marshal(diagnostics)
 	if err != nil {
 		return err
