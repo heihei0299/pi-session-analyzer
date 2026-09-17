@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -12,14 +13,12 @@ import (
 	"github.com/heihei0299/token-analyzer/internal/domain"
 	"github.com/heihei0299/token-analyzer/internal/query"
 	"github.com/heihei0299/token-analyzer/internal/refresh"
-	"github.com/heihei0299/token-analyzer/internal/render"
-	"github.com/heihei0299/token-analyzer/internal/serialize"
 	"github.com/heihei0299/token-analyzer/internal/server"
 	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 	"github.com/heihei0299/token-analyzer/internal/timerange"
 )
 
-const Version = "2026.9.12"
+var Version = "dev"
 
 func defaultDir() string {
 	home, err := os.UserHomeDir()
@@ -74,10 +73,14 @@ func main() {
 		if cmd == "serve" || cmd == "totals" || cmd == "sessions" || cmd == "requests" {
 			window = cmd
 			args = args[1:]
+		} else {
+			fmt.Fprintf(os.Stderr, "错误: 未知 command: %s\n", cmd)
+			os.Exit(2)
 		}
 	}
 
-	fs := flag.NewFlagSet("token-analyzer", flag.ExitOnError)
+	fs := flag.NewFlagSet("token-analyzer", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	dir := fs.String("dir", defaultDir(), "Pi 数据目录")
 	source := fs.String("source", "pi", "数据源 pi|codex|all")
 	codexDir := fs.String("codex-dir", "", "Codex 数据目录")
@@ -94,7 +97,20 @@ func main() {
 	port := fs.Int("port", 50080, "serve 监听端口")
 	host := fs.String("host", "127.0.0.1", "serve 监听地址")
 
-	_ = fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		os.Exit(2)
+	}
+	if len(fs.Args()) > 0 {
+		fmt.Fprintf(os.Stderr, "错误: 未知参数或 command: %s\n", strings.Join(fs.Args(), " "))
+		os.Exit(2)
+	}
+	if err := validateCLIOptions(window, *source, *format, *by, *period, *watchMode, *interval, *port, *host); err != nil {
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+		os.Exit(2)
+	}
 
 	// Serve 模式：初次 Refresh 完成后才对外提供 snapshot 查询，
 	// 之后 watcher 以 change → refresh → query 驱动，GET 只读快照。
@@ -135,67 +151,9 @@ func main() {
 	// Watch 实时监控模式：change → source refresh → query，与普通查询同一快照源。
 	// source 解析/去重/费用等规则只在 adapter 内实现，这里不累加。
 	if *watchMode {
-		if *source != "pi" && *source != "codex" && *source != "all" {
-			fmt.Fprintln(os.Stderr, "错误: --watch 的 --source 只支持 pi|codex|all")
-			os.Exit(1)
-		}
-		fmt.Printf("开始监控数据源: %s (轮询间隔: %dms)...\n", *source, *interval)
-		printWatchTotals := func() error {
-			tot, err := queryWatchTotals(*dir, *codexDir, *dbPath, filter)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "watch 失败（保留上次快照）: %v\n", err)
-				return err
-			}
-			now := time.Now().Format("15:04:05")
-			fmt.Printf("[%s] 请求数: %d | 总 Token: %.0f | 花费: $%.4f\n",
-				now, tot.Requests, tot.TotalTokens, tot.Cost)
-			return nil
-		}
-		refreshSource := func(source string) error {
-			return refresh.Refresh(refresh.Config{PiDir: *dir, CodexDir: *codexDir, DBPath: *dbPath, Source: source})
-		}
-		lastPi, lastCodex := "", ""
-		if err := refreshSource(*source); err == nil {
-			if *source == "pi" || *source == "all" {
-				lastPi, _ = refresh.PiFingerprint(*dir)
-			}
-			if *source == "codex" || *source == "all" {
-				lastCodex, _ = refresh.CodexFingerprint(*codexDir)
-			}
-			_ = printWatchTotals()
-		} else {
-			fmt.Fprintf(os.Stderr, "watch 失败（保留上次快照）: %v\n", err)
-		}
-		ticker := time.NewTicker(time.Duration(*interval) * time.Millisecond)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			refreshed := false
-			if *source == "pi" || *source == "all" {
-				cur, err := refresh.PiFingerprint(*dir)
-				if err == nil && cur != lastPi {
-					if err := refreshSource("pi"); err != nil {
-						fmt.Fprintf(os.Stderr, "watch pi 失败（保留上次快照）: %v\n", err)
-					} else {
-						lastPi = cur
-						refreshed = true
-					}
-				}
-			}
-			if *source == "codex" || *source == "all" {
-				cur, err := refresh.CodexFingerprint(*codexDir)
-				if err == nil && cur != lastCodex {
-					if err := refreshSource("codex"); err != nil {
-						fmt.Fprintf(os.Stderr, "watch codex 失败（保留上次快照）: %v\n", err)
-					} else {
-						lastCodex = cur
-						refreshed = true
-					}
-				}
-			}
-			if refreshed {
-				_ = printWatchTotals()
-			}
+		if err := runWatch(*dir, *codexDir, *dbPath, *interval, filter); err != nil {
+			fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+			os.Exit(2)
 		}
 		return
 	}
@@ -217,6 +175,10 @@ func main() {
 		}
 	}
 
+	if err := query.Validate(query.Config{PiDir: *dir, CodexDir: *codexDir, DBPath: *dbPath, Source: *source}, filter, view); err != nil {
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+		os.Exit(2)
+	}
 	if err := refresh.Refresh(refresh.Config{PiDir: *dir, CodexDir: *codexDir, DBPath: *dbPath, Source: *source}); err != nil {
 		fmt.Fprintf(os.Stderr, "同步失败: %v\n", err)
 		os.Exit(1)
@@ -227,113 +189,52 @@ func main() {
 		os.Exit(1)
 	}
 
-	if res.Meta != nil {
-		for _, warning := range res.Meta.Warnings {
-			fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
-		}
+	if err := printQueryResult(*format, res, view); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
 	}
+}
 
-	// 格式化输出
-	switch *format {
-	case "json":
-		bytes, _ := serialize.SerializeJSON(jsonOutputData(res))
-		fmt.Println(string(bytes))
-	case "csv":
-		var data any
-		if res.Rows != nil {
-			data = res.Rows
-		} else if res.Totals != nil {
-			data = *res.Totals
-		}
-		bytes, err := serialize.SerializeCSV(string(view.Kind), data)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "CSV 序列化失败: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Print(string(bytes))
+func validateCLIOptions(window, source, format, by, period string, watch bool, interval, port int, host string) error {
+	if _, err := sessiondata.NormalizeSource(source); err != nil {
+		return err
+	}
+	switch format {
+	case "table", "json", "csv":
 	default:
-		// Table 格式
-		if rows, ok := res.Rows.([]domain.SessionRow); ok {
-			fmt.Print(render.RenderSessionTable(rows))
-		} else if rows, ok := res.Rows.([]domain.RequestRow); ok {
-			fmt.Print(render.RenderRequestTable(rows))
-		} else if rows, ok := res.Rows.([]domain.GroupRow); ok {
-			fmt.Print(render.RenderGroupTable(rows, view.By))
-		} else if rows, ok := res.Rows.([]domain.PeriodRow); ok {
-			fmt.Print(render.RenderPeriodTable(rows, view.Period))
-		} else if res.Totals != nil {
-			fmt.Print(render.RenderTotalsTable(*res.Totals))
+		return fmt.Errorf("未知 format: %s（支持 table|json|csv）", format)
+	}
+	if by != "" {
+		if window != "totals" {
+			return fmt.Errorf("--by 仅适用于 totals command")
+		}
+		value := domain.GroupBy(by)
+		if value != domain.GroupByModel && value != domain.GroupByCwd && value != domain.GroupByModelCwd {
+			return fmt.Errorf("未知 group: %s（支持 model|cwd|model,cwd）", by)
 		}
 	}
-}
-
-// watchTotalsOnce 是 --watch 每次 tick 的全部工作：refresh 后查同一快照。
-// 与普通查询走同一 Refresh + Query 映射，故 watch totals 与同一时刻
-// 普通 Query totals 天然一致；source 规则只在 adapter 内实现，这里不累加。
-func watchTotalsOnce(piDir, codexDir, dbPath string, filter sessiondata.Filter) (*domain.Totals, error) {
-	source := filter.Source
-	if source == "" {
-		source = "pi"
-	}
-	if err := refresh.Refresh(refresh.Config{PiDir: piDir, CodexDir: codexDir, DBPath: dbPath, Source: source}); err != nil {
-		return nil, err
-	}
-	return queryWatchTotals(piDir, codexDir, dbPath, filter)
-}
-
-func queryWatchTotals(piDir, codexDir, dbPath string, filter sessiondata.Filter) (*domain.Totals, error) {
-	source := filter.Source
-	if source == "" {
-		source = "pi"
-	}
-	res, err := query.Query(query.Config{PiDir: piDir, CodexDir: codexDir, DBPath: dbPath, Source: source}, filter, sessiondata.View{Kind: sessiondata.ViewTotals})
-	if err != nil {
-		return nil, err
-	}
-	if res.Totals == nil {
-		return nil, fmt.Errorf("watch 查询无 totals")
-	}
-	return res.Totals, nil
-}
-
-func jsonOutputData(res *sessiondata.QueryResult) map[string]any {
-	var outData map[string]any
-	if res.Window == "totals" && res.Rows == nil && res.Totals != nil {
-		outData = map[string]any{
-			"window":      "totals",
-			"requests":    res.Totals.Requests,
-			"input":       res.Totals.Input,
-			"output":      res.Totals.Output,
-			"cacheRead":   res.Totals.CacheRead,
-			"cacheWrite":  res.Totals.CacheWrite,
-			"reasoning":   res.Totals.Reasoning,
-			"totalTokens": res.Totals.TotalTokens,
-			"cost":        res.Totals.Cost,
-			"cacheRate":   res.Totals.CacheRate,
+	if period != "" {
+		if window != "totals" {
+			return fmt.Errorf("--period 仅适用于 totals command")
 		}
-		if res.Totals.CostStatus != "" {
-			outData["costStatus"] = res.Totals.CostStatus
-		}
-	} else if res.Window == "totals" && res.By != "" {
-		outData = map[string]any{
-			"window": "totals",
-			"by":     string(res.By),
-			"rows":   res.Rows,
-		}
-	} else if res.Window == "totals" && res.Period != "" {
-		outData = map[string]any{
-			"window": "totals",
-			"period": string(res.Period),
-			"rows":   res.Rows,
-		}
-	} else {
-		outData = map[string]any{
-			"window": res.Window,
-			"rows":   res.Rows,
+		value := domain.Period(period)
+		if value != domain.PeriodDay && value != domain.PeriodWeek && value != domain.PeriodMonth {
+			return fmt.Errorf("未知 period: %s（支持 day|week|month）", period)
 		}
 	}
-	if res.Meta != nil {
-		outData["meta"] = res.Meta
+	if by != "" && period != "" {
+		return fmt.Errorf("--by 与 --period 不能同时使用")
 	}
-	return outData
+	if watch && interval <= 0 {
+		return fmt.Errorf("--interval 必须为正数毫秒")
+	}
+	if window == "serve" {
+		if port <= 0 || port > 65535 {
+			return fmt.Errorf("--port 必须在 1 到 65535 之间")
+		}
+		if strings.TrimSpace(host) == "" {
+			return fmt.Errorf("--host 不能为空")
+		}
+	}
+	return nil
 }

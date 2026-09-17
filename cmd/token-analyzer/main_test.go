@@ -11,6 +11,42 @@ import (
 	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
+func TestValidateCLIOptionsRejectsUnsupportedInputs(t *testing.T) {
+	tests := []struct {
+		name string
+		args func() error
+	}{
+		{name: "source", args: func() error {
+			return validateCLIOptions("totals", "nope", "table", "", "", false, 1000, 50080, "127.0.0.1")
+		}},
+		{name: "format", args: func() error {
+			return validateCLIOptions("totals", "pi", "yaml", "", "", false, 1000, 50080, "127.0.0.1")
+		}},
+		{name: "group", args: func() error {
+			return validateCLIOptions("totals", "pi", "table", "invalid", "", false, 1000, 50080, "127.0.0.1")
+		}},
+		{name: "period", args: func() error {
+			return validateCLIOptions("totals", "pi", "table", "", "quarter", false, 1000, 50080, "127.0.0.1")
+		}},
+		{name: "watch interval", args: func() error {
+			return validateCLIOptions("totals", "pi", "table", "", "", true, 0, 50080, "127.0.0.1")
+		}},
+		{name: "port", args: func() error {
+			return validateCLIOptions("serve", "pi", "table", "", "", false, 1000, 0, "127.0.0.1")
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.args(); err == nil {
+				t.Fatal("unsupported CLI input must return an error")
+			}
+		})
+	}
+	if err := validateCLIOptions("totals", "all", "json", "model", "", false, 1000, 50080, "127.0.0.1"); err != nil {
+		t.Fatalf("supported CLI inputs rejected: %v", err)
+	}
+}
+
 func TestJSONOutputDataIncludesMetaForGroupedAndPeriodResults(t *testing.T) {
 	meta := &sessiondata.QueryMeta{Sources: []string{"codex"}, Warnings: []string{"fixture warning"}}
 	tests := []struct {
@@ -50,6 +86,7 @@ func TestJSONOutputDataIncludesMetaForGroupedAndPeriodResults(t *testing.T) {
 // Watch totals 与同一时刻普通 Query totals 完全一致：两者走同一映射，
 // 这里追加写入后分别经 watchTotalsOnce 与 Refresh+Query 取数并逐字段比对。
 func TestWatchTotalsMatchQueryTotals(t *testing.T) {
+	t.Setenv("TOKEN_ANALYZER_DB", "")
 	piDir := t.TempDir()
 	piFile := filepath.Join(piDir, "project", "w.jsonl")
 	if err := os.MkdirAll(filepath.Dir(piFile), 0o755); err != nil {

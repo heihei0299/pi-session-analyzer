@@ -41,6 +41,12 @@ func TestParseTimestampStrictValidation(t *testing.T) {
 	}
 }
 
+func TestRejectsReversedRanges(t *testing.T) {
+	if _, err := MakeMessageRange("2026-09-12", "2026-09-11"); err == nil {
+		t.Fatal("a range whose since is after until must be rejected")
+	}
+}
+
 func TestParseTimestampDateTimeFormats(t *testing.T) {
 	// 自定义时间范围（时分下拉产生无时区 ISO 本地时间串）
 	ms, err := ParseTimestamp("2026-08-05T14:00", false)

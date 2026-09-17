@@ -145,6 +145,9 @@ func makeRange(kind RangeKind, since, until string) (*TimeRange, error) {
 		}
 		untilMs = &ms
 	}
+	if sinceMs != nil && untilMs != nil && *sinceMs > *untilMs {
+		return nil, fmt.Errorf("无效时间范围: since must not be after until")
+	}
 	return &TimeRange{
 		Kind:    kind,
 		Since:   since,

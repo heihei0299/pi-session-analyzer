@@ -12,6 +12,7 @@ import (
 	"github.com/heihei0299/token-analyzer/internal/codex"
 	"github.com/heihei0299/token-analyzer/internal/db"
 	"github.com/heihei0299/token-analyzer/internal/pi"
+	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
 // Config 与 query.Config 同构（分包避免 query 反向依赖 adapter）。
@@ -30,9 +31,15 @@ var refreshMu sync.Mutex
 // codex/all 额外同步 Codex rollout。幂等，可失败重试。
 // 失败不清除旧 ledger：sync 按文件事务提交，失败只影响本次增量。
 func Refresh(cfg Config) error {
+	source, err := sessiondata.NormalizeSource(cfg.Source)
+	if err != nil {
+		recordResult(err)
+		return err
+	}
+	cfg.Source = source
 	refreshMu.Lock()
 	defer refreshMu.Unlock()
-	err := refreshLocked(cfg)
+	err = refreshLocked(cfg)
 	recordResult(err)
 	return err
 }

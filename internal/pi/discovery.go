@@ -81,6 +81,11 @@ func GetPiNativeSessionDir() string {
 	return ""
 }
 
+// ResolveConfiguredSessionRoot 按运行时配置解析当前 Pi root。
+func ResolveConfiguredSessionRoot(defaultRoot string) (ResolveResult, error) {
+	return ResolvePiSessionRoot(os.Getenv("PI_CODING_AGENT_SESSION_DIR"), defaultRoot, GetPiNativeSessionDir())
+}
+
 // ResolvePiSessionRoot 按优先级解析
 func ResolvePiSessionRoot(envDb, defaultRoot, piConfig string) (ResolveResult, error) {
 	if envDb != "" {
@@ -97,6 +102,7 @@ func ResolvePiSessionRoot(envDb, defaultRoot, piConfig string) (ResolveResult, e
 	}
 	return ResolveResult{Root: defaultRoot, Layout: LayoutProjectDirectories}, nil
 }
+
 var ErrRequiresProjectContext = &resolveError{"400 PI_SESSION_DIR_REQUIRES_PROJECT_CONTEXT"}
 
 type resolveError struct{ msg string }

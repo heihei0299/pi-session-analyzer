@@ -1,6 +1,7 @@
 package sessiondata
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,23 @@ import (
 )
 
 var isoDatePrefixRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}`)
+
+var ErrUnknownSource = errors.New("unknown source")
+
+// NormalizeSource validates a requested source and applies the default used by
+// every Refresh and Query entry point.
+func NormalizeSource(source string) (string, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "pi", nil
+	}
+	switch source {
+	case "pi", "codex", "all":
+		return source, nil
+	default:
+		return "", fmt.Errorf("%w: 未知 source: %s（支持 pi|codex|all）", ErrUnknownSource, source)
+	}
+}
 
 type Filter struct {
 	Model     string               `json:"model,omitempty"`
