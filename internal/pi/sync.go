@@ -2,107 +2,47 @@ package pi
 
 import (
 	"bufio"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/heihei0299/token-analyzer/internal/db"
 )
 
-type PiFileRevision struct {
-	FileSize        int64
-	TailFingerprint uint32
-	Complete        bool
-	ModifiedMs      int64
-}
-
-func tailFingerprintGo(buf []byte) uint32 {
-	h := sha256.New()
-	label := []byte("pi-session-tail-v1")
-	var lenBuf [8]byte
-	binary.BigEndian.PutUint64(lenBuf[:], uint64(len(label)))
-	h.Write(lenBuf[:])
-	h.Write(label)
-	binary.BigEndian.PutUint64(lenBuf[:], uint64(len(buf)))
-	h.Write(lenBuf[:])
-	h.Write(buf)
-	sum := h.Sum(nil)
-	return binary.BigEndian.Uint32(sum[:4])
-}
-
-func PiFileRevisionOf(path string) (PiFileRevision, error) {
-	st, err := os.Stat(path)
-	if err != nil {
-		return PiFileRevision{}, err
-	}
-	fileSize := st.Size()
-	modifiedMs := st.ModTime().UnixMilli()
-	tailLen := fileSize
-	if tailLen > 4096 {
-		tailLen = 4096
-	}
-	var tail []byte
-	complete := true
-	if tailLen > 0 {
-		f, err := os.Open(path)
-		if err != nil {
-			return PiFileRevision{}, err
-		}
-		defer f.Close()
-		buf := make([]byte, tailLen)
-		_, err = f.ReadAt(buf, fileSize-tailLen)
-		if err != nil {
-			return PiFileRevision{}, err
-		}
-		tail = buf
-		complete = buf[len(buf)-1] == '\n'
-	}
-	return PiFileRevision{
-		FileSize:        fileSize,
-		TailFingerprint: tailFingerprintGo(tail),
-		Complete:        complete,
-		ModifiedMs:      modifiedMs,
-	}, nil
-}
-
-func tailFingerprintAtGo(path string, offset int64) (uint32, error) {
-	l := offset
-	if l > 4096 {
-		l = 4096
-	}
-	if l <= 0 {
-		return tailFingerprintGo([]byte{}), nil
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-	buf := make([]byte, l)
-	_, err = f.ReadAt(buf, offset-l)
-	if err != nil {
-		return 0, err
-	}
-	return tailFingerprintGo(buf), nil
-}
-
 const PiSyncSemanticsVersion = 2
 
 type SyncResult struct {
-	Imported int
-	Skipped  int
+	Imported    int
+	Skipped     int
+	Diagnostics Diagnostics
 }
 
 func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 	var imported, skipped int
+	diagnostics := Diagnostics{Source: "pi"}
+	pricingByModel, err := loadModelPricing(database)
+	if err != nil {
+		return SyncResult{Diagnostics: diagnostics}, fmt.Errorf("读取 Pi 定价表失败: %w", err)
+	}
+	var failures []error
 	for _, file := range files {
+		fileDiagnostics := Diagnostics{Source: "pi"}
+		recordFailure := func(cause error) {
+			fileDiagnostics.Skipped++
+			fileDiagnostics.warn("同步 %s 失败: %v", file, cause)
+			mergeDiagnostics(&diagnostics, &fileDiagnostics)
+			failures = append(failures, fmt.Errorf("同步 %s: %w", file, cause))
+			if persistErr := persistFileDiagnostics(database, file, fileDiagnostics); persistErr != nil {
+				failures = append(failures, persistErr)
+			}
+		}
 		rev, err := PiFileRevisionOf(file)
 		if err != nil {
+			recordFailure(err)
 			continue
 		}
 		var cursorLastByte int64
@@ -111,9 +51,10 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		var hasCursor bool
 		var canSeek bool
 		var nByte, nTail, nLine, nSemantics sql.NullInt64
-		err = database.DB.QueryRow(`SELECT last_byte_offset, last_tail_fingerprint, last_line_offset, sync_semantics_version FROM session_log_sync WHERE file_path = ?`, file).Scan(&nByte, &nTail, &nLine, &nSemantics)
+		var storedSummary sql.NullString
+		err = database.DB.QueryRow(`SELECT last_byte_offset, last_tail_fingerprint, last_line_offset, sync_semantics_version, diagnostics_summary FROM session_log_sync WHERE file_path = ?`, file).Scan(&nByte, &nTail, &nLine, &nSemantics, &storedSummary)
 		if err != nil && err != sql.ErrNoRows {
-			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("读取 %s 游标失败: %w", file, err)
+			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("读取 %s 游标失败: %w", file, err)
 		}
 		if err == nil && nByte.Valid && nTail.Valid && nSemantics.Valid && nSemantics.Int64 == PiSyncSemanticsVersion {
 			cursorLastByte = nByte.Int64
@@ -130,6 +71,11 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			}
 		}
 		if hasCursor && canSeek && rev.FileSize == cursorLastByte && rev.TailFingerprint == cursorTail {
+			stored, decodeErr := decodeDiagnostics(storedSummary.String)
+			if decodeErr != nil {
+				return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("读取 %s 诊断失败: %w", file, decodeErr)
+			}
+			mergeDiagnostics(&diagnostics, &stored)
 			continue
 		}
 		var linesToProcess []string
@@ -146,23 +92,28 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			// read header
 			fh, err := os.Open(file)
 			if err != nil {
+				recordFailure(err)
 				continue
 			}
 			br := bufio.NewReader(fh)
 			hl, err := br.ReadString('\n')
 			fh.Close()
 			if err != nil && len(hl) == 0 {
+				recordFailure(err)
 				continue
 			}
 			headerLine := strings.TrimSpace(hl)
 			if headerLine == "" {
+				recordFailure(fmt.Errorf("empty session header"))
 				continue
 			}
 			var header map[string]interface{}
 			if err := json.Unmarshal([]byte(headerLine), &header); err != nil {
+				recordFailure(fmt.Errorf("invalid session header: %w", err))
 				continue
 			}
 			if header["type"] != "session" {
+				recordFailure(fmt.Errorf("invalid session header type"))
 				continue
 			}
 			if v, ok := header["id"].(string); ok {
@@ -195,12 +146,14 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			}
 			f2, err := os.Open(file)
 			if err != nil {
+				recordFailure(err)
 				continue
 			}
 			buf := make([]byte, suffixLen)
 			_, err = f2.ReadAt(buf, cursorLastByte)
 			f2.Close()
 			if err != nil {
+				recordFailure(err)
 				continue
 			}
 			suffixStr := string(buf)
@@ -221,11 +174,16 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				}
 			}
 			newCommittedLines = cursorLastLine + completeNewLines
-			nt, _ := tailFingerprintAtGo(file, newCommittedByte)
+			nt, err := tailFingerprintAtGo(file, newCommittedByte)
+			if err != nil {
+				recordFailure(err)
+				continue
+			}
 			newTail = nt
 		} else {
 			f, err := os.Open(file)
 			if err != nil {
+				recordFailure(err)
 				continue
 			}
 			scanner := bufio.NewScanner(f)
@@ -236,14 +194,21 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				lines = append(lines, scanner.Text())
 			}
 			f.Close()
+			if scanErr := scanner.Err(); scanErr != nil {
+				recordFailure(scanErr)
+				continue
+			}
 			if len(lines) == 0 {
+				recordFailure(fmt.Errorf("empty session file"))
 				continue
 			}
 			var header map[string]interface{}
 			if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+				recordFailure(fmt.Errorf("invalid session header: %w", err))
 				continue
 			}
 			if header["type"] != "session" {
+				recordFailure(fmt.Errorf("invalid session header type"))
 				continue
 			}
 			if v, ok := header["id"].(string); ok {
@@ -283,7 +248,11 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			} else {
 				linesToProcess = []string{}
 			}
-			contentBytes, _ := os.ReadFile(file)
+			contentBytes, err := os.ReadFile(file)
+			if err != nil {
+				recordFailure(err)
+				continue
+			}
 			contentStr := string(contentBytes)
 			if rev.Complete {
 				newCommittedByte = rev.FileSize
@@ -298,18 +267,25 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				parts := strings.Split(contentStr, "\n")
 				newCommittedLines = int64(len(parts) - 1)
 			}
-			nt, _ := tailFingerprintAtGo(file, newCommittedByte)
+			nt, err := tailFingerprintAtGo(file, newCommittedByte)
+			if err != nil {
+				recordFailure(err)
+				continue
+			}
 			newTail = nt
 		}
 		seen := make(map[string]*PiRecord)
 		identities := make(map[string]PiIdentity)
 		tsTextByID := make(map[string]string)
-		for _, line := range linesToProcess {
+		warnedMissingPricing := make(map[string]bool)
+		for lineNo, line := range linesToProcess {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
 			var entry map[string]interface{}
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {
+				fileDiagnostics.Skipped++
+				fileDiagnostics.warn("%s:%d: 坏 JSON 行: %v", file, lineNo+1, err)
 				continue
 			}
 			if forkTsMs != nil {
@@ -321,6 +297,10 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			}
 			rec := ParsePiUsageRecord(entry, sessionID, sessionTimestamp, rev.ModifiedMs)
 			if rec == nil {
+				if piEntryHasUsage(entry) {
+					fileDiagnostics.Skipped++
+					fileDiagnostics.warn("%s:%d: 跳过无效 usage 记录", file, lineNo+1)
+				}
 				continue
 			}
 			var usageRaw map[string]interface{}
@@ -358,15 +338,17 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				tsTextByID[identity.RequestID] = tsText
 			}
 		}
-		pricingByModel := loadModelPricing(database)
 		tx, err := database.DB.Begin()
 		if err != nil {
-			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("开始同步 %s 事务失败: %w", file, err)
+			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("开始同步 %s 事务失败: %w", file, err)
 		}
 		fileImported, fileSkipped := 0, 0
 		rollback := func(cause error) (SyncResult, error) {
 			_ = tx.Rollback()
-			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("同步 %s 失败: %w", file, cause)
+			fileDiagnostics.Skipped++
+			fileDiagnostics.warn("同步 %s 失败: %v", file, cause)
+			mergeDiagnostics(&diagnostics, &fileDiagnostics)
+			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("同步 %s 失败: %w", file, cause)
 		}
 		for reqID, rec := range seen {
 			identity := identities[reqID]
@@ -379,7 +361,12 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 					fileSkipped++
 					continue
 				}
-				cost := costForPiRecord(rec, pricingByModel[rec.Model])
+				pricing, configured := pricingByModel[rec.Model]
+				if !configured && rec.CostTotal <= 0 && !warnedMissingPricing[rec.Model] {
+					fileDiagnostics.warn("%s: model %q 未配置价格，cost=0", file, rec.Model)
+					warnedMissingPricing[rec.Model] = true
+				}
+				cost := costForPiRecord(rec, pricing)
 				_, err = tx.Exec(`UPDATE proxy_request_logs SET provider_id = ?, app_type = ?, model = ?, request_model = ?, pricing_model = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_creation_tokens = ?, input_token_semantics = ?, total_cost_usd = ?, latency_ms = ?, status_code = ?, stop_reason = ?, error_message = ?, session_id = ?, provider_type = ?, is_streaming = ?, cost_multiplier = ?, created_at = ?, data_source = ?, kind = ?, reasoning_tokens = ?, cwd = ?, timestamp_text = ? WHERE request_id = ? AND data_source = ?`,
 					rec.Provider, "pi", rec.Model, rec.RequestModel, rec.Model, int64(rec.Input), int64(rec.Output), int64(rec.CacheRead), int64(rec.CacheWrite), 0, formatFloat(cost), 0, rec.StatusCode, rec.StopReason, nullableString(rec.ErrorMessage), rec.SessionID, "pi_session", 1, "1.0", rec.CreatedAt, "pi_session", string(rec.Kind), int64(rec.Reasoning), headerCwd, tsTextByID[reqID], reqID, "pi_session")
 				if err != nil {
@@ -417,7 +404,12 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			if _, err = tx.Exec(`INSERT INTO session_usage_dedup (data_source, request_id, semantic_id, has_entry_id) VALUES (?, ?, ?, ?)`, "pi_session", reqID, identity.SemanticID, boolToInt(identity.HasEntryID)); err != nil {
 				return rollback(err)
 			}
-			cost := costForPiRecord(rec, pricingByModel[rec.Model])
+			pricing, configured := pricingByModel[rec.Model]
+			if !configured && rec.CostTotal <= 0 && !warnedMissingPricing[rec.Model] {
+				fileDiagnostics.warn("%s: model %q 未配置价格，cost=0", file, rec.Model)
+				warnedMissingPricing[rec.Model] = true
+			}
+			cost := costForPiRecord(rec, pricing)
 			if _, err = tx.Exec(`INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, input_token_semantics, total_cost_usd, latency_ms, status_code, stop_reason, error_message, session_id, provider_type, is_streaming, cost_multiplier, created_at, data_source, kind, reasoning_tokens, cwd, timestamp_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				reqID, rec.Provider, "pi", rec.Model, rec.RequestModel, rec.Model, int64(rec.Input), int64(rec.Output), int64(rec.CacheRead), int64(rec.CacheWrite), 0, formatFloat(cost), 0, rec.StatusCode, rec.StopReason, nullableString(rec.ErrorMessage), rec.SessionID, "pi_session", 1, "1.0", rec.CreatedAt, "pi_session", string(rec.Kind), int64(rec.Reasoning), headerCwd, tsTextByID[reqID]); err != nil {
 				return rollback(err)
@@ -428,10 +420,7 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		if parentSessionID != nil {
 			parentStr = *parentSessionID
 		}
-		fileBase := file
-		if idx := strings.LastIndex(file, "/"); idx != -1 {
-			fileBase = file[idx+1:]
-		}
+		fileBase := filepath.Base(file)
 		isTask := 0
 		if strings.Contains(file, "/tasks/") || strings.Contains(file, "\\tasks\\") {
 			isTask = 1
@@ -445,48 +434,27 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				return rollback(err)
 			}
 		}
-		if _, err = tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint, sync_semantics_version) VALUES (?, ?, ?, ?, ?, ?, ?)`, file, rev.ModifiedMs, newCommittedLines, rev.ModifiedMs/1000, newCommittedByte, int64(newTail), PiSyncSemanticsVersion); err != nil {
+		summary, err := json.Marshal(fileDiagnostics)
+		if err != nil {
+			return rollback(err)
+		}
+		if _, err = tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint, sync_semantics_version, diagnostics_summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, file, rev.ModifiedMs, newCommittedLines, rev.ModifiedMs/1000, newCommittedByte, int64(newTail), PiSyncSemanticsVersion, string(summary)); err != nil {
 			return rollback(err)
 		}
 		if err := tx.Commit(); err != nil {
 			_ = tx.Rollback()
-			return SyncResult{Imported: imported, Skipped: skipped}, fmt.Errorf("提交 %s 失败: %w", file, err)
+			fileDiagnostics.Skipped++
+			fileDiagnostics.warn("提交 %s 失败: %v", file, err)
+			mergeDiagnostics(&diagnostics, &fileDiagnostics)
+			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("提交 %s 失败: %w", file, err)
 		}
 		imported += fileImported
 		skipped += fileSkipped
+		mergeDiagnostics(&diagnostics, &fileDiagnostics)
 	}
-	return SyncResult{Imported: imported, Skipped: skipped}, nil
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
+	result := SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}
+	if len(failures) > 0 {
+		return result, errors.Join(failures...)
 	}
-	return 0
-}
-
-func formatFloat(f float64) string {
-	if f == 0 {
-		return "0"
-	}
-	return strings.TrimRight(strings.TrimRight(parseFloatStr(f), "0"), ".")
-}
-
-func parseFloatStr(f float64) string {
-	b, _ := json.Marshal(f)
-	return string(b)
-}
-
-func parseTimestampGo(s string) (int64, error) {
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return t.Unix(), nil
-	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t.Unix(), nil
-	}
-	return 0, nil
-}
-
-func timeParse(s string) (int64, error) {
-	return parseTimestampGo(s)
+	return result, nil
 }

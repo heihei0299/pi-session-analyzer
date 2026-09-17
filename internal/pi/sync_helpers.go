@@ -54,17 +54,17 @@ type modelPricing struct {
 	cacheCreatePerM float64
 }
 
-func loadModelPricing(database *db.Database) map[string]modelPricing {
+func loadModelPricing(database *db.Database) (map[string]modelPricing, error) {
 	out := map[string]modelPricing{}
 	rows, err := database.DB.Query(`SELECT model_id, input_cost_per_million, output_cost_per_million, cache_read_cost_per_million, cache_creation_cost_per_million FROM model_pricing`)
 	if err != nil {
-		return out
+		return nil, fmt.Errorf("read model pricing: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id, in, outC, cr, cw string
 		if err := rows.Scan(&id, &in, &outC, &cr, &cw); err != nil {
-			continue
+			return nil, fmt.Errorf("scan model pricing: %w", err)
 		}
 		out[id] = modelPricing{
 			inputPerM:       toNum(in),
@@ -73,7 +73,10 @@ func loadModelPricing(database *db.Database) map[string]modelPricing {
 			cacheCreatePerM: toNum(cw),
 		}
 	}
-	return out
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read model pricing rows: %w", err)
+	}
+	return out, nil
 }
 
 func toNum(s string) float64 {
@@ -146,6 +149,27 @@ func extractFirstUserTextPiFile(path string) string {
 		}
 	}
 	return ""
+}
+
+func piEntryHasUsage(entry map[string]interface{}) bool {
+	typ, _ := entry["type"].(string)
+	if typ == "compaction" || typ == "branch_summary" {
+		_, ok := entry["usage"]
+		return ok
+	}
+	if typ != "message" {
+		return false
+	}
+	message, ok := entry["message"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	role, _ := message["role"].(string)
+	if role != "assistant" && role != "toolResult" {
+		return false
+	}
+	_, ok = message["usage"]
+	return ok
 }
 
 // displayNameOfPiFile 直接复用共享显示名规则，不另起第二份实现。

@@ -299,6 +299,36 @@ func TestPiSyncRescansLegacyCursorAndRepairsLedger(t *testing.T) {
 	}
 }
 
+func TestPiSyncStoresPlatformFileBase(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	path := filepath.Join(dir, "platform-session.jsonl")
+	content := `{"type":"session","id":"platform-session","timestamp":"2026-07-31T01:55:30.577Z","cwd":"/tmp"}
+{"type":"message","id":"platform-request","timestamp":"2026-07-31T01:58:29.810Z","message":{"role":"assistant","provider":"p","model":"m","usage":{"input":1,"output":1}},"stopReason":"stop"}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncPiUsage(database, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	var fileName, displayName string
+	if err := database.DB.QueryRow(`SELECT file_name, display_name FROM pi_sessions WHERE session_id = ?`, "platform-session").Scan(&fileName, &displayName); err != nil {
+		t.Fatal(err)
+	}
+	if fileName != filepath.Base(path) || displayName == path {
+		t.Fatalf("Pi metadata must use the platform file base: fileName=%q displayName=%q path=%q", fileName, displayName, path)
+	}
+}
+
 func TestPiSyncReplacesRequestAcrossRefreshes(t *testing.T) {
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
