@@ -1,9 +1,8 @@
 package pi
 
 import (
-	"encoding/json"
 	"fmt"
-	"strings"
+	"strconv"
 	"time"
 )
 
@@ -18,12 +17,7 @@ func formatFloat(f float64) string {
 	if f == 0 {
 		return "0"
 	}
-	return strings.TrimRight(strings.TrimRight(parseFloatStr(f), "0"), ".")
-}
-
-func parseFloatStr(f float64) string {
-	b, _ := json.Marshal(f)
-	return string(b)
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 func parseTimestampGo(s string) (int64, error) {

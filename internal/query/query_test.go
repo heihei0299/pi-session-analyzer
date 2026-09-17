@@ -1,6 +1,7 @@
 package query
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,40 @@ func refreshAndQuery(t *testing.T, cfg Config, filter sessiondata.Filter, view s
 		t.Fatal(err)
 	}
 	return Query(cfg, filter, view)
+}
+
+func TestPiCostPreservesIntegerAmountsAcrossRefresh(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_SESSION_DIR", "")
+	t.Setenv("HOME", t.TempDir())
+	cfg := Config{
+		PiDir:  filepath.Join("..", "..", "testdata", "canonical", "pi-cost"),
+		DBPath: filepath.Join(t.TempDir(), "ledger.db"),
+		Source: "pi",
+	}
+	var expected struct {
+		Requests int     `json:"requests"`
+		Cost     float64 `json:"cost"`
+	}
+	expectedBytes, err := os.ReadFile(filepath.Join("..", "..", "testdata", "canonical", "expected", "pi-cost.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(expectedBytes, &expected); err != nil {
+		t.Fatal(err)
+	}
+	refreshCfg := refresh.Config{PiDir: cfg.PiDir, DBPath: cfg.DBPath, Source: cfg.Source}
+	for i := 0; i < 2; i++ {
+		if err := refresh.Refresh(refreshCfg); err != nil {
+			t.Fatal(err)
+		}
+		result, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Totals == nil || result.Totals.Requests != expected.Requests || result.Totals.Cost != expected.Cost {
+			t.Fatalf("refresh %d lost Pi cost precision: %+v", i+1, result.Totals)
+		}
+	}
 }
 
 func TestQueryCodexAndAllSources(t *testing.T) {
