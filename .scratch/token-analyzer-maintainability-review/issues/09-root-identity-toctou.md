@@ -4,14 +4,14 @@
 
 **Blocked by:** 02: 统一 source root identity 与 legacy ownership 的 fail-closed 策略；03: 让 Pi session rename 遵守 root binding（均已完成，作为既有契约）
 
-**Status:** claimed
+**Status:** resolved
 
-- [ ] root identity 校验和后续 source file 操作使用同一个固定的 canonical physical root。
-- [ ] 校验后替换 symlink target 不会导致 Refresh 从未绑定目录导入数据。
-- [ ] 校验后替换 symlink target 不会导致 rename 查找或修改未绑定目录中的文件。
-- [ ] matching root 的正常 Refresh、Query 和 rename 行为保持不变。
-- [ ] mismatch、root unavailable 和并发 symlink 变化都 fail closed，不删除已有 ledger rows。
-- [ ] 回归测试覆盖 Refresh 与 rename 的 root identity race/替换场景；若平台限制无法稳定制造 race，至少覆盖校验后 canonical root 不再重新解析的行为契约。
+- [x] root identity 校验和后续 source file 操作使用同一个固定的 canonical physical root。
+- [x] 校验后替换 symlink target 不会导致 Refresh 从未绑定目录导入数据。
+- [x] 校验后替换 symlink target 不会导致 rename 查找或修改未绑定目录中的文件。
+- [x] matching root 的正常 Refresh、Query 和 rename 行为保持不变。
+- [x] mismatch、root unavailable 和并发 symlink 变化都 fail closed，不删除已有 ledger rows。
+- [x] 回归测试覆盖 Refresh 与 rename 的 root identity race/替换场景；若平台限制无法稳定制造 race，至少覆盖校验后 canonical root 不再重新解析的行为契约。
 
 ## Comments
 
@@ -30,3 +30,15 @@
 - Refresh/Query 与 rename 的 root/project/.jsonl symlink target 替换、校验后不重解析的回归测试已补：`TestRefreshResolvedSkipsSymlinkProjectAndFileEscape`、`TestServerRenameRefusesSymlinkFileEscape`；既有 `TestRefreshResolvedKeepsCanonicalPhysicalRootAfterSymlinkSwap`、`TestServerRenameRejectsSymlinkTargetSwitchBeforeFilesystemRename`、`TestSourceRootBinding*` 保持适用。
 - 静态验证：改动 Go 文件 `gofmt -l` 无输出（已格式化）；`git diff --check` 通过。本机未执行 `go test`、`go vet`、build 或全量测试（未获授权），所有行为断言仅为待执行回归。
 - 状态：保持 `claimed`；acceptance 未勾选，等待 review 与聚焦测试执行。
+
+### 第三轮（review pass）
+
+- Finding A（本页）：删除重复的非 pinned `BindSourceRoot` / `CheckSourceRoot` / `ValidateSourceRoot`，root binding 只保留 `BindPinnedSourceRoot` / `CheckPinnedSourceRoot` + `CanonicalSourceRoot` 一条生产路径；测试先 canonicalize 再调 pinned API。
+- Finding B：README / CONTEXT / ADR-0005 的措辞改为“校验式 containment（枚举过滤 + 读取/rename 前复核），非 dirfd/renameat 原子隔离”，与 `internal/pi/root_guard.go` 能力一致；因此第 5 条中“并发 symlink 变化”按该边界验证（替换/交换场景 fail closed），不声称原子隔离。
+- 验证（本机已获授权，w9:p1 review 独立复跑一致）：
+  - `test -z "$(gofmt -l $(git ls-files '*.go'))"` → exit 0；
+  - `GOMAXPROCS=2 go vet ./...` → exit 0；
+  - `TOKEN_ANALYZER_DB= GOMAXPROCS=2 go test -p 1 -parallel 1 ./...` → 154 passed in 12 packages，exit 0。
+- Commit：`4b38290`（pinned root）、`1f51c11`（binding 收敛 + 文档措辞）；`9135c81` 为无关基线格式化。
+- Review：REVIEW_ROUND_4 REVIEW PASS，无剩余阻塞。
+- 未执行（未授权）：`make release`、交叉编译、打包、安装。
