@@ -25,5 +25,5 @@
 - 修改摘要：`lastRefresh` 在锁内返回 detached error-map snapshot，避免 watcher/RefreshNow 与 HTTP QueryMeta/db-meta 的 map race；新增 Pi/Codex/All 过滤及 watcher 并发回归。
 - 验证：`TOKEN_ANALYZER_DB= go test ./internal/server`，27 个测试通过；`TOKEN_ANALYZER_DB= go test -race ./internal/server -run '^TestRefreshStatusSnapshotIsSafeDuringConcurrentReads$'`，通过。
 - Review：完整 Standards/Spec 双轴 Review 已通过；private accessor、source filtering 与 watcher concurrency findings 已增量复核关闭。
-- Commit：待提交后记录。
+- Commit：`0fce0a6 fix(server): snapshot refresh status errors`。
 - 未解决边界问题：无。
