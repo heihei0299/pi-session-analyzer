@@ -18,6 +18,10 @@ func TestPartialDayRollupReportsPartialCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	piDir := t.TempDir()
+	if err := db.BindSourceRoot(database, "pi", piDir); err != nil {
+		t.Fatal(err)
+	}
 	exec := func(statement string, args ...any) {
 		t.Helper()
 		if _, err := database.DB.Exec(statement, args...); err != nil {
@@ -38,7 +42,7 @@ func TestPartialDayRollupReportsPartialCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{PiDir: t.TempDir(), DBPath: dbPath, Source: "pi"}
+	cfg := Config{PiDir: piDir, DBPath: dbPath, Source: "pi"}
 	views := []sessiondata.View{
 		{Kind: sessiondata.ViewTotals},
 		{Kind: sessiondata.ViewGroups, By: domain.GroupByModel},

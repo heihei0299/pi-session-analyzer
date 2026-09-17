@@ -15,6 +15,11 @@ func TestRefreshRunsRollupMaintenanceAfterSourceSync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	piDir := t.TempDir()
+	if err := db.BindSourceRoot(database, "pi", piDir); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
 	oldAt := time.Now().Add(-31 * 24 * time.Hour)
 	if _, err := database.DB.Exec(`INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, request_model, pricing_model, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, total_cost_usd, latency_ms, status_code, session_id, created_at, data_source, kind, cwd, timestamp_text) VALUES ('old', 'provider', 'pi', 'model', 'request-model', 'pricing-model', 4, 5, 1, 2, '0.10', 100, 200, 'session', ?, 'pi_session', 'assistant', '/workspace', ?)`, oldAt.Unix(), oldAt.UTC().Format(time.RFC3339)); err != nil {
 		database.Close()
@@ -24,7 +29,7 @@ func TestRefreshRunsRollupMaintenanceAfterSourceSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Refresh(Config{PiDir: t.TempDir(), DBPath: dbPath, Source: "pi"}); err != nil {
+	if err := Refresh(Config{PiDir: piDir, DBPath: dbPath, Source: "pi"}); err != nil {
 		t.Fatal(err)
 	}
 	check, err := db.Open(dbPath)

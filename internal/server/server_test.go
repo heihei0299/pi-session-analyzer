@@ -92,15 +92,7 @@ func TestServerEndpoints(t *testing.T) {
 		t.Fatalf("sessions must see the renamed displayName immediately: status=%d body=%s", wSessions.Code, wSessions.Body.String())
 	}
 
-	// 4. OpenCode 已抽离，token-analyzer 不再注册其 API。
-	reqOpenCode := httptest.NewRequest("GET", "/api/opencode/costs?year=2026&month=8", nil)
-	wOpenCode := httptest.NewRecorder()
-	handler.ServeHTTP(wOpenCode, reqOpenCode)
-	if wOpenCode.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for extracted OpenCode API, got %d", wOpenCode.Code)
-	}
-
-	// 5. 验证 GET /api/db/meta
+	// 4. 验证 GET /api/db/meta
 	reqDbMeta := httptest.NewRequest("GET", "/api/db/meta", nil)
 	wDbMeta := httptest.NewRecorder()
 	handler.ServeHTTP(wDbMeta, reqDbMeta)
@@ -111,7 +103,7 @@ func TestServerEndpoints(t *testing.T) {
 	if err := json.Unmarshal(wDbMeta.Body.Bytes(), &resDbMeta); err != nil {
 		t.Fatalf("failed to parse db meta json: %v", err)
 	}
-	if resDbMeta["schemaVersion"] != float64(2) {
-		t.Errorf("expected schemaVersion 2, got %v", resDbMeta["schemaVersion"])
+	if resDbMeta["schemaVersion"] != float64(3) {
+		t.Errorf("expected schemaVersion 3, got %v", resDbMeta["schemaVersion"])
 	}
 }

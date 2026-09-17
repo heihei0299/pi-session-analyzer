@@ -18,6 +18,10 @@ func TestQueryUsesRollupsForAggregateWindowsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	piDir := t.TempDir()
+	if err := db.BindSourceRoot(database, "pi", piDir); err != nil {
+		t.Fatal(err)
+	}
 	exec := func(statement string, args ...any) {
 		t.Helper()
 		if _, err := database.DB.Exec(statement, args...); err != nil {
@@ -36,7 +40,7 @@ func TestQueryUsesRollupsForAggregateWindowsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := Config{PiDir: t.TempDir(), DBPath: dbPath, Source: "pi"}
+	cfg := Config{PiDir: piDir, DBPath: dbPath, Source: "pi"}
 	totals, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals})
 	if err != nil {
 		t.Fatal(err)
