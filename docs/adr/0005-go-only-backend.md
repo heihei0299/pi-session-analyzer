@@ -1,7 +1,7 @@
 # ADR-0005 — Go-only 后端收尾（删除 TypeScript 生产实现）
 
 - **状态**: Accepted（2026-09-12，Go-only 迁移 05）
-- **影响组件**: `go.mod`（module 统一为 `github.com/heihei0299/token-analyzer`）、`internal/query`（唯一统计 seam）、`internal/refresh`、`internal/server`（单 WebUI 源码）、`testdata/canonical`（长期契约）、`.github/workflows`（Go-only CI/发版）、`README.md`、`CONTEXT.md`、`opencode-analyzer/`（独立边界）
+- **影响组件**: `go.mod`（module 统一为 `github.com/heihei0299/token-analyzer`）、`internal/query`（唯一统计 seam）、`internal/refresh`、`internal/server`（单 WebUI 源码）、`testdata/canonical`（长期契约）、`.github/workflows`（Go-only CI/发版）、`README.md`、`CONTEXT.md`、OpenCode 产品边界（外部项目）
 - **前置**: ADR-0001（fork 去重）、ADR-0002（totalTokens/cacheRate）、ADR-0003（存储对齐）、ADR-0004（input/cacheRead 语义）；04 已收口 Refresh/Query/Watch/Server/WebUI 运行时
 
 ## 背景
@@ -18,9 +18,9 @@
 - **Refresh/Watch 语义**：Refresh（`internal/refresh` + Pi/Codex adapter）为唯一写入路径，串行化，失败保快照并经 meta 暴露；Watch 先用 source-specific cheap revision，只有对应源变化才做该源 Refresh，失败保留 acknowledged revision 并重试；无独立 token/cost 聚合。
 - **WebUI 单一源码**：`internal/server/webui.html` 为唯一人工维护源（Go embed 直引），无 copy/sync；`meta.sources` 恒为 `["pi","codex"]`。
 - **契约**：`testdata/canonical` + Go golden tests 为长期回归（替代跨 runtime parity）；fixtures 全为合成数据；CI 在 pull request 和 `main` 变更时执行 root token-analyzer Go module 的格式检查、`go vet` 和串行测试，release 只执行 root module 的构建与 smoke check；OpenCode Analyzer 的测试与发布由其外部项目负责。
-- **命名统一**：module/repository/import/release 统一为当前项目名 `token-analyzer`（`go.mod: github.com/heihei0299/token-analyzer`）；旧拼写 `pi-session-anylize` 为 breaking change 直接修正；`opencode-analyzer/` 保持独立 module `github.com/heihei0299/opencode-analyzer`，可整目录迁出。
+- **命名统一**：module/repository/import/release 统一为当前项目名 `token-analyzer`（`go.mod: github.com/heihei0299/token-analyzer`）；旧拼写 `pi-session-anylize` 为 breaking change 直接修正；OpenCode Analyzer 使用独立 module `github.com/heihei0299/opencode-analyzer`，已正式迁出本仓库。
 - **发版**：Git `v<版本>` tag 是唯一版本来源；`make build/release` 只将 tag 派生值注入 CLI，普通构建产物为 `dist/token-analyzer`，平台 release artifact 保留平台后缀；release workflow 在发布前校验 `--version` 与 tag 一致；不再区分 Go/npm edition，不再发 npm 包。
-- **OpenCode 边界**：`opencode-analyzer/internal/piaudit` 自己维护本地 Pi audit 语义（canonical message fields + complete usage payload）和 synthetic fixture；该目录可整目录迁出，token-analyzer 不依赖其 runtime/API/UI/storage/credential。
+- **OpenCode 边界**：OpenCode Analyzer 在外部项目中独立维护本地 Pi audit 语义（canonical message fields + complete usage payload）和 synthetic fixture；token-analyzer 不依赖其 runtime/API/UI/storage/credential。
 
 ## 后果
 

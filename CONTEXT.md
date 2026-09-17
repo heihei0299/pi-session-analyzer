@@ -82,6 +82,6 @@
 
 ## OpenCode 产品边界
 
-- **OpenCode Analyzer**：独立于 token-analyzer 的同仓产品，归档 OpenCode 云端用量并与本地 Pi 消耗对账；OpenCode 不是 token-analyzer 的 usage source，也不属于 All。
-- **OpenCode 对账**：OpenCode 官方扣费与本地 Pi 消耗的比较，仅属于 OpenCode Analyzer；其 standalone `piaudit` 自有四载体、门控、fork/request/semantic 去重与月份边界实现，不 import token-analyzer；token-analyzer 不处理 OpenCode credential 或对账数据。
+- **OpenCode Analyzer**：独立于 token-analyzer 的外部项目（[OpenCode Analyzer](https://github.com/heihei0299/opencode-analyzer)），归档 OpenCode 云端用量并与本地 Pi 消耗对账；OpenCode 不是 token-analyzer 的 usage source，也不属于 All。
+- **OpenCode 对账**：OpenCode 官方扣费与本地 Pi 消耗的比较，仅属于 OpenCode Analyzer；该项目独立维护四载体、门控、fork/request/semantic 去重与月份边界实现；token-analyzer 不处理 OpenCode credential 或对账数据。
 

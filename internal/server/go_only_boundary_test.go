@@ -36,8 +36,8 @@ func assertNoMatch(t *testing.T, rel, source string, substrs []string) {
 	}
 }
 
-// TestGoOnlyNoOpenCodeRuntime 替代已删除的 TS 41 号边界测试：
-// token-analyzer 不暴露或依赖 OpenCode runtime；opencode-analyzer 独立可迁出。
+// TestGoOnlyNoOpenCodeRuntime 确认 token-analyzer 不暴露或依赖 OpenCode runtime。
+// OpenCode Analyzer 已迁出，本仓库只维护 token-analyzer。
 func TestGoOnlyNoOpenCodeRuntime(t *testing.T) {
 	root := repoRoot(t)
 	for _, rel := range []string{
@@ -50,47 +50,6 @@ func TestGoOnlyNoOpenCodeRuntime(t *testing.T) {
 			"api/opencode", "handleOpencode", "opencode sync", `data-tab="opencode"`,
 			"OPENCODE_AUTH", "OPENCODE_WORKSPACE", "OPENCODE_DATA_DIR",
 		})
-	}
-
-	mod := readRepoFile(t, root, "opencode-analyzer/go.mod")
-	if !strings.Contains(mod, "module github.com/heihei0299/opencode-analyzer") {
-		t.Fatalf("opencode-analyzer/go.mod must stay standalone, got:\n%s", mod)
-	}
-	entries, err := os.ReadDir(filepath.Join(root, "opencode-analyzer"))
-	if err != nil || len(entries) == 0 {
-		t.Fatalf("opencode-analyzer/ must stay extractable: %v", err)
-	}
-	var goFiles []string
-	var walk func(dir string)
-	walk = func(dir string) {
-		ents, err := os.ReadDir(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, e := range ents {
-			p := filepath.Join(dir, e.Name())
-			if e.IsDir() {
-				walk(p)
-				continue
-			}
-			if strings.HasSuffix(e.Name(), ".go") {
-				goFiles = append(goFiles, p)
-			}
-		}
-	}
-	walk(filepath.Join(root, "opencode-analyzer"))
-	if len(goFiles) == 0 {
-		t.Fatal("opencode-analyzer/ must contain Go sources")
-	}
-	for _, p := range goFiles {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		s := string(b)
-		if strings.Contains(s, "token-analyzer/internal") || strings.Contains(s, "pi-session-anylize/internal") {
-			t.Fatalf("%s must not import token-analyzer internal", p)
-		}
 	}
 }
 

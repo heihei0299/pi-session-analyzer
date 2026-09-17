@@ -41,7 +41,7 @@ GOMAXPROCS=2 go test -p 1 ./...
 token-analyzer [totals|sessions|requests] [--source pi|codex|all] [--dir <pi-dir>] [--codex-dir <codex-home>] [选项]
 ```
 
-OpenCode 云端用量同步与对账已迁入同仓独立项目 [`opencode-analyzer/`](opencode-analyzer/README.md)。token-analyzer 不再读取 OpenCode 凭据，也不再提供 OpenCode CLI、API 或 WebUI。
+OpenCode 云端用量同步与对账已迁入独立项目 [OpenCode Analyzer](https://github.com/heihei0299/opencode-analyzer)。token-analyzer 不再读取 OpenCode 凭据，也不再提供 OpenCode CLI、API 或 WebUI。
 
 开发时可用 `go run ./cmd/token-analyzer` 或 `./dist/token-analyzer` 直接运行。
 
@@ -154,7 +154,6 @@ internal/
   serialize/            JSON / CSV 序列化器
 testdata/canonical/     synthetic fixtures + golden expected（长期行为契约，Pi/Codex 字段级断言）
 dist/                   构建产物（Go 多平台交叉编译二进制）
-opencode-analyzer/      独立 OpenCode Analyzer Go module（CLI/API/WebUI/storage/tests，可整目录迁出）
 .scratch/               功能规格与 issue（背景材料，非规范入口）
 .github/workflows/      自动化 CI / 发布流程（Go-only：ci.yml 测试 + release.yml 发版）
 ```
