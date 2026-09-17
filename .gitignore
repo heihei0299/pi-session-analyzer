@@ -11,3 +11,8 @@ token-analyzer
 opencode-analyzer/opencode-analyzer
 .pi/
 .agents/
+
+# Locally or externally managed worktree content
+/AGENTS.md
+/opencode-analyzer/
+/.scratch/sol-pi/
