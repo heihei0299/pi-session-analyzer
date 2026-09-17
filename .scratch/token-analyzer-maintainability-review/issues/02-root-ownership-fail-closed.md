@@ -27,5 +27,5 @@
 - 修改摘要：统一 Pi root ownership predicate；共享 ledger 中非 `pi_session` proxy 行不再阻塞首次 binding；Refresh 在打开 ledger 前校验有效 root；同一 physical root 继续支持词法路径变化，不同 target 与 legacy history 继续 fail closed。
 - 验证：`TOKEN_ANALYZER_DB= go test ./internal/pi ./internal/db ./internal/refresh ./internal/query`，通过。
 - Review：完整 Standards/Spec 双轴 Review 已通过；empty-root、解析重复和测试覆盖 findings 均已增量复核关闭。
-- Commit：待提交后记录。
+- Commit：`d519459 fix(refresh): fail closed on Pi root ownership`。
 - 未解决边界问题：`source=all` 且未配置 Pi root 继续保留既有 Codex-only 行为。
