@@ -104,7 +104,11 @@ func sendQueryError(w http.ResponseWriter, err error) {
 		sendError(w, http.StatusBadRequest, "Unsupported", err.Error())
 		return
 	}
-	if errors.Is(err, db.ErrSourceRootMismatch) {
+	if errors.Is(err, db.ErrSourceRootUnavailable) {
+		sendError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if errors.Is(err, db.ErrSourceRootMismatch) || errors.Is(err, db.ErrSourceRootBindingMissing) || errors.Is(err, db.ErrSourceRootBindingRequired) {
 		sendError(w, http.StatusConflict, "Conflict", err.Error())
 		return
 	}

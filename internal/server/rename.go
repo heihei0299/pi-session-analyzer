@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/heihei0299/token-analyzer/internal/db"
 	"github.com/heihei0299/token-analyzer/internal/pi"
 	sourcequery "github.com/heihei0299/token-analyzer/internal/query"
 	"github.com/heihei0299/token-analyzer/internal/refresh"
@@ -138,6 +139,16 @@ func (s *Server) handleApiSessionRename(w http.ResponseWriter, r *http.Request) 
 	)
 	if err != nil {
 		sendError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	ledger, err := db.OpenReadOnly(db.ResolveDbPathFromEnv(s.queryConfig.DBPath))
+	if err != nil {
+		sendQueryError(w, err)
+		return
+	}
+	defer ledger.Close()
+	if err := db.CheckSourceRoot(ledger, "pi", resolved.Root); err != nil {
+		sendQueryError(w, err)
 		return
 	}
 	matchedFile, err := pi.FindSessionFileByHeaderID(resolved.Root, resolved.Layout, req.SessionId)
