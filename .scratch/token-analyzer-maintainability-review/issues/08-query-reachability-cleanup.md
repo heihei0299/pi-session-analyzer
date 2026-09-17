@@ -25,5 +25,5 @@
 - 修改摘要：删除不可达的 `buildCodexRequestRows` 与无效 `byID` 状态；Codex/All requests 的 WebUI export 改为显式 unsupported，保留 Validate/CLI/HTTP/Query capability 契约。
 - 验证：`TOKEN_ANALYZER_DB= go test ./internal/query ./internal/server`，40 个测试通过；`rg` 确认无残留 builder、状态和空结果回退。
 - Review：完整 Standards/Spec 双轴 Review 已通过；WebUI unsupported 行为已增量复核关闭。
-- Commit：待提交后记录。
+- Commit：`ce116df refactor(query): remove unreachable request builder`。
 - 未解决边界问题：无。
