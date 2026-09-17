@@ -15,12 +15,12 @@ func makeAssistantEntry(overrides map[string]interface{}) map[string]interface{}
 			"responseId":    "resp-1",
 			"stopReason":    "stop",
 			"usage": map[string]interface{}{
-				"input":  float64(10),
-				"output": float64(5),
-				"cacheRead": float64(3),
-				"cacheWrite": float64(2),
+				"input":       float64(10),
+				"output":      float64(5),
+				"cacheRead":   float64(3),
+				"cacheWrite":  float64(2),
 				"totalTokens": float64(20),
-				"cost": map[string]interface{}{"total": float64(0.1)},
+				"cost":        map[string]interface{}{"total": float64(0.1)},
 			},
 			"timestamp": float64(1700000000000),
 			"content":   []interface{}{map[string]interface{}{"type": "text", "text": "ok"}},
@@ -34,7 +34,9 @@ func makeAssistantEntry(overrides map[string]interface{}) map[string]interface{}
 
 func TestParseAssistant(t *testing.T) {
 	rec := ParsePiUsageRecord(makeAssistantEntry(nil), "session-a", int64Ptr(1700000000), 1700000000000)
-	if rec == nil { t.Fatalf("expected record") }
+	if rec == nil {
+		t.Fatalf("expected record")
+	}
 	if rec.Kind != KindAssistant || rec.Input != 10 || rec.Output != 5 || rec.CacheRead != 3 || rec.CacheWrite != 2 {
 		t.Fatalf("unexpected rec %+v", rec)
 	}
@@ -53,7 +55,7 @@ func TestParseToolResult(t *testing.T) {
 			"toolCallId": "tool-1",
 			"toolName":   "nested",
 			"content":    []interface{}{},
-			"usage": map[string]interface{}{"input": float64(3), "output": float64(4), "cacheRead": float64(1), "cacheWrite": float64(1), "totalTokens": float64(9), "cost": map[string]interface{}{"total": float64(0)}},
+			"usage":      map[string]interface{}{"input": float64(3), "output": float64(4), "cacheRead": float64(1), "cacheWrite": float64(1), "totalTokens": float64(9), "cost": map[string]interface{}{"total": float64(0)}},
 		},
 	}
 	rec := ParsePiUsageRecord(entry, "session-a", int64Ptr(1700000000), 1700000000000)
