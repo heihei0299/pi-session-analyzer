@@ -35,7 +35,14 @@ func (s *Server) RefreshNow() error {
 func (s *Server) lastRefresh() (time.Time, map[string]error) {
 	s.refreshMu.RLock()
 	defer s.refreshMu.RUnlock()
-	return s.lastRefreshAt, s.lastRefreshErr
+	var errs map[string]error
+	if s.lastRefreshErr != nil {
+		errs = make(map[string]error, len(s.lastRefreshErr))
+		for source, err := range s.lastRefreshErr {
+			errs[source] = err
+		}
+	}
+	return s.lastRefreshAt, errs
 }
 
 // StartWatch 以指纹轮询驱动 change → refresh → query：目录有变才同步，
