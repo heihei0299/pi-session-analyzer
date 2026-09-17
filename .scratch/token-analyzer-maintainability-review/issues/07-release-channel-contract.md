@@ -26,5 +26,5 @@
 - 修改摘要：release workflow 使用真实日历校验日期式 tag，统一输出 tag 派生 version，并将 numeric suffix 派生为 GitHub prerelease；stable tag 保持正式 Release，产物只来自 root token-analyzer。
 - 验证：workflow tag shell block 通过 `bash -n`；stable/prerelease/非法日期样例已纳入 workflow；未执行本机 build。
 - Review：完整 Standards/Spec 双轴 Review 已通过；workflow 实现细节测试 finding 已增量复核关闭。
-- Commit：待提交后记录。
+- Commit：`16bb41b ci(release): align tag channels and versions`。
 - 未解决边界问题：GitHub Actions 真实发布由 CI/release runner 执行。
