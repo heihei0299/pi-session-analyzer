@@ -57,13 +57,14 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("读取 %s 游标失败: %w", file, err)
 		}
 		var storedDiagnostics Diagnostics
-		if err == nil {
+		hasStoredDiagnostics := err == nil
+		if hasStoredDiagnostics {
 			storedDiagnostics, err = decodeDiagnostics(storedSummary.String)
 			if err != nil {
 				return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("读取 %s 诊断失败: %w", file, err)
 			}
 		}
-		if err == nil && storedDiagnostics.Source != "" && storedDiagnostics.Source != "pi" {
+		if hasStoredDiagnostics && storedDiagnostics.Source != "" && storedDiagnostics.Source != "pi" {
 			recordFailure(fmt.Errorf("诊断摘要属于 %s source", storedDiagnostics.Source))
 			continue
 		}
@@ -84,9 +85,6 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 		if hasCursor && canSeek && rev.FileSize == cursorLastByte && rev.TailFingerprint == cursorTail {
 			mergeDiagnostics(&diagnostics, &storedDiagnostics)
 			continue
-		}
-		if hasCursor && canSeek {
-			mergeDiagnostics(&fileDiagnostics, &storedDiagnostics)
 		}
 		var linesToProcess []string
 		var newCommittedByte int64
@@ -358,6 +356,9 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			fileDiagnostics.Skipped++
 			fileDiagnostics.warn("同步 %s 失败: %v", file, cause)
 			mergeDiagnostics(&diagnostics, &fileDiagnostics)
+			if persistErr := persistFileDiagnostics(database, file, fileDiagnostics); persistErr != nil {
+				cause = errors.Join(cause, fmt.Errorf("持久化 %s 诊断失败: %w", file, persistErr))
+			}
 			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("同步 %s 失败: %w", file, cause)
 		}
 		for reqID, rec := range seen {
@@ -444,19 +445,26 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 				return rollback(err)
 			}
 		}
-		summary, err := json.Marshal(fileDiagnostics)
+		summaryDiagnostics := fileDiagnostics
+		if hasStoredDiagnostics {
+			mergeDiagnostics(&summaryDiagnostics, &storedDiagnostics)
+		}
+		summary, err := json.Marshal(summaryDiagnostics)
 		if err != nil {
 			return rollback(err)
 		}
 		if _, err = tx.Exec(`INSERT OR REPLACE INTO session_log_sync (file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset, last_tail_fingerprint, sync_semantics_version, diagnostics_summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, file, rev.ModifiedMs, newCommittedLines, rev.ModifiedMs/1000, newCommittedByte, int64(newTail), PiSyncSemanticsVersion, string(summary)); err != nil {
 			return rollback(err)
 		}
-		if err := tx.Commit(); err != nil {
+		if commitErr := tx.Commit(); commitErr != nil {
 			_ = tx.Rollback()
 			fileDiagnostics.Skipped++
-			fileDiagnostics.warn("提交 %s 失败: %v", file, err)
+			fileDiagnostics.warn("提交 %s 失败: %v", file, commitErr)
 			mergeDiagnostics(&diagnostics, &fileDiagnostics)
-			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("提交 %s 失败: %w", file, err)
+			if persistErr := persistFileDiagnostics(database, file, fileDiagnostics); persistErr != nil {
+				commitErr = errors.Join(commitErr, fmt.Errorf("持久化 %s 诊断失败: %w", file, persistErr))
+			}
+			return SyncResult{Imported: imported, Skipped: skipped, Diagnostics: diagnostics}, fmt.Errorf("提交 %s 失败: %w", file, commitErr)
 		}
 		imported += fileImported
 		skipped += fileSkipped
