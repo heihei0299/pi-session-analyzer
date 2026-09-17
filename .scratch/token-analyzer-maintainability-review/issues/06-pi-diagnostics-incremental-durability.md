@@ -26,5 +26,5 @@
 - 修改摘要：Pi 增量同步在 cursor seek 时合并既有同源 diagnostics 与新 suffix diagnostics；failure persistence 保留旧 summary，跨 source summary fail closed；新增 append/revision failure 回归。
 - 验证：`TOKEN_ANALYZER_DB= go test ./internal/pi ./internal/query`，39 个测试通过。
 - Review：完整 Standards/Spec 双轴 Review 已通过；SQL seam、旧 summary 覆盖和跨 source 隔离 findings 均已增量复核关闭。
-- Commit：待提交后记录。
+- Commit：`915d501 fix(pi): retain incremental diagnostics history`。
 - 未解决边界问题：无。
