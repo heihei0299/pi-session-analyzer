@@ -25,5 +25,5 @@
 - 修改摘要：rename 在候选文件发现前检查 Pi root binding；mismatch、missing binding 和 unavailable root 均返回明确错误且不触碰文件；保留成功 rename、Refresh 失败和 snapshot verification 失败的可观察结果。
 - 验证：`TOKEN_ANALYZER_DB= go test ./internal/server -count=1`，24 个测试通过；相关 root/query/refresh 测试通过。
 - Review：完整 Standards/Spec 双轴 Review 已通过；测试覆盖与 staged caller findings 已增量复核关闭。
-- Commit：待提交后记录。
+- Commit：`1d617b1 fix(server): gate Pi rename on root binding`。
 - 未解决边界问题：无。
