@@ -236,20 +236,32 @@ func piMetaOf(dir string, metas []piSessionMeta, diagnostics pi.Diagnostics) *se
 	}
 }
 
+func paginationBounds(length, page, size int) (start, end int, ok bool) {
+	if page == 0 && size == 0 {
+		return 0, length, true
+	}
+	if page <= 0 || size <= 0 {
+		return 0, 0, false
+	}
+	pageOffset := page - 1
+	if pageOffset > length/size {
+		return 0, 0, false
+	}
+	start = pageOffset * size
+	if start >= length {
+		return 0, 0, false
+	}
+	end = length
+	if size <= length-start {
+		end = start + size
+	}
+	return start, end, true
+}
+
 func paginateSessionRows(rows []domain.SessionRow, v sessiondata.View) []domain.SessionRow {
-	if v.Page <= 0 || v.Size <= 0 {
-		if rows == nil {
-			return make([]domain.SessionRow, 0)
-		}
-		return rows
-	}
-	start := (v.Page - 1) * v.Size
-	if start > len(rows) {
-		start = len(rows)
-	}
-	end := start + v.Size
-	if end > len(rows) {
-		end = len(rows)
+	start, end, ok := paginationBounds(len(rows), v.Page, v.Size)
+	if !ok {
+		return make([]domain.SessionRow, 0)
 	}
 	out := rows[start:end]
 	if out == nil {
@@ -259,19 +271,9 @@ func paginateSessionRows(rows []domain.SessionRow, v sessiondata.View) []domain.
 }
 
 func paginateRequestRows(rows []domain.RequestRow, v sessiondata.View) []domain.RequestRow {
-	if v.Page <= 0 || v.Size <= 0 {
-		if rows == nil {
-			return make([]domain.RequestRow, 0)
-		}
-		return rows
-	}
-	start := (v.Page - 1) * v.Size
-	if start > len(rows) {
-		start = len(rows)
-	}
-	end := start + v.Size
-	if end > len(rows) {
-		end = len(rows)
+	start, end, ok := paginationBounds(len(rows), v.Page, v.Size)
+	if !ok {
+		return make([]domain.RequestRow, 0)
 	}
 	out := rows[start:end]
 	if out == nil {
