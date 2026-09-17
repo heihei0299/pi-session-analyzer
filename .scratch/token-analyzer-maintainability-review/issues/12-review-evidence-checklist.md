@@ -1,0 +1,30 @@
+# 12: 对齐 review remediation 的验收证据
+
+**What to build:** 让本地 issue tracker 的状态、验收 checklist 和实现/review 证据一致，使 resolved 不再与全未勾选条目或未解决的阻塞问题同时存在。
+
+**Blocked by:** 09: 固定 root identity，消除 Refresh 与 rename 的 TOCTOU；10: 让无 Pi root 的 All source 保持一致可用；11: 持久化 Pi mutation 与 commit failure diagnostics
+
+**Status:** claimed
+
+- [x] Issue 01 和 02 的 checklist 已按已有真实验证结果更新，不再保留 resolved + 全部未勾选的矛盾状态。
+- [ ] 09、10、11 的 acceptance criteria 暂不标记完成：实现已写入，但本轮未获 Go 测试/编译授权。
+- [x] 每个 resolved ticket 都记录修改摘要、验证命令/结果和剩余阻塞。
+- [x] 文档中的 root、All source、diagnostics 和 release/Go-only 语义与当前实现和 ADR 一致。
+- [x] 不通过删除历史记录、伪造验证结果或提前修改状态来隐藏未解决问题。
+- [x] 完成后可从 issue tracker 重建本轮整改闭环，并明确等待最终 review，而不是自行宣称 REVIEW PASS。
+
+## Comments
+
+- Source spec: `.scratch/token-analyzer-maintainability-review/spec.md`
+- Review finding: `5feee53` / `09aff72` checklist evidence mismatch
+- Triage: ready-for-agent
+
+---
+
+## Completion note
+
+- 证据同步：Issue 01/02 checklist 已依据既有记录的聚焦测试与 Review 结果勾选；Issue 09/10/11 保持 `claimed`，未把未执行的 Go 测试当作完成证据。
+- 文档同步：README、CONTEXT 和 ADR-0005 已记录 canonical physical root 与无 Pi root 的 Codex-only All 语义。
+- 静态验证：相关 Go 文件已 `gofmt`，`git diff --check` 通过，root/All/diagnostics 关键路径已静态检索；未执行 `go test`、`go vet`、build 或全量测试（HANDOFF 未授权）。
+- 剩余阻塞：09–11 的聚焦 Go 测试、首次 review 和后续整改仍待执行。
+- Awaiting: review。

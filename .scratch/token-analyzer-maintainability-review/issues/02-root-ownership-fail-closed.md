@@ -6,14 +6,14 @@
 
 **Status:** resolved
 
-- [ ] 空 ledger 可以首次绑定存在且可解析的 Pi root。
-- [ ] 共享 ledger 中不属于 token-analyzer Pi session 的 proxy 行不会阻止首次 binding。
-- [ ] 已有 Pi 历史但没有 root binding 的 legacy ledger 不会被当前 root 自动认领。
-- [ ] legacy fail-closed 过程不删除、不改写已有历史行。
-- [ ] root 不存在、不是目录或 symlink target 无法解析时，在创建或迁移 ledger 前返回明确错误。
-- [ ] 同一 physical root 的词法路径变化仍被识别为同一 root；切换到不同 physical target 时 Refresh 和 Query 都拒绝。
-- [ ] 现有 schema version、Refresh 失败保留旧 snapshot 和 Pi/Codex ownership 契约不被改变。
-- [ ] 回归测试覆盖 fresh ledger、shared rows、legacy history、matching root、mismatch root 和 symlink target switch。
+- [x] 空 ledger 可以首次绑定存在且可解析的 Pi root。
+- [x] 共享 ledger 中不属于 token-analyzer Pi session 的 proxy 行不会阻止首次 binding。
+- [x] 已有 Pi 历史但没有 root binding 的 legacy ledger 不会被当前 root 自动认领。
+- [x] legacy fail-closed 过程不删除、不改写已有历史行。
+- [x] root 不存在、不是目录或 symlink target 无法解析时，在创建或迁移 ledger 前返回明确错误。
+- [x] 同一 physical root 的词法路径变化仍被识别为同一 root；切换到不同 physical target 时 Refresh 和 Query 都拒绝。
+- [x] 现有 schema version、Refresh 失败保留旧 snapshot 和 Pi/Codex ownership 契约不被改变。
+- [x] 回归测试覆盖 fresh ledger、shared rows、legacy history、matching root、mismatch root 和 symlink target switch。
 
 ## Comments
 
@@ -28,4 +28,5 @@
 - 验证：`TOKEN_ANALYZER_DB= go test ./internal/pi ./internal/db ./internal/refresh ./internal/query`，通过。
 - Review：完整 Standards/Spec 双轴 Review 已通过；empty-root、解析重复和测试覆盖 findings 均已增量复核关闭。
 - Commit：`d519459 fix(refresh): fail closed on Pi root ownership`。
-- 未解决边界问题：`source=all` 且未配置 Pi root 继续保留既有 Codex-only 行为。
+- 未解决边界问题：`source=all` 且未配置 Pi root 继续保留既有 Codex-only 行为；本轮 09–11 的新增测试未因授权限制执行。
+- Evidence sync（ticket 12）：以上 checklist 与已记录的 issue 02 聚焦测试证据一致。

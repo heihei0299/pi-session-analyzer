@@ -6,11 +6,11 @@
 
 **Status:** resolved
 
-- [ ] 整数金额和小数金额写入 ledger 后都保持原始数值语义，包括以零结尾的整数。
-- [ ] `Refresh → normalized ledger → Query` canonical path 的 totals 与修复前的合法 cost 口径一致。
-- [ ] 不引入新的数值格式化依赖或第二套 cost 计算逻辑。
-- [ ] 回归测试覆盖整数 cost、普通小数 cost、重复 Refresh 和 Query 输出。
-- [ ] 失败的数值编码不会静默写入错误金额。
+- [x] 整数金额和小数金额写入 ledger 后都保持原始数值语义，包括以零结尾的整数。
+- [x] `Refresh → normalized ledger → Query` canonical path 的 totals 与修复前的合法 cost 口径一致。
+- [x] 不引入新的数值格式化依赖或第二套 cost 计算逻辑。
+- [x] 回归测试覆盖整数 cost、普通小数 cost、重复 Refresh 和 Query 输出。
+- [x] 失败的数值编码不会静默写入错误金额；实现使用无错误返回的标准库编码器，无静默失败分支。
 
 ## Comments
 
@@ -26,3 +26,4 @@
 - Review：完整 Standards/Spec 双轴 Review 已通过；ADR-0005 fixture finding 已增量复核关闭。
 - Commit：`2139ca8 fix(pi): preserve normalized cost precision`。
 - 未解决边界问题：无。
+- Evidence sync（ticket 12）：以上 checklist 与已记录的聚焦测试和 Review 证据一致。
