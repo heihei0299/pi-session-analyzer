@@ -296,6 +296,10 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			}
 			newTail = nt
 		}
+		lineNumberBase := int64(1) // full scans skip the session header
+		if canSeek && hasCursor {
+			lineNumberBase = cursorLastLine
+		}
 		seen := make(map[string]*PiRecord)
 		identities := make(map[string]PiIdentity)
 		tsTextByID := make(map[string]string)
@@ -307,7 +311,7 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			var entry map[string]interface{}
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {
 				fileDiagnostics.Skipped++
-				fileDiagnostics.warn("%s:%d: 坏 JSON 行: %v", file, lineNo+1, err)
+				fileDiagnostics.warn("%s:%d: 坏 JSON 行: %v", file, lineNumberBase+int64(lineNo)+1, err)
 				continue
 			}
 			if forkTsMs != nil {
@@ -321,7 +325,7 @@ func SyncPiUsage(database *db.Database, files []string) (SyncResult, error) {
 			if rec == nil {
 				if piEntryHasUsage(entry) {
 					fileDiagnostics.Skipped++
-					fileDiagnostics.warn("%s:%d: 跳过无效 usage 记录", file, lineNo+1)
+					fileDiagnostics.warn("%s:%d: 跳过无效 usage 记录", file, lineNumberBase+int64(lineNo)+1)
 				}
 				continue
 			}

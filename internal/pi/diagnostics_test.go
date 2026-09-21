@@ -76,6 +76,36 @@ not-json
 	}
 }
 
+func TestPiIncrementalDiagnosticsUseAbsoluteLineNumber(t *testing.T) {
+	database, err := db.Open(filepath.Join(t.TempDir(), "ledger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	dir := t.TempDir()
+	path := writePiFile(dir, "diagnostics-line-number.jsonl", `{"type":"session","id":"diagnostics-line-number","timestamp":"2026-09-10T00:00:00Z","cwd":"/tmp"}
+{"type":"message","id":"valid-1","timestamp":"2026-09-10T01:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":2,"output":3},"stopReason":"stop"}}
+{"type":"message","id":"valid-2","timestamp":"2026-09-10T02:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":4,"output":5},"stopReason":"stop"}}
+{"type":"message","id":"valid-3","timestamp":"2026-09-10T03:00:00Z","message":{"role":"assistant","model":"m","usage":{"input":6,"output":7},"stopReason":"stop"}}
+`)
+	first, err := SyncPiUsage(database, []string{path})
+	if err != nil || first.Imported != 3 {
+		t.Fatalf("baseline sync must import committed entries: %+v %v", first, err)
+	}
+	if err := appendPiLine(path, "not-json"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := SyncPiUsage(database, []string{path})
+	if err != nil {
+		t.Fatalf("incremental sync failed: %v", err)
+	}
+	warnings := strings.Join(second.Diagnostics.Warnings, "\n")
+	if !strings.Contains(warnings, path+":5: 坏 JSON 行") {
+		t.Fatalf("incremental diagnostic must use the original file line: %s", warnings)
+	}
+}
+
 func TestPiDiagnosticsSurviveRevisionFailure(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "ledger.db"))
 	if err != nil {
