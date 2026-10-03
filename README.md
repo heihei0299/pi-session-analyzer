@@ -46,4 +46,4 @@ token-analyzer serve
 
 总 token 按 `input + cacheRead + output` 计算；Pi fork 会话的复制历史会去重。Codex 数据没有美元定价时标记为未定价。Pi 数据库绑定到一个会话根目录；分析不同根目录时请使用独立的 `--db`。
 
-完整统计口径、安全边界和架构决策见 [`CONTEXT.md`](CONTEXT.md) 与 [`docs/adr/`](docs/adr/)。
+完整统计口径、安全边界和架构决策见 [`docs/audit/`](docs/audit/) 与 [`docs/adr/`](docs/adr/)。
