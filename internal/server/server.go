@@ -23,11 +23,14 @@ type Options struct {
 	Source   string
 	CodexDir string
 	DBPath   string
+	// Now 固定刷新时的保留期参照时间，零值表示真实时间（测试用）。
+	Now time.Time
 }
 
 type Server struct {
 	queryConfig sourcequery.Config
 	mux         *http.ServeMux
+	now         time.Time
 
 	// refresh orchestration：GET 只读快照，同步只走 RefreshNow
 	//（启动初次同步 + watcher 变更触发），并发触发由 refresh 包串行化。
@@ -48,6 +51,7 @@ func NewServer(dir string, options ...Options) *Server {
 	s := &Server{
 		queryConfig: sourcequery.Config{PiDir: dir, Source: opts.Source, CodexDir: opts.CodexDir, DBPath: opts.DBPath},
 		mux:         http.NewServeMux(),
+		now:         opts.Now,
 	}
 	s.registerRoutes()
 	return s

@@ -30,7 +30,7 @@ func TestPaginationOverflowAndEmptyPagesAreSafe(t *testing.T) {
 		}
 	}
 
-	srv := NewServer(piDir, Options{CodexDir: t.TempDir(), DBPath: filepath.Join(t.TempDir(), "ledger.db")})
+	srv := NewServer(piDir, Options{Now: fixtureNow(), CodexDir: t.TempDir(), DBPath: filepath.Join(t.TempDir(), "ledger.db")})
 	mustRefreshNow(t, srv)
 	maxInt := int(^uint(0) >> 1)
 	for _, view := range []string{"sessions", "requests"} {

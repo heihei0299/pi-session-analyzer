@@ -21,6 +21,9 @@ type Config struct {
 	CodexDir string
 	DBPath   string
 	Source   string
+	// Now 是 rollup 保留期的参照时间；零值表示使用真实时间。测试用固定时钟
+	// 让 fixture 不会随真实时间漂移过期。
+	Now time.Time
 }
 
 // refreshMu 把进程内并发 refresh 串行化：多个触发源（HTTP watch、CLI、
@@ -85,5 +88,9 @@ func refreshLocked(cfg Config) error {
 			return err
 		}
 	}
-	return db.RollupAndPrune(database, time.Now(), db.DefaultRollupRetentionDays)
+	now := cfg.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return db.RollupAndPrune(database, now, db.DefaultRollupRetentionDays)
 }

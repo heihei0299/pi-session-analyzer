@@ -34,7 +34,7 @@ func TestAllWithoutPiRootRejectsLegacyPiHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := Config{PiDir: "", CodexDir: t.TempDir(), DBPath: dbPath, Source: "all"}
-	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: cfg.Source}); !errors.Is(err, db.ErrSourceRootBindingRequired) {
+	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: cfg.Source, Now: fixtureNow()}); !errors.Is(err, db.ErrSourceRootBindingRequired) {
 		t.Fatalf("legacy Pi history without binding must fail closed in Refresh: %v", err)
 	}
 	if _, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals}); !errors.Is(err, db.ErrSourceRootBindingRequired) {
@@ -74,7 +74,7 @@ func TestAllWithoutPiRootReturnsCodexOnly(t *testing.T) {
 	}
 
 	cfg := Config{PiDir: "", CodexDir: codexDir, DBPath: filepath.Join(t.TempDir(), "ledger.db"), Source: "all"}
-	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: cfg.Source}); err != nil {
+	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: cfg.Source, Now: fixtureNow()}); err != nil {
 		t.Fatal(err)
 	}
 	views := []sessiondata.View{

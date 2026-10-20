@@ -23,7 +23,7 @@ func TestPiLedgerDoesNotMixRoots(t *testing.T) {
 	cfgA := Config{PiDir: rootA, DBPath: dbPath, Source: "pi"}
 	cfgB := Config{PiDir: rootB, DBPath: dbPath, Source: "pi"}
 
-	if err := refresh.Refresh(refresh.Config{PiDir: rootA, DBPath: dbPath, Source: "pi"}); err != nil {
+	if err := refresh.Refresh(refresh.Config{PiDir: rootA, DBPath: dbPath, Source: "pi", Now: fixtureNow()}); err != nil {
 		t.Fatal(err)
 	}
 	first, err := Query(cfgA, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewSessions})
@@ -34,7 +34,7 @@ func TestPiLedgerDoesNotMixRoots(t *testing.T) {
 		t.Fatalf("first Pi root must expose only its session: %+v", first.Rows)
 	}
 
-	if err := refresh.Refresh(refresh.Config{PiDir: rootB, DBPath: dbPath, Source: "pi"}); err == nil {
+	if err := refresh.Refresh(refresh.Config{PiDir: rootB, DBPath: dbPath, Source: "pi", Now: fixtureNow()}); err == nil {
 		t.Fatal("a ledger bound to one Pi root must reject a different root")
 	}
 	if _, err := Query(cfgB, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals}); err == nil {
@@ -86,7 +86,7 @@ func TestLegacyPiLedgerWithoutBindingIsNotClaimed(t *testing.T) {
 
 	currentRoot := t.TempDir()
 	cfg := Config{PiDir: currentRoot, DBPath: dbPath, Source: "pi"}
-	if err := refresh.Refresh(refresh.Config{PiDir: currentRoot, DBPath: dbPath, Source: "pi"}); !errors.Is(err, db.ErrSourceRootBindingRequired) {
+	if err := refresh.Refresh(refresh.Config{PiDir: currentRoot, DBPath: dbPath, Source: "pi", Now: fixtureNow()}); !errors.Is(err, db.ErrSourceRootBindingRequired) {
 		t.Fatalf("legacy Pi rows without a binding must not be silently claimed by Refresh: %v", err)
 	}
 	if _, err := Query(cfg, sessiondata.Filter{}, sessiondata.View{Kind: sessiondata.ViewTotals}); err == nil {

@@ -6,17 +6,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/heihei0299/token-analyzer/internal/domain"
 	"github.com/heihei0299/token-analyzer/internal/refresh"
 	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
+// fixtureNow 固定 rollup 保留期的参照时间；canonical fixture 数据落在
+// 2026-09-08，用真实时钟会在 30 天后被保留期清掉，导致契约测试随时间失效。
+func fixtureNow() time.Time { return time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC) }
+
 // refreshAndQuery 先 Refresh 再查 ledger，与 server/CLI 生产路径一致。
 func refreshAndQuery(t *testing.T, cfg Config, filter sessiondata.Filter, view sessiondata.View) (*sessiondata.QueryResult, error) {
 	t.Helper()
 	t.Setenv("TOKEN_ANALYZER_DB", "")
-	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "all"}); err != nil {
+	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "all", Now: fixtureNow()}); err != nil {
 		t.Fatal(err)
 	}
 	return Query(cfg, filter, view)
@@ -41,7 +46,7 @@ func TestPiCostPreservesIntegerAmountsAcrossRefresh(t *testing.T) {
 	if err := json.Unmarshal(expectedBytes, &expected); err != nil {
 		t.Fatal(err)
 	}
-	refreshCfg := refresh.Config{PiDir: cfg.PiDir, DBPath: cfg.DBPath, Source: cfg.Source}
+	refreshCfg := refresh.Config{PiDir: cfg.PiDir, DBPath: cfg.DBPath, Source: cfg.Source, Now: fixtureNow()}
 	for i := 0; i < 2; i++ {
 		if err := refresh.Refresh(refreshCfg); err != nil {
 			t.Fatal(err)

@@ -13,7 +13,7 @@ import (
 
 func (s *Server) refreshSource(source string) error {
 	cfg := s.queryConfig
-	err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: source})
+	err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: source, Now: s.now})
 	s.refreshMu.Lock()
 	if s.lastRefreshErr == nil {
 		s.lastRefreshErr = make(map[string]error)

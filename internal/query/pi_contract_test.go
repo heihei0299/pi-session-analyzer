@@ -24,7 +24,7 @@ func TestCanonicalPiQueryContract(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
 	cfg := Config{PiDir: piCanonicalFixture, DBPath: dbPath, Source: "pi"}
-	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, DBPath: cfg.DBPath, Source: "pi"}); err != nil {
+	if err := refresh.Refresh(refresh.Config{PiDir: cfg.PiDir, DBPath: cfg.DBPath, Source: "pi", Now: fixtureNow()}); err != nil {
 		t.Fatal(err)
 	}
 

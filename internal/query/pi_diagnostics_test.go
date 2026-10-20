@@ -26,7 +26,7 @@ not-json
 		t.Fatal(err)
 	}
 	cfg := Config{PiDir: piDir, DBPath: filepath.Join(t.TempDir(), "ledger.db"), Source: "pi"}
-	if err := refresh.Refresh(refresh.Config{PiDir: piDir, DBPath: cfg.DBPath, Source: "pi"}); err != nil {
+	if err := refresh.Refresh(refresh.Config{PiDir: piDir, DBPath: cfg.DBPath, Source: "pi", Now: fixtureNow()}); err != nil {
 		t.Fatal(err)
 	}
 	for _, view := range []sessiondata.View{{Kind: sessiondata.ViewMeta}, {Kind: sessiondata.ViewTotals}} {

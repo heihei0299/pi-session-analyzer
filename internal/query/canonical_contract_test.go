@@ -8,10 +8,11 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/heihei0299/token-analyzer/internal/codex"
 	"github.com/heihei0299/token-analyzer/internal/db"
 	"github.com/heihei0299/token-analyzer/internal/domain"
-	"github.com/heihei0299/token-analyzer/internal/refresh"
 	"github.com/heihei0299/token-analyzer/internal/sessiondata"
 )
 
@@ -49,7 +50,16 @@ func TestCanonicalCodexQueryContract(t *testing.T) {
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
 		Source:   "codex",
 	}
-	if err := refresh.Refresh(refresh.Config{CodexDir: cfg.CodexDir, DBPath: cfg.DBPath, Source: "codex"}); err != nil {
+	database, err := db.Open(cfg.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := codex.SyncRollouts(database, codex.ResolveHome(cfg.CodexDir)); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the fixture clock fixed so retention cannot age its request rows.
+	if err := db.RollupAndPrune(database, time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC), db.DefaultRollupRetentionDays); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := canonicalCodexSnapshot{}

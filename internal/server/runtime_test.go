@@ -13,6 +13,10 @@ import (
 	"github.com/heihei0299/token-analyzer/internal/db"
 )
 
+// fixtureNow 固定 rollup 保留期的参照时间；测试 fixture 的时间戳早于真实的
+// 30 天保留期，用真实时钟会让 ledger 数据被清空。
+func fixtureNow() time.Time { return time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC) }
+
 func mustRefreshNow(t *testing.T, srv *Server) {
 	t.Helper()
 	if err := srv.RefreshNow(); err != nil {
@@ -76,7 +80,7 @@ func TestServerGetsDoNotAdvanceLedger(t *testing.T) {
 	}
 	codexHome := t.TempDir()
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	srv := NewServer(piDir, Options{Source: "all", CodexDir: codexHome, DBPath: dbPath})
+	srv := NewServer(piDir, Options{Now: fixtureNow(), Source: "all", CodexDir: codexHome, DBPath: dbPath})
 	mustRefreshNow(t, srv)
 	handler := srv.Handler()
 
@@ -145,7 +149,7 @@ func TestServerRefreshFailureKeepsSnapshotAndExposesError(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	srv := NewServer(piDir, Options{Source: "all", CodexDir: notDir, DBPath: dbPath})
+	srv := NewServer(piDir, Options{Now: fixtureNow(), Source: "all", CodexDir: notDir, DBPath: dbPath})
 	if err := srv.RefreshNow(); err == nil {
 		t.Fatal("refresh against a non-directory codex home must fail")
 	}
@@ -201,7 +205,7 @@ func TestServerWatchUsesOnlyConfiguredSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	srv := NewServer(piDir, Options{Source: "pi", CodexDir: notDir, DBPath: dbPath})
+	srv := NewServer(piDir, Options{Now: fixtureNow(), Source: "pi", CodexDir: notDir, DBPath: dbPath})
 	if err := srv.RefreshNow(); err == nil {
 		t.Fatal("initial refresh should report the invalid unused Codex source")
 	}
@@ -246,7 +250,7 @@ func TestServerWatchRetriesFailedRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	srv := NewServer(piDir, Options{Source: "all", CodexDir: t.TempDir(), DBPath: dbPath})
+	srv := NewServer(piDir, Options{Now: fixtureNow(), Source: "all", CodexDir: t.TempDir(), DBPath: dbPath})
 	mustRefreshNow(t, srv)
 
 	database, err := db.Open(dbPath)

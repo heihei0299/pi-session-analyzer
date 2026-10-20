@@ -22,7 +22,7 @@ func TestServerCodexSourceQueries(t *testing.T) {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(t.TempDir(), Options{Source: "codex", CodexDir: codexHome, DBPath: filepath.Join(t.TempDir(), "ledger.db")})
+	srv := NewServer(t.TempDir(), Options{Now: fixtureNow(), Source: "codex", CodexDir: codexHome, DBPath: filepath.Join(t.TempDir(), "ledger.db")})
 	mustRefreshNow(t, srv)
 	handler := srv.Handler()
 	index := httptest.NewRecorder()
@@ -71,7 +71,7 @@ func TestServerCodexSourceQueries(t *testing.T) {
 
 // 真实同形基线 fixture 经 HTTP 出口必须给出与上游一致的 token 口径，并把「未计入的覆盖率」当作诊断暴露。
 func TestServerCodexBaselineFixtureExposesUpstreamSemanticsAndDiagnostics(t *testing.T) {
-	srv := NewServer(t.TempDir(), Options{
+	srv := NewServer(t.TempDir(), Options{Now: fixtureNow(),
 		Source:   "codex",
 		CodexDir: filepath.Join("..", "codex", "testdata", "codex-home"),
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
@@ -150,7 +150,7 @@ func TestServerRejectsDetailAndRenameForNonPiSources(t *testing.T) {
 	stale := time.Now().Add(-10 * time.Minute)
 	_ = os.Chtimes(piFile, stale, stale)
 
-	srv := NewServer(piDir, Options{
+	srv := NewServer(piDir, Options{Now: fixtureNow(),
 		Source:   "pi",
 		CodexDir: filepath.Join("..", "codex", "testdata", "codex-home"),
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
@@ -202,7 +202,7 @@ func TestServerRejectsDetailAndRenameForNonPiSources(t *testing.T) {
 	}
 
 	// serve --source codex 的默认值同样适用：请求不带 source 也必须拒绝。
-	codexDefault := NewServer(piDir, Options{
+	codexDefault := NewServer(piDir, Options{Now: fixtureNow(),
 		Source:   "codex",
 		CodexDir: filepath.Join("..", "codex", "testdata", "codex-home"),
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
@@ -244,7 +244,7 @@ func TestServerSourceSwitchingCapabilitiesAndEmptyDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srv := NewServer(piDir, Options{
+	srv := NewServer(piDir, Options{Now: fixtureNow(),
 		Source:   "pi",
 		CodexDir: codexHome,
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
@@ -310,7 +310,7 @@ func TestServerSourceSwitchingCapabilitiesAndEmptyDir(t *testing.T) {
 
 	// 空 Codex 目录只应产生诊断警告，不应把整个服务查询变成 5xx。
 	emptyHome := t.TempDir()
-	emptySrv := NewServer(piDir, Options{
+	emptySrv := NewServer(piDir, Options{Now: fixtureNow(),
 		Source:   "codex",
 		CodexDir: emptyHome,
 		DBPath:   filepath.Join(t.TempDir(), "ledger.db"),
@@ -344,7 +344,7 @@ func TestServerSourceSwitchingCapabilitiesAndEmptyDir(t *testing.T) {
 
 func TestServerSupportsCustomDateTimeRange(t *testing.T) {
 	piDir := t.TempDir()
-	srv := NewServer(piDir, Options{
+	srv := NewServer(piDir, Options{Now: fixtureNow(),
 		Source: "pi",
 		DBPath: filepath.Join(t.TempDir(), "ledger.db"),
 	})
