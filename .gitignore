@@ -7,7 +7,7 @@ dist/
 .opencode/
 .pi/CONTEXT.md
 data/
-token-analyzer
+/token-analyzer
 opencode-analyzer/opencode-analyzer
 .pi/
 .agents/
@@ -16,3 +16,9 @@ opencode-analyzer/opencode-analyzer
 /AGENTS.md
 /opencode-analyzer/
 /.scratch/sol-pi/
+
+# === 提交内容治理：仅提交 README + 源码 ===
+# 其余文档保留在本地磁盘，不纳入版本控制
+*.md
+!README*.md
+/docs/
